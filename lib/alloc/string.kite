@@ -1,0 +1,5 @@
+// kite::alloc::string — heap String helpers.
+fun strRepeat(s: String, n: Int): String { var out = ""  var i = 0  while (i < n) { out = concat(out, s)  i = i + 1 }  return out }
+fun joinList(xs: List, sep: String): String { var out = ""  var i = 0  while (i < listLen(xs)) { if (i > 0) { out = concat(out, sep) }  out = concat(out, listGet(xs, i))  i = i + 1 }  return out }
+
+pub import kite::alloc::string::strbuf

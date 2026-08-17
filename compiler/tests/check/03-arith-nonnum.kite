@@ -1,0 +1,1 @@
+fun m(): Int { val s = "x"  return s - 1 }

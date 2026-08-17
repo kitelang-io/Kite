@@ -1,0 +1,19 @@
+trait Shape {
+  fun area(self): Int
+}
+struct Circle(val r: Int)
+struct Square(val s: Int)
+impl Shape for Circle {
+  fun area(self): Int = self.r * self.r * 3
+}
+impl Shape for Square {
+  fun area(self): Int = self.s * self.s
+}
+impl Circle {
+  fun diameter(self): Int = self.r * 2
+}
+fun main(): Int {
+  val c = Circle(2)
+  val sq = Square(3)
+  return c.area() + sq.area() + c.diameter()
+}

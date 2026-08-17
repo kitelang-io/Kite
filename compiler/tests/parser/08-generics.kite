@@ -1,0 +1,5 @@
+fun f<T>(x: T): T = x
+fun h<T: Show + Eq, U = Int>(x: T): U = 0
+struct Box<T>(val value: T)
+struct Wrap<T>(val v: T) where T: Show + Eq
+enum Opt<T> { None; Some(T) }

@@ -1,0 +1,31 @@
+// mut-param-mode.kite — BUG CASE (step 1b), NOT currently checkable (M5 feature:
+//   traits/generics/associated types land at M5).
+//
+// EXPECTED ERROR (once the ownership rules are enforced):
+//   error: `mut` is not a parameter mode. Parameters use `borrow` (default) / `inout`
+//   / `consuming`; `mut` is a RECEIVER mode (`mut self`) only.
+//   (LANGUAGE-DESIGN.md "Ownership vocabulary"; LANGUAGE-DESIGN-DETAIL.md:
+//    "Parameter mutability is `inout`/`consuming`, never bare `mut`" + grammar
+//    `Param := Ident ":" ["inout" | "consuming"] Type   // no bare "mut" on params`.)
+//
+// NOTE: this is NOT merely a wording slip — a Formatter sink and a mutable Iterator
+//   both genuinely need a MUTABLE-BORROW param mode the vocabulary does not yet name.
+//   See the "NEEDS DECISION (mutable-borrow param mode)" note in LANGUAGE-DESIGN.md.
+//   The two candidate fixes are (i) add an explicit mutable-borrow param mode, or
+//   (ii) make these receivers. Do NOT blindly rewrite `mut I` to `inout I`.
+
+trait Iterator {
+    type Item
+    fun next(mut self): Item?
+}
+
+fun count<I: Iterator>(it: mut I): Int {           // `mut I` param: illegal mode
+    var n = 0
+    while true { val x = it.next() ?: break; n = n + 1 }
+    return n
+}
+
+impl Display for Point {
+    fun fmt(self, out: mut Formatter): Result<Unit, FmtError> = // `mut Formatter` param: illegal mode
+        out.write("(${self.x}, ${self.y})")
+}

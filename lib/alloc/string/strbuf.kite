@@ -1,0 +1,19 @@
+// kite::alloc::string::strbuf — a growable String (byte buffer) in pure Kite. Method style.
+class Str(var n: Int, var cap: Int, var data: Int) {
+  fun pushByte(self, b: Int): Int {
+    if (self.n == self.cap) { self.cap = self.cap * 2  self.data = __rawRealloc(self.data, self.cap) }
+    __rawStoreByte(self.data, self.n, b)
+    self.n = self.n + 1
+    return 0
+  }
+  fun byteAt(self, i: Int): Int { return __rawLoadByte(self.data, i) }
+  fun size(self): Int { return self.n }
+  deinit { __rawFree(self.data) }
+}
+fun strNew(): Str { return Str(0, 8, __rawAlloc(8)) }
+fun strFrom(lit: String): Str {
+  val s = strNew()
+  var i = 0
+  while (i < strLen(lit)) { s.pushByte(charAt(lit, i))  i = i + 1 }
+  return s
+}

@@ -1,0 +1,5 @@
+fun main(): Int {
+  val xs = [10, 20, 30]
+  val s = "abc"
+  return xs[1] + s[0]
+}

@@ -1,0 +1,4 @@
+// std/a.kite — module fixture for the module-system test. Defines `size`/`helper` names that
+// deliberately COLLIDE with std/b.kite to prove per-module namespacing.
+fun size(): Int { return 7 }
+fun helper(): Int { return size() * 100 }

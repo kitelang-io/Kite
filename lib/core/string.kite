@@ -1,0 +1,67 @@
+// lib/core/string.kite — convention methods for the built-in String (kite::core::string).
+//
+// The built-in String is a primitive (a C-string). These are the desugar landing points for its
+// nominal methods — `s.charAt(i)` -> String_charAt, `s.len()` -> String_len, `s.substr(a,b)` ->
+// String_substr — thin wrappers over the string intrinsics (charAt/strLen/substr). Following Kotlin,
+// a type's convention methods live WITH the type, not in a separate sugar library. In `core`: they
+// use only always-present intrinsics (no library dependency). Auto-included via compiler/prelude.conf;
+// names are global (unmangled).
+
+// Pure-Kite string ops on the null-terminated byte representation (were libc-backed codegen builtins).
+// charAt is just a byte load; strLen scans to the terminating 0. (`&&`/`!=` avoided — `&&` is bitwise.)
+fun charAt(s: String, i: Int): Int { return __rawLoadByte(s, i) }
+fun strLen(s: String): Int { var i = 0 var go = 1 while (go == 1) { if (__rawLoadByte(s, i) == 0) { go = 0 } else { i = i + 1 } } return i }
+// byte-by-byte compare to the terminating 0 (returns Bool to match the intrinsic's registered type).
+fun strEq(a: String, b: String): Bool {
+  var i = 0
+  var go = 1
+  while (go == 1) {
+    val ca = __rawLoadByte(a, i)
+    val cb = __rawLoadByte(b, i)
+    if (ca == cb) { if (ca == 0) { return true } } else { return false }
+    i = i + 1
+  }
+  return false
+}
+// concat allocates la+lb+1 bytes and copies both, NUL-terminated (leaks like the old libc version).
+fun concat(a: String, b: String): String {
+  val la = strLen(a)
+  val lb = strLen(b)
+  val r = __rawAlloc(la + lb + 1)
+  var i = 0
+  while (i < la) { __rawStoreByte(r, i, __rawLoadByte(a, i)) i = i + 1 }
+  var j = 0
+  while (j < lb) { __rawStoreByte(r, la + j, __rawLoadByte(b, j)) j = j + 1 }
+  __rawStoreByte(r, la + lb, 0)
+  return r
+}
+// substr(s, start, length): copy length bytes from s+start into a fresh NUL-terminated buffer.
+fun substr(s: String, st: Int, len: Int): String {
+  val r = __rawAlloc(len + 1)
+  var i = 0
+  while (i < len) { __rawStoreByte(r, i, __rawLoadByte(s, st + i)) i = i + 1 }
+  __rawStoreByte(r, len, 0)
+  return r
+}
+// intToStr: base-10, handles 0 and negatives, into a fresh NUL-terminated buffer. `%` avoided via
+// d = mm - (mm/10)*10. (ASCII '0'=48, '-'=45.) Was libc snprintf("%ld").
+fun intToStr(n: Int): String {
+  if (n == 0) { val z = __rawAlloc(2) __rawStoreByte(z, 0, 48) __rawStoreByte(z, 1, 0) return z }
+  var neg = 0
+  var m = n
+  if (n < 0) { neg = 1 m = 0 - n }
+  var digits = 0
+  var t = m
+  while (t > 0) { digits = digits + 1 t = t / 10 }
+  val total = digits + neg
+  val r = __rawAlloc(total + 1)
+  __rawStoreByte(r, total, 0)
+  var pos = total - 1
+  var mm = m
+  while (mm > 0) { val d = mm - (mm / 10) * 10 __rawStoreByte(r, pos, 48 + d) pos = pos - 1 mm = mm / 10 }
+  if (neg == 1) { __rawStoreByte(r, 0, 45) }
+  return r
+}
+fun String_charAt(s: String, i: Int): Int { return charAt(s, i) }
+fun String_len(s: String): Int { return strLen(s) }
+fun String_substr(s: String, a: Int, b: Int): String { return substr(s, a, b) }

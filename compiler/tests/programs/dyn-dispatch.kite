@@ -1,0 +1,16 @@
+trait Shape { fun area(self): Int }
+struct Circle(val r: Int)
+struct Square(val s: Int)
+impl Shape for Circle { fun area(self): Int = self.r * self.r * 3 }
+impl Shape for Square { fun area(self): Int = self.s * self.s }
+fun pick(flag: Int, c: Circle, sq: Square): Shape {
+  if (flag == 1) { return c }
+  return sq
+}
+fun main(): Int {
+  val c = Circle(5)
+  val sq = Square(4)
+  val a = pick(1, c, sq)
+  val b = pick(0, c, sq)
+  return a.area() + b.area()
+}

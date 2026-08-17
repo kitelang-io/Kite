@@ -1,0 +1,3 @@
+// kite::alloc — allocator layer. Re-exports (pub import) its own sub-modules; nothing of core.
+pub import kite::alloc::collections
+pub import kite::alloc::string

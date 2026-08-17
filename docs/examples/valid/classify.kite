@@ -1,0 +1,17 @@
+// classify.kite — nullable `Int?`, subject-less `when` as an expression, String results.
+// Currently-checkable subset: fun, val, T?, `when { cond -> ... }`, comparison, null.
+
+fun describe(n: Int?): String {
+    return when {
+        n == null -> "nothing"
+        n < 0     -> "negative"
+        n == 0    -> "zero"
+        else      -> "positive"
+    }
+}
+
+fun main() {
+    println(describe(0 - 5))
+    println(describe(0))
+    println(describe(42))
+}

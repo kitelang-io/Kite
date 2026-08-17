@@ -1,0 +1,410 @@
+// stage1/minikite.kite — a real (small) Kite front-end + tree-walking interpreter,
+// written in Kite, compiled by Fledge, run natively.
+//
+//   source String
+//     -> lex   : String -> List<Tok>            (real Kite tokens: keywords, idents,
+//                                                 int literals, 1- and 2-char operators)
+//     -> parse : List<Tok> -> List<Func>        (a real multi-variant AST)
+//     -> eval  : walk the AST with an Env + a function table
+//
+// Handles: fun declarations with params, calls (incl. recursion), val/var locals,
+// assignment, return, if/else, while loops, arithmetic (+ - * / %) and
+// comparison (< > == != <= >=).
+// The whole program is a String; we parse it, find `main`, and run it.
+
+// --- token kinds ---
+//  0 INT   1 IDENT
+//  2 (   3 )   4 {   5 }   6 ,
+// 10 +  11 -  12 *  13 /  14 %
+// 15 <  16 >  17 ==  18 !=  19 <=  20 >=
+// 30 fun 31 val 32 var 33 return 34 if 35 else
+// 40 =   99 EOF
+struct Tok(val kind: Int, val ival: Int, val text: String)
+
+// --- AST (payloads carry Int / String / child-Expr / List for variable arity) ---
+enum Expr { ENum(Int); EVar(String); EBin(Int, Expr, Expr); ECall(String, List) }
+enum Stmt {
+  SVal(String, Expr); SReturn(Expr); SIf(Expr, List, List); SExpr(Expr);
+  SWhile(Expr, List); SAssign(String, Expr)
+}
+struct Func(val name: String, val params: List, val body: List)
+
+// ===========================================================================
+// Lexer
+// ===========================================================================
+fun isDigit(c: Int): Bool { return c >= 48 && c <= 57 }
+fun isSpace(c: Int): Bool { return c == 32 || c == 10 || c == 9 || c == 13 }
+fun isAlpha(c: Int): Bool { return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c == 95 }
+fun isIdent(c: Int): Bool { return isAlpha(c) || isDigit(c) }
+
+fun charAtSafe(src: String, i: Int, n: Int): Int {
+  if (i < n) { return charAt(src, i) }
+  return 0
+}
+
+fun kwKind(word: String): Int {
+  if (strEq(word, "fun")) { return 30 }
+  if (strEq(word, "val")) { return 31 }
+  if (strEq(word, "var")) { return 32 }
+  if (strEq(word, "return")) { return 33 }
+  if (strEq(word, "if")) { return 34 }
+  if (strEq(word, "else")) { return 35 }
+  if (strEq(word, "while")) { return 36 }
+  return 1
+}
+
+fun opKind(c: Int): Int {
+  if (c == 40) { return 2 }
+  if (c == 41) { return 3 }
+  if (c == 123) { return 4 }
+  if (c == 125) { return 5 }
+  if (c == 44) { return 6 }
+  if (c == 43) { return 10 }
+  if (c == 45) { return 11 }
+  if (c == 42) { return 12 }
+  if (c == 47) { return 13 }
+  if (c == 37) { return 14 }
+  if (c == 60) { return 15 }
+  if (c == 62) { return 16 }
+  if (c == 61) { return 40 }
+  return 99
+}
+
+fun lex(src: String): List {
+  val toks = listNew()
+  val n = strLen(src)
+  var i = 0
+  while (i < n) {
+    val c = charAt(src, i)
+    if (isSpace(c)) {
+      i = i + 1
+    } else {
+      if (isDigit(c)) {
+        var v = 0
+        while (i < n && isDigit(charAt(src, i))) {
+          v = v * 10 + (charAt(src, i) - 48)
+          i = i + 1
+        }
+        listPush(toks, Tok(0, v, ""))
+      } else {
+        if (isAlpha(c)) {
+          val start = i
+          while (i < n && isIdent(charAt(src, i))) { i = i + 1 }
+          val word = substr(src, start, i - start)
+          val k = kwKind(word)
+          if (k == 1) { listPush(toks, Tok(1, 0, word)) }
+          else { listPush(toks, Tok(k, 0, "")) }
+        } else {
+          val c2 = charAtSafe(src, i + 1, n)
+          if (c == 61 && c2 == 61) { listPush(toks, Tok(17, 0, "")) ; i = i + 2 }
+          else { if (c == 33 && c2 == 61) { listPush(toks, Tok(18, 0, "")) ; i = i + 2 }
+          else { if (c == 60 && c2 == 61) { listPush(toks, Tok(19, 0, "")) ; i = i + 2 }
+          else { if (c == 62 && c2 == 61) { listPush(toks, Tok(20, 0, "")) ; i = i + 2 }
+          else { listPush(toks, Tok(opKind(c), 0, "")) ; i = i + 1 } } } }
+        }
+      }
+    }
+  }
+  listPush(toks, Tok(99, 0, ""))
+  return toks
+}
+
+// ===========================================================================
+// Parser: token list -> AST
+// ===========================================================================
+struct P(val toks: List, var pos: Int)
+
+fun peekKind(p: P): Int {
+  if (p.pos >= listLen(p.toks)) { return 99 }
+  val t: Tok = listGet(p.toks, p.pos)
+  return t.kind
+}
+fun peekVal(p: P): Int { val t: Tok = listGet(p.toks, p.pos) ; return t.ival }
+fun peekText(p: P): String { val t: Tok = listGet(p.toks, p.pos) ; return t.text }
+fun peekKind2(p: P): Int {
+  if (p.pos + 1 >= listLen(p.toks)) { return 99 }
+  val t: Tok = listGet(p.toks, p.pos + 1)
+  return t.kind
+}
+fun advance(p: P): Int { p.pos = p.pos + 1 ; return 0 }
+
+fun isCmp(k: Int): Bool { return k >= 15 && k <= 20 }
+fun isAdd(k: Int): Bool { return k == 10 || k == 11 }
+fun isMul(k: Int): Bool { return k == 12 || k == 13 || k == 14 }
+
+fun parseArgs(p: P): List {
+  val args = listNew()
+  if (peekKind(p) != 3) {
+    var more = 1
+    while (more == 1) {
+      listPush(args, parseExpr(p))
+      if (peekKind(p) == 6) { advance(p) } else { more = 0 }
+    }
+  }
+  advance(p)                        // consume ')'
+  return args
+}
+
+fun parsePrimary(p: P): Expr {
+  val k = peekKind(p)
+  if (k == 2) {                     // '(' expr ')'
+    advance(p)
+    val e = parseExpr(p)
+    advance(p)
+    return e
+  }
+  if (k == 1) {                     // identifier: var or call
+    val name = peekText(p)
+    advance(p)
+    if (peekKind(p) == 2) { advance(p) ; return ECall(name, parseArgs(p)) }
+    return EVar(name)
+  }
+  val v = peekVal(p)                // number
+  advance(p)
+  return ENum(v)
+}
+
+fun parseMul(p: P): Expr {
+  var left = parsePrimary(p)
+  var k = peekKind(p)
+  while (isMul(k)) {
+    advance(p)
+    val right = parsePrimary(p)
+    left = EBin(k, left, right)
+    k = peekKind(p)
+  }
+  return left
+}
+
+fun parseAdd(p: P): Expr {
+  var left = parseMul(p)
+  var k = peekKind(p)
+  while (isAdd(k)) {
+    advance(p)
+    val right = parseMul(p)
+    left = EBin(k, left, right)
+    k = peekKind(p)
+  }
+  return left
+}
+
+fun parseExpr(p: P): Expr {
+  var left = parseAdd(p)
+  var k = peekKind(p)
+  while (isCmp(k)) {
+    advance(p)
+    val right = parseAdd(p)
+    left = EBin(k, left, right)
+    k = peekKind(p)
+  }
+  return left
+}
+
+fun parseBlock(p: P): List {
+  val b = listNew()
+  while (peekKind(p) != 5 && peekKind(p) != 99) { listPush(b, parseStmt(p)) }
+  return b
+}
+
+fun parseStmt(p: P): Stmt {
+  val k = peekKind(p)
+  if (k == 31 || k == 32) {         // val / var
+    advance(p)
+    val name = peekText(p)
+    advance(p)                      // consume name
+    advance(p)                      // consume '='
+    return SVal(name, parseExpr(p))
+  }
+  if (k == 33) { advance(p) ; return SReturn(parseExpr(p)) }
+  if (k == 36) {                    // while (cond) { .. }
+    advance(p)
+    advance(p)                      // consume '('
+    val cond = parseExpr(p)
+    advance(p)                      // consume ')'
+    advance(p)                      // consume '{'
+    val body = parseBlock(p)
+    advance(p)                      // consume '}'
+    return SWhile(cond, body)
+  }
+  if (k == 1 && peekKind2(p) == 40) {   // assignment:  name = expr
+    val name = peekText(p)
+    advance(p)                      // consume name
+    advance(p)                      // consume '='
+    return SAssign(name, parseExpr(p))
+  }
+  if (k == 34) {                    // if (cond) { .. } else { .. }
+    advance(p)
+    advance(p)                      // consume '('
+    val cond = parseExpr(p)
+    advance(p)                      // consume ')'
+    advance(p)                      // consume '{'
+    val thenB = parseBlock(p)
+    advance(p)                      // consume '}'
+    var elseB = listNew()
+    if (peekKind(p) == 35) {
+      advance(p)                    // consume 'else'
+      advance(p)                    // consume '{'
+      elseB = parseBlock(p)
+      advance(p)                    // consume '}'
+    }
+    return SIf(cond, thenB, elseB)
+  }
+  return SExpr(parseExpr(p))
+}
+
+fun parseFunc(p: P): Func {
+  advance(p)                        // consume 'fun'
+  val name = peekText(p)
+  advance(p)                        // consume name
+  advance(p)                        // consume '('
+  val params = listNew()
+  if (peekKind(p) != 3) {
+    var more = 1
+    while (more == 1) {
+      listPush(params, peekText(p))
+      advance(p)                    // consume param name
+      if (peekKind(p) == 6) { advance(p) } else { more = 0 }
+    }
+  }
+  advance(p)                        // consume ')'
+  advance(p)                        // consume '{'
+  val body = parseBlock(p)
+  advance(p)                        // consume '}'
+  return Func(name, params, body)
+}
+
+fun parseProgram(p: P): List {
+  val fns = listNew()
+  while (peekKind(p) == 30) { listPush(fns, parseFunc(p)) }
+  return fns
+}
+
+// ===========================================================================
+// Interpreter: walk the AST
+// ===========================================================================
+struct Env(val names: List, val vals: List)
+struct Ret(var done: Int, var value: Int)
+
+fun define(env: Env, name: String, value: Int): Int {
+  listPush(env.names, name)
+  listPush(env.vals, value)
+  return 0
+}
+fun lookup(env: Env, name: String): Int {
+  var i = 0
+  var found = 0
+  while (i < listLen(env.names)) {
+    val nm: String = listGet(env.names, i)
+    if (strEq(nm, name)) { found = listGet(env.vals, i) }
+    i = i + 1
+  }
+  return found
+}
+
+fun boolToInt(b: Bool): Int { if (b) { return 1 } return 0 }
+
+fun combine(op: Int, a: Int, b: Int): Int {
+  if (op == 10) { return a + b }
+  if (op == 11) { return a - b }
+  if (op == 12) { return a * b }
+  if (op == 13) { return a / b }
+  if (op == 14) { return a % b }
+  if (op == 15) { return boolToInt(a < b) }
+  if (op == 16) { return boolToInt(a > b) }
+  if (op == 17) { return boolToInt(a == b) }
+  if (op == 18) { return boolToInt(a != b) }
+  if (op == 19) { return boolToInt(a <= b) }
+  if (op == 20) { return boolToInt(a >= b) }
+  return 0
+}
+
+fun findFunc(funcs: List, name: String): Func {
+  var i = 0
+  var hit = 0
+  while (i < listLen(funcs)) {
+    val f: Func = listGet(funcs, i)
+    if (strEq(f.name, name)) { hit = i }
+    i = i + 1
+  }
+  val r: Func = listGet(funcs, hit)
+  return r
+}
+
+fun callFunc(f: Func, args: List, caller: Env, funcs: List): Int {
+  val local = Env(listNew(), listNew())
+  var i = 0
+  while (i < listLen(f.params)) {
+    val pname: String = listGet(f.params, i)
+    val ae: Expr = listGet(args, i)
+    define(local, pname, evalExpr(ae, caller, funcs))
+    i = i + 1
+  }
+  val ret = Ret(0, 0)
+  evalStmts(f.body, local, funcs, ret)
+  return ret.value
+}
+
+fun evalExpr(e: Expr, env: Env, funcs: List): Int {
+  return when (e) {
+    ENum(n) -> n
+    EVar(x) -> lookup(env, x)
+    EBin(op, l, r) -> combine(op, evalExpr(l, env, funcs), evalExpr(r, env, funcs))
+    ECall(name, args) -> callFunc(findFunc(funcs, name), args, env, funcs)
+    else -> 0
+  }
+}
+
+fun setRet(ret: Ret, v: Int): Int { ret.value = v ; ret.done = 1 ; return 0 }
+
+fun evalIf(cond: Expr, thenB: List, elseB: List, env: Env, funcs: List, ret: Ret): Int {
+  if (evalExpr(cond, env, funcs) != 0) { evalStmts(thenB, env, funcs, ret) }
+  else { evalStmts(elseB, env, funcs, ret) }
+  return 0
+}
+
+fun evalWhile(cond: Expr, body: List, env: Env, funcs: List, ret: Ret): Int {
+  while (evalExpr(cond, env, funcs) != 0 && ret.done == 0) {
+    evalStmts(body, env, funcs, ret)
+  }
+  return 0
+}
+
+fun evalStmt(s: Stmt, env: Env, funcs: List, ret: Ret): Int {
+  return when (s) {
+    SVal(name, e) -> define(env, name, evalExpr(e, env, funcs))
+    SReturn(e) -> setRet(ret, evalExpr(e, env, funcs))
+    SIf(cond, thenB, elseB) -> evalIf(cond, thenB, elseB, env, funcs, ret)
+    SExpr(e) -> evalExpr(e, env, funcs)
+    SWhile(cond, body) -> evalWhile(cond, body, env, funcs, ret)
+    SAssign(name, e) -> define(env, name, evalExpr(e, env, funcs))
+    else -> 0
+  }
+}
+
+fun evalStmts(stmts: List, env: Env, funcs: List, ret: Ret): Int {
+  var i = 0
+  while (i < listLen(stmts) && ret.done == 0) {
+    val s: Stmt = listGet(stmts, i)
+    evalStmt(s, env, funcs, ret)
+    i = i + 1
+  }
+  return 0
+}
+
+fun run(src: String): Int {
+  val p = P(lex(src), 0)
+  val funcs = parseProgram(p)
+  val top = Env(listNew(), listNew())
+  return callFunc(findFunc(funcs, "main"), listNew(), top, funcs)
+}
+
+fun main(): Int {
+  println(intToStr(run("fun add(a, b) { return a + b } fun main() { return add(2, 3) * 4 }")))          // 20
+  println(intToStr(run("fun fact(n) { if (n < 2) { return 1 } return n * fact(n - 1) } fun main() { return fact(5) }")))  // 120
+  println(intToStr(run("fun fib(n) { if (n < 2) { return n } return fib(n - 1) + fib(n - 2) } fun main() { return fib(10) }")))  // 55
+  println(intToStr(run("fun max(a, b) { if (a > b) { return a } return b } fun main() { val x = max(3, 9) val y = max(x, 7) return x + y }")))  // 18
+  println(intToStr(run("fun main() { var s = 0 var i = 1 while (i <= 10) { s = s + i i = i + 1 } return s }")))  // 55 (while + assignment)
+  println(intToStr(run("fun main() { var f = 1 var i = 1 while (i <= 5) { f = f * i i = i + 1 } return f }")))   // 120 (loop factorial)
+  println(intToStr(run("fun collatz(n) { var c = 0 var x = n while (x > 1) { if (x % 2 == 0) { x = x / 2 } else { x = 3 * x + 1 } c = c + 1 } return c } fun main() { return collatz(27) }")))  // 111 (steps)
+  return run("fun sq(x) { return x * x } fun main() { var s = 0 var i = 1 while (i <= 4) { s = s + sq(i) i = i + 1 } return s }")  // 30 (1+4+9+16, exit code)
+}

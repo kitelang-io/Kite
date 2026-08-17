@@ -1,0 +1,8 @@
+const HLEN = strLen("hello")
+fun main(): Int {
+  val a = comptime(strLen("hi") + strLen("world"))
+  val b = comptime(charAt("ABC", 1))
+  val c = comptime(listLen([10, 20, 30]))
+  val d = comptime(listGet([10, 20, 30], 2))
+  return a + b + c + d + HLEN
+}

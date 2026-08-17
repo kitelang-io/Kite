@@ -1,0 +1,12 @@
+class Node(val v: Int)
+fun borrow(n: Node): Int {
+  val alias = n
+  val rc = __refcount(alias)
+  return rc
+}
+fun main(): Int {
+  val n = Node(7)
+  val rcInside = borrow(n)
+  val rcAfter = __refcount(n)
+  return rcInside * 10 + rcAfter
+}

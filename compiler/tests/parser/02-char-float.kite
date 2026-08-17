@@ -1,0 +1,11 @@
+fun m(): Int {
+  val a = 'A'
+  val z = '0'
+  val nl = '\n'
+  val f1 = 1.0
+  val f2 = 3.0
+  val f3 = 0.5
+  val f4 = 10.25
+  val f5 = 100.0
+  return a
+}

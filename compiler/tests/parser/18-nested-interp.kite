@@ -1,0 +1,4 @@
+fun a(y: Int): String { return "a${ "b$y" }c" }
+fun b(x: Int): String { return "${ f(g(x)) }" }
+fun c(x: Int): String { return "n=${ xs[x] } m=${ items.map { it } }" }
+fun d(): String { return "$this and ${this}" }

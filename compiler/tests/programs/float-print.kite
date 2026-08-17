@@ -1,0 +1,10 @@
+fun main(): Int {
+  val a = 3.5
+  val b = 1.25
+  println(a)
+  println(b)
+  println(a + b)
+  print(a)
+  println(b)
+  return toInt((a + b) * 2.0)
+}

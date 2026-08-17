@@ -1,0 +1,18 @@
+// geometry.kite — value structs, borrow-by-default params, expression + block bodies.
+// Currently-checkable subset: struct, fun (expr + block body), val, arithmetic, calls.
+
+struct Point(val x: Int, val y: Int)
+
+fun distanceSquared(a: Point, b: Point): Int {
+    val dx = a.x - b.x
+    val dy = a.y - b.y
+    return dx * dx + dy * dy
+}
+
+fun scale(p: Point, k: Int): Point = Point(p.x * k, p.y * k)
+
+fun main(): Int {
+    val origin = Point(0, 0)
+    val p = scale(Point(3, 4), 2)
+    return distanceSquared(origin, p)
+}

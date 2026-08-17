@@ -1,0 +1,16 @@
+// factorial.kite — mutable `var`, `while` loop, integer arithmetic.
+// Currently-checkable subset: fun, var, while, if, assignment, arithmetic.
+
+fun factorial(n: Int): Int {
+    var acc = 1
+    var i = 2
+    while (i <= n) {
+        acc = acc * i
+        i = i + 1
+    }
+    return acc
+}
+
+fun main(): Int {
+    return factorial(5)
+}

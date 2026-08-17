@@ -1,0 +1,30 @@
+// lib/alloc/collections/list.kite — the language-primitive List/Map (kite::alloc::collections::list).
+// The growable word-list {len@0, cap@8, data@16} that backs the [..] and {..} literals, built on the
+// compiler raw-memory intrinsics. In alloc because it OWNS a heap allocation; a sibling of vec/map.
+// Following Kotlin, a type's convention methods (the desugar landing points) live WITH the type, not
+// in a separate sugar library; the [..]/{..} constructors are top-level like Kotlin listOf()/mapOf().
+// Names are global (unmangled): the prelude injects them.
+fun listNew(): List { val h = __rawAlloc(24) __rawStore(h, 0, 0) __rawStore(h, 8, 4) __rawStore(h, 16, __rawAlloc(32)) return h }
+fun listLen(l: List): Int { return __rawLoad(l, 0) }
+fun listGet(l: List, i: Int): Int { return __rawLoad(__rawLoad(l, 16), i * 8) }
+fun listSet(l: List, i: Int, x: consuming Int): Int { __rawStore(__rawLoad(l, 16), i * 8, x) return 0 }
+fun listPush(l: List, x: consuming Int): Int {
+  val n = __rawLoad(l, 0)
+  val cap = __rawLoad(l, 8)
+  if (n == cap) { val nc = cap * 2 __rawStore(l, 8, nc) __rawStore(l, 16, __rawRealloc(__rawLoad(l, 16), nc * 8)) }
+  __rawStore(__rawLoad(l, 16), n * 8, x)
+  __rawStore(l, 0, n + 1)
+  return 0
+}
+fun __mapGetS(m: List, k: String): Int { var i = 0 while (i < listLen(m)) { if (strEq(listGet(m, i), k)) { return listGet(m, i + 1) } i = i + 2 } return 0 }
+fun __mapGetI(m: List, k: Int): Int { var i = 0 while (i < listLen(m)) { if (listGet(m, i) == k) { return listGet(m, i + 1) } i = i + 2 } return 0 }
+// map[k] = v : update k's value in place, else append [k, v]. Backs `m[k] = v` for Int/String keys.
+fun __mapSetI(m: List, k: Int, v: Int): Int { var i = 0 while (i < listLen(m)) { if (listGet(m, i) == k) { listSet(m, i + 1, v) return 0 } i = i + 2 } listPush(m, k) listPush(m, v) return 0 }
+fun __mapSetS(m: List, k: String, v: Int): Int { var i = 0 while (i < listLen(m)) { if (strEq(listGet(m, i), k)) { listSet(m, i + 1, v) return 0 } i = i + 2 } listPush(m, k) listPush(m, v) return 0 }
+fun list(): List { return listNew() }
+fun map(): Map { return listNew() }
+fun List_push(l: List, x: Int): Int { return listPush(l, x) }
+fun List_get(l: List, i: Int): Int { return listGet(l, i) }
+fun List_set(l: List, i: Int, x: Int): Int { return listSet(l, i, x) }
+fun List_len(l: List): Int { return listLen(l) }
+fun Map_size(m: Map): Int { return listLen(m) / 2 }

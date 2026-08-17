@@ -1,0 +1,18 @@
+trait Greet {
+  fun hello(self): Int = 10
+  fun name(self): Int
+}
+struct A(val x: Int)
+struct B(val y: Int)
+impl Greet for A {
+  fun name(self): Int = self.x
+}
+impl Greet for B {
+  fun hello(self): Int = 20
+  fun name(self): Int = self.y
+}
+fun main(): Int {
+  val a = A(5)
+  val b = B(7)
+  return a.hello() + a.name() + b.hello() + b.name()
+}

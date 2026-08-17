@@ -1,0 +1,225 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Kite",
+  "scopeName": "source.kite",
+  "fileTypes": ["kite"],
+  "patterns": [
+    { "include": "#expression" }
+  ],
+  "repository": {
+    "expression": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#annotations" },
+        { "include": "#strings" },
+        { "include": "#keywords-control" },
+        { "include": "#keywords-operator-word" },
+        { "include": "#keywords-declaration" },
+        { "include": "#keywords-modifier" },
+        { "include": "#constants" },
+        { "include": "#language-variables" },
+        { "include": "#numbers" },
+        { "include": "#types" },
+        { "include": "#function-call" },
+        { "include": "#operators" },
+        { "include": "#punctuation" }
+      ]
+    },
+
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.kite",
+          "begin": "//",
+          "end": "$",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.comment.kite" }
+          }
+        },
+        { "include": "#block-comment" }
+      ]
+    },
+    "block-comment": {
+      "name": "comment.block.kite",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "captures": {
+        "0": { "name": "punctuation.definition.comment.kite" }
+      },
+      "patterns": [
+        { "include": "#block-comment" }
+      ]
+    },
+
+    "annotations": {
+      "match": "(@)([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.annotation.kite" },
+        "2": { "name": "storage.type.annotation.kite" }
+      }
+    },
+
+    "keywords-control": {
+      "name": "keyword.control.kite",
+      "match": "\\b(if|else|when|while|for|return|break|continue|where)\\b"
+    },
+    "keywords-operator-word": {
+      "name": "keyword.operator.word.kite",
+      "match": "\\b(is|in|as)\\b"
+    },
+    "keywords-declaration": {
+      "patterns": [
+        {
+          "name": "keyword.control.import.kite",
+          "match": "\\b(import)\\b"
+        },
+        {
+          "name": "storage.type.function.kite",
+          "match": "\\b(fun)\\b"
+        },
+        {
+          "name": "storage.type.kite",
+          "match": "\\b(val|var|struct|class|enum|trait|impl|type|deinit)\\b"
+        }
+      ]
+    },
+    "keywords-modifier": {
+      "name": "storage.modifier.kite",
+      "match": "\\b(pub|mut|consuming|inout)\\b"
+    },
+
+    "constants": {
+      "name": "constant.language.kite",
+      "match": "\\b(true|false|null)\\b"
+    },
+    "language-variables": {
+      "name": "variable.language.kite",
+      "match": "\\b(this|self)\\b"
+    },
+
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.kite",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.kite",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.self.kite",
+          "match": "\\bSelf\\b"
+        },
+        {
+          "name": "entity.name.type.kite",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+
+    "function-call": {
+      "match": "\\b([a-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "entity.name.function.call.kite" }
+      }
+    },
+
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.kite",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.kite" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.kite" }
+          },
+          "patterns": [
+            { "include": "#string-interpolation" }
+          ]
+        },
+        {
+          "name": "string.quoted.double.kite",
+          "begin": "\"",
+          "end": "\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.kite" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.kite" }
+          },
+          "patterns": [
+            { "include": "#string-escape" },
+            { "include": "#string-interpolation" }
+          ]
+        },
+        {
+          "name": "string.quoted.single.kite",
+          "begin": "'",
+          "end": "'",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.kite" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.kite" }
+          },
+          "patterns": [
+            { "include": "#string-escape" }
+          ]
+        }
+      ]
+    },
+    "string-escape": {
+      "name": "constant.character.escape.kite",
+      "match": "\\\\[ntr\\\\\"$'0]"
+    },
+    "string-interpolation": {
+      "patterns": [
+        {
+          "name": "meta.template.expression.kite",
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.template-expression.begin.kite" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.template-expression.end.kite" }
+          },
+          "patterns": [
+            { "include": "#expression" }
+          ]
+        },
+        {
+          "match": "(\\$)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "punctuation.definition.template-expression.kite" },
+            "2": { "name": "variable.other.interpolated.kite" }
+          }
+        }
+      ]
+    },
+
+    "operators": {
+      "name": "keyword.operator.kite",
+      "match": "->|=>|\\?\\.|\\?:|!!|::|\\.\\.|==|!=|<=|>=|&&|\\|\\||[-+*/%<>=!?|]"
+    },
+
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.separator.kite", "match": "[,;:]" },
+        { "name": "punctuation.accessor.kite", "match": "\\." },
+        { "name": "punctuation.section.braces.kite", "match": "[{}]" },
+        { "name": "punctuation.section.brackets.kite", "match": "[\\[\\]]" },
+        { "name": "punctuation.section.parens.kite", "match": "[()]" }
+      ]
+    }
+  }
+}

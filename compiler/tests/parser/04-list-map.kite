@@ -1,0 +1,10 @@
+fun m(): Int {
+  val a = []
+  val b = [1, 2, 3]
+  val c = [[1], [2]]
+  val d = ["k": v, "j": w]
+  val e = [1: 2, 3: 4]
+  val f = xs[0]
+  val g = mp["key"]
+  return 0
+}

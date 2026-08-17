@@ -1,0 +1,57 @@
+{
+  "Function": {
+    "prefix": "fun",
+    "body": ["fun ${1:name}(${2:args}): ${3:Unit} {", "\t$0", "}"],
+    "description": "Function definition"
+  },
+  "Public function": {
+    "prefix": "pubfun",
+    "body": ["pub fun ${1:name}(${2:args}): ${3:Unit} {", "\t$0", "}"],
+    "description": "Public function definition"
+  },
+  "Struct": {
+    "prefix": "struct",
+    "body": ["struct ${1:Name}(${2:pub val field: Int})"],
+    "description": "Value struct with primary constructor"
+  },
+  "Class": {
+    "prefix": "class",
+    "body": ["class ${1:Name}(${2:val field: Int}) {", "\t$0", "}"],
+    "description": "Reference (ARC) class"
+  },
+  "Enum": {
+    "prefix": "enum",
+    "body": ["enum ${1:Name} {", "\t${2:VariantA}", "\t${3:VariantB}", "}"],
+    "description": "Enum declaration"
+  },
+  "Trait": {
+    "prefix": "trait",
+    "body": ["trait ${1:Name} {", "\tfun ${2:method}(self): ${3:Unit}", "}"],
+    "description": "Trait declaration"
+  },
+  "Impl": {
+    "prefix": "impl",
+    "body": ["impl ${1:Trait} for ${2:Type} {", "\t$0", "}"],
+    "description": "Trait implementation"
+  },
+  "when": {
+    "prefix": "when",
+    "body": ["when (${1:subject}) {", "\t${2:pattern} -> $0", "\telse -> ${3:default}", "}"],
+    "description": "when expression"
+  },
+  "if let / elvis": {
+    "prefix": "elvis",
+    "body": ["val ${1:x} = ${2:expr} ?: ${3:fallback}"],
+    "description": "Elvis (null-coalescing) binding"
+  },
+  "for": {
+    "prefix": "for",
+    "body": ["for (${1:x} in ${2:collection}) {", "\t$0", "}"],
+    "description": "for loop"
+  },
+  "while": {
+    "prefix": "while",
+    "body": ["while (${1:cond}) {", "\t$0", "}"],
+    "description": "while loop"
+  }
+}

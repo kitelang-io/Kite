@@ -1,0 +1,12 @@
+class Res(val id: Int, val log: List) {
+  deinit { listSet(self.log, 0, listGet(self.log, 0) + 1) }
+}
+fun main(): Int {
+  val log = listNew()
+  listPush(log, 0)
+  var r = Res(1, log)
+  r = Res(2, log)
+  r = Res(3, log)
+  val mid = listGet(log, 0)
+  return mid * 10 + r.id
+}

@@ -1,0 +1,44 @@
+import kite::collections
+
+@derive(Eq, Ord)
+class Registry<K: Hash + Eq, V>(pub val store: Map<K, V>, var count: Int) where V: Clone {
+  deinit { println("bye ${count}") }
+  fun get(self, key: K): V? = store[key]
+  fun put(mut self, key: K, value: V): Bool {
+    val slot = store[key] ?: default()
+    self.count = count + 1
+    return true
+  }
+}
+
+trait Codec<T>: Show where T: Clone {
+  type Wire
+  fun encode(self, x: T): List<Int>
+  fun decode(self, bytes: List<Int>): T = self.zero()
+}
+
+impl<T> Codec<T> for Json<T> where T: Serialize {
+  type Wire = String
+  fun encode(self, x: T): List<Int> = [x.hash(), 0xff & 1]
+}
+
+enum Node<T> { Leaf(value: T); Branch(Node<T>, Node<T>); Empty }
+
+fun walk<T>(n: Node<T>, f: (T) -> Int): Int = when (n) {
+  Leaf(value = v) -> f(v)
+  Branch(l, r) -> walk(l, f) + walk(r, f)
+  Empty -> 0
+}
+
+fun run(): Int {
+  val xs = [1, 2, 3]
+  val doubled = xs.map { it * 2 }
+  val msg = "sum=${fold(0) { a: Int, b: Int -> a + b }}, first=${xs[0]}"
+  val r = compute()?.result ?: fallback!!
+  return when (r) {
+    -1 -> { 0 }
+    is Int -> { 1 }
+    Config(host, port, ..) -> { 2 }
+    _ -> { 3 }
+  }
+}

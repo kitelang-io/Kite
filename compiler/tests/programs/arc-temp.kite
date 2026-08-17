@@ -1,0 +1,19 @@
+// Temporary-ARC: a class temp passed to a BORROW function is released after the call (no leak); a class
+// temp passed to a CONSUMING/storing function is transferred and must NOT be released (no double-free).
+// Res logs each deinit into log[0]. Two borrow temps => 2 deinits. The stored temp stays alive (log[0]
+// unchanged, no double-free). Returns afterBorrow*10 + afterStore = 2*10 + 2 = 22.
+class Res(val id: Int, val log: List) {
+  deinit { listSet(self.log, 0, listGet(self.log, 0) + 1) }
+}
+fun useIt(r: Res): Int { return r.id }
+fun main(): Int {
+  val log = listNew()
+  listPush(log, 0)
+  useIt(Res(1, log))
+  useIt(Res(2, log))
+  val afterBorrow = listGet(log, 0)
+  val keep = listNew()
+  listPush(keep, Res(3, log))
+  val afterStore = listGet(log, 0)
+  return afterBorrow * 10 + afterStore
+}

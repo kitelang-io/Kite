@@ -1,0 +1,5 @@
+fun a(): Float { return 1000000.0 }
+fun b(): Float { return 123456789.0 }
+fun c(): Float { return 1.2345678 }
+fun d(): Float { return 0.00001 }
+fun e(): Float { return 999999.9 }

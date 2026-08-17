@@ -1,0 +1,24 @@
+// compiler/kprint.kite — printer driver for kfront (differential-test build: kfront + kprint).
+
+fun main(): Int {
+  val src = readFile("/tmp/kparse_input.kite")
+  val p = P(lex(src), 0)
+  var count = 0
+  var go = 1
+  while (go == 1) {
+    if (pk(p) == 0) { go = 0 }
+    else {
+      val annos = parseAnnos(p)
+      val k = pk(p)
+      if (k == 10) { printFunc(parseFunc(p, annos)) ; count = count + 1 }                  // fun
+      else { if (k == 54) { printTDecl(parseTypeDecl(p, annos, 0)) ; count = count + 1 }    // struct
+      else { if (k == 65) { printTDecl(parseTypeDecl(p, annos, 1)) ; count = count + 1 }    // class
+      else { if (k == 55) { printEDecl(parseEnum(p, annos)) ; count = count + 1 }           // enum
+      else { if (k == 66) { printTrait(parseTrait(p, annos)) ; count = count + 1 }          // trait
+      else { if (k == 67) { printImpl(parseImpl(p, annos)) ; count = count + 1 }            // impl
+      else { if (k == 58) { line(0, concat("import ", parseImport(p))) ; println("") ; count = count + 1 }
+      else { go = 0 } } } } } } }
+    }
+  }
+  return count
+}

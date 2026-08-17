@@ -1,0 +1,11 @@
+// index STORE sugar `a[i] = v` (was a no-op before; had to use .set): List via listSet, Map via
+// __mapSet (update-in-place, then append). xs -> [9,1,5]; m[7]:42->100. Returns 9+1+5 + 100 = 115.
+fun main(): Int {
+  val xs = [3, 1, 2]
+  xs[0] = 9
+  xs[2] = 5
+  val m = map()
+  m[7] = 42
+  m[7] = 100
+  return xs[0] + xs[1] + xs[2] + m[7]
+}

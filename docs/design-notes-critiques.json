@@ -1,0 +1,342 @@
+[
+  {
+    "lens": "Coherence",
+    "overall": "The seven dimensions are internally sane but collide badly at their seams. The two most damaging fault lines are (a) a split personality between a Swift-style memory model (class = intrinsic ARC reference, value-semantic COW collections, atomic refcounts, single `Sendable`) and a Rust-style one bolted on by the concurrency/stdlib/generics dimensions (Rc/Arc wrappers, reference-semantic no-COW collections, non-atomic default, Send+Sync, `&mut Self`, `mut`-params); and (b) surface-syntax drift that the Syntax dimension already made hard decisions about — `::` vs `.` paths, struct paren-vs-brace declarations, `Show` vs `Display`, `Vec`/`Array`/`List` — being ignored by every other dimension's examples. The settled sigil scheme (try/try!/? nullability/Nothing/absence-vs-failure) is the one area that actually composes cleanly across dimensions; almost everything else needs a reconciliation pass before the examples could be handed to a user as one language.",
+    "issues": [
+      {
+        "severity": "blocker",
+        "dimensions_involved": [
+          "Syntax, grammar & sigils",
+          "Modules & core stdlib",
+          "Error handling model",
+          "Generics & traits",
+          "Type system core"
+        ],
+        "problem": "The path/namespace sigil is contradicted everywhere. Syntax made `::` the path/callable-ref/turbofish sigil and EXPLICITLY rejected dot-paths ('would make `.` mean both namespace path and value access, reintroducing resolve-before-parse coupling') — it writes `import std::io::{readFile}`, `Vec::new`, `String::length`. But Modules/stdlib writes `import kite.collections.{List, Map}`, `File.readAll`, `Symbol.unresolved`, `IoError.Subprocess` — dot everywhere. Error handling MIXES both in one file: `F::from(e)` / `ConfigError::from` yet `ConfigError.Parse(e)` / `ConfigError.Missing`. Generics uses dot for associated-type projection `I.Item`. So module paths, static/associated calls, and enum-variant qualification are spelled `::` in Syntax and `.` in the dimensions that actually use them — the exact ambiguity Syntax's parser rationale was designed to avoid. Root namespace also drifts (`std::` vs `kite.`).",
+        "recommendation": "Ratify Syntax's decision: `::` for module paths, associated/static functions, enum-variant qualification, and type projection (`I::Item`); `.` only for instance-member access. Rewrite every stdlib/error/generics example to `::`, and fix the root namespace to one of `std`/`kite`."
+      },
+      {
+        "severity": "blocker",
+        "dimensions_involved": [
+          "Memory model & ARC",
+          "Modules & core stdlib",
+          "Type system core"
+        ],
+        "problem": "Collections and String have contradictory value semantics. Memory model: `Array<T>`, `String`, `Map<K,V>` are copy-on-write VALUE types in the bootstrap subset, with `isUniquelyReferenced` — its own example shows `var a=[1,2,3]; var b=a; b.push(4)` leaving `a` unchanged. Modules/stdlib: `List<T>`, `Map<K,V>`, `StringBuilder` are REFERENCE types with reference semantics ('assignment shares, mutation is visible through aliases'), explicitly 'No copy-on-write', and String is immutable with mutation only via `StringBuilder`. These give opposite results for aliased mutation, and opposite String stories (mutable-COW vs immutable). Type-core adds a third String position (reference type, immutable shared ARC buffer, COW deferred).",
+        "recommendation": "Pick one model. Given north-star predictability, a hand-written backend, and a single-package bootstrap, adopt stdlib's reference-semantic collections + immutable String and DELETE the COW decision (and `isUniquelyReferenced`) from Memory's bootstrap; or commit to COW value semantics everywhere. Do not ship both."
+      },
+      {
+        "severity": "blocker",
+        "dimensions_involved": [
+          "Memory model & ARC",
+          "Concurrency & async"
+        ],
+        "problem": "Refcount atomicity default is inverted between dimensions. Memory: 'Refcounts are atomic by default for class instances; a Sendable-gated non-atomic fast path is a LATER optimization.' Concurrency: 'Reference counting is non-atomic (Rc, thread-local) by DEFAULT; crossing a task boundary requires an atomic Shared<T>.' Both describe themselves as the language-wide policy, and both flag it as an open question aimed at the other. Every retain/release the ARC codegen emits depends on which is true.",
+        "recommendation": "Resolve before ARC codegen is written. For a single-threaded bootstrap compiler and predictable single-thread performance, non-atomic default + an atomic wrapper for Send-crossing types is the stronger fit; have Memory adopt it. Otherwise commit to atomic-always and delete Concurrency's Rc/Shared split. One owner (Memory) must state the final rule."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Memory model & ARC",
+          "Concurrency & async",
+          "Modules & core stdlib"
+        ],
+        "problem": "Two overlapping shared-heap mechanisms. Memory makes `class` an intrinsically ARC-refcounted reference type — 'class provides shared heap indirection.' Concurrency/stdlib independently add `Rc<T>` / `Shared<T>` / `Arc` as THE shared-heap primitive. Since a `class Node` is already refcounted, `Rc<Node>` double-counts, and users get two unrelated ways to express shared ownership with different atomicity. The atomic-shared type is also named three ways: `class` (Memory), `Shared<T>` (Concurrency), `Arc`/`Rc` (stdlib).",
+        "recommendation": "Define the relationship explicitly: `class`'s pointer IS the strong reference (no wrapper needed); `Rc<T>`/`Arc<T>` exist ONLY to put VALUE types on the shared heap. Unify the atomic-shared name to one (`Arc` or `Shared`) across Concurrency and stdlib."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Error handling model",
+          "Generics & traits"
+        ],
+        "problem": "`try`'s error conversion requires overlapping blanket impls that coherence forbids. Error handling depends on BOTH `impl<E> From<E> for E` (identity) AND `impl<E: Error> From<E> for AnyError`. If `AnyError: Error` (needed so AnyError nests), both supply `From<AnyError> for AnyError` — an overlap. Generics' coherence rule is 'Overlapping impls are forbidden; no specialization.' This is the classic Rust reflexive-From-vs-error-From conflict, and it makes the error model's central ergonomic (auto-convert at every `try`) illegal under the stated trait rules.",
+        "recommendation": "Introduce a dedicated `ErrorFrom`/`IntoError` trait scoped to the `try` desugar (no reflexive blanket), or make identity conversion a compiler special-case rather than a real `From` impl — so no two blanket impls ever overlap. This is already flagged as an open question; it needs to become a decision."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Generics & traits",
+          "Memory model & ARC",
+          "Modules & core stdlib",
+          "Syntax, grammar & sigils",
+          "Concurrency & async"
+        ],
+        "problem": "The growable-sequence type has three names: `Vec` (Generics `Vec::new`, Syntax `import std::collections::Vec`), `Array` (Memory `Array<T>`, `[1,2,3]`), and `List` (stdlib `List<T>`, Concurrency `List<Job>`). A user reading across the docs sees three types for one concept. `Slice<T>` (Generics) vs `Substr` (stdlib) and the absence of any defined slice type compounds it.",
+        "recommendation": "Choose one canonical name. Stdlib and Concurrency already agree on `List`; update Generics/Memory/Syntax to match (or pick `Vec` and update the others). Define a single slice type name at the same time."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Memory model & ARC",
+          "Generics & traits",
+          "Concurrency & async",
+          "Syntax, grammar & sigils"
+        ],
+        "problem": "Borrow/ownership annotation vocabulary is inconsistent and the `&` sigil is overloaded. Mutable-borrow PARAM is `inout n: Int` (Memory) vs `mut Slice<T>` (Generics `sort<T>(xs: mut Slice<T>)`). Consuming receiver is `own self` (Generics) but 'reserved/unnamed' (Memory, Syntax). Concurrency writes the `Future` trait Rust-style: `fun poll(self: &mut Self, cx: &Context)` — `&mut`/`&` reference-TYPE syntax that appears nowhere else in Kite, while `&` already means the inout CALL-SITE sigil in Memory (`bump(&count)`).",
+        "recommendation": "Fix one vocabulary: receivers `self`/`mut self`/`own self`; params `borrow`(default)/`inout`/`consuming` (drop `mut`-on-non-self). Rewrite `Future` as `fun poll(mut self, cx: Context): Poll<...>`. Reserve `&` exclusively for the inout call-site sigil — never a type constructor."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Generics & traits",
+          "Memory model & ARC",
+          "Concurrency & async"
+        ],
+        "problem": "Sendability is one trait or two, depending on the dimension. Generics defines Rust-style auto-marker traits `Send` AND `Sync`. Memory and Concurrency both define a single Swift-style `Sendable`. Sendability gates cross-task capture on `spawn` and the non-atomic-refcount fast path, so its identity must be singular; today `T: Send` (Generics) and `T: Sendable` (Concurrency) are the same bound spelled two ways.",
+        "recommendation": "Pick one. A single `Sendable` matches the Swift-flavored concurrency and structured-concurrency capture checks; delete `Send`/`Sync` from Generics (or converge all three on Send+Sync). Update all bounds."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Syntax, grammar & sigils",
+          "Type system core",
+          "Generics & traits",
+          "Memory model & ARC"
+        ],
+        "problem": "Struct declaration syntax contradicts itself. Type-core/Generics use a paren primary-constructor: `struct Point(val x: Double, val y: Double)`, `struct Pair<A,B>(val fst: A, val snd: B)`. Syntax/Memory use a brace body: `struct Point { pub x: Int; pub y: Int }`, and Memory puts `deinit`/methods inside the braces (`unique struct File { val fd: Int32; deinit {...} }`). Field spelling also drifts: `val x` (Type-core/Memory) vs `pub x` with no val/var (Syntax). A user cannot tell how to declare a struct.",
+        "recommendation": "Syntax owns the grammar: settle on one form. A Kotlin-style paren primary constructor plus an optional brace body (for methods/deinit) is the natural hybrid that satisfies both the tuple-style decls and Memory's need for deinit. Standardize field visibility + val/var spelling across all dimensions' examples."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Syntax, grammar & sigils",
+          "Modules & core stdlib"
+        ],
+        "problem": "Two different visibility models. Syntax: `pub` / default = MODULE-internal / `priv` (type-or-file private). Stdlib: `pub` (cross-package) / default = PACKAGE-internal / `private` (module-local). The private keyword differs (`priv` vs `private`), the DEFAULT's scope differs (module vs package), and the private level's scope differs. Stdlib is also the only one that defines what 'module' (a directory) and 'package' (a source tree) concretely are.",
+        "recommendation": "Adopt stdlib's package/module model and its `private` keyword (it has the concrete module/package definitions the visibility levels need); rename Syntax's `priv`→`private` and correct its default-scope wording to 'package-internal'."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Type system core",
+          "Modules & core stdlib",
+          "Memory model & ARC"
+        ],
+        "problem": "Bootstrap needs sized/unsigned integers that Type-core defers. Stdlib's bootstrap libc bindings require `Int32`, `UInt8`, `UWord`, `IWord`, `RawPtr<UInt8>` (e.g. `fun read(fd: Int32, buf: RawPtr<UInt8>, n: UWord): IWord`), and Memory uses `Int32`/`UInt8` in bootstrap examples — but Type-core's bootstrap subset ships only `Int/Long/Double/Bool/Char/String/Unit/Nothing` and EXPLICITLY defers 'the full sized/unsigned int family + USize/ISize.' The self-hosting compiler cannot do FFI or drive `as`/`ld` without them. Pointer-width int is also named `USize`/`ISize` (Type-core) vs `UWord`/`IWord` (stdlib).",
+        "recommendation": "Pull the fixed-width FFI integer subset (Int8/16/32/64, UInt8/16/32/64, and one pointer-width signed+unsigned pair) into the Type-core BOOTSTRAP subset, since stdlib FFI depends on it. Fix a single pointer-width name (`USize/ISize` or `UWord/IWord`)."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Syntax, grammar & sigils",
+          "Generics & traits",
+          "Modules & core stdlib"
+        ],
+        "problem": "The user-facing formatting trait is `Show` in Syntax (`@derive(Show, Eq, Ord)`, `trait Show { fun show(self): String }`) but `Display` in Generics and stdlib (`trait Display { fun fmt(self, out: mut Formatter): Result<Unit, FmtError> }`, plus `Debug`). Stdlib says interpolation lowers to `Display`, while Syntax's interpolation examples conceptually rely on `Show`. The derive lists also diverge (`Show, Eq, Ord` vs `Eq, Ord, Hash, Clone, Debug, Default`).",
+        "recommendation": "Adopt `Display` + `Debug` (Generics/stdlib majority, and interpolation lowering depends on Display). Replace `Show`/`show` in Syntax's examples and unify the `@derive` set."
+      },
+      {
+        "severity": "minor",
+        "dimensions_involved": [
+          "Type system core",
+          "Modules & core stdlib"
+        ],
+        "problem": "Same concept, two names: Type-core's primitive is `Char` (32-bit Unicode scalar); stdlib's String iteration yields `Rune` (UInt32 Unicode scalar) and never mentions `Char`. A reader sees two scalar types.",
+        "recommendation": "Use one name — either make String iterate `Char` (the existing primitive), or explicitly define `Rune` as an alias/distinct newtype of the `Char` primitive with a one-line rationale."
+      },
+      {
+        "severity": "minor",
+        "dimensions_involved": [
+          "Syntax, grammar & sigils",
+          "Memory model & ARC",
+          "Modules & core stdlib"
+        ],
+        "problem": "Bracket collection literals `[1,2,3]` (Memory) and `[\"-arch\", \"arm64\", ...]` / `table[\"main\"] = 0` (stdlib) are used freely, but the Syntax dimension never defines a `[...]` literal production (it only defines `a[i]` indexing via the Index trait and `[` as an ATI bracket) and doesn't say which collection type a literal yields — which is entangled with the Vec/Array/List naming split.",
+        "recommendation": "Add explicit list-literal (and, if `table[..]=` implies it, map-literal) productions to the grammar and specify the element/collection type they produce."
+      },
+      {
+        "severity": "minor",
+        "dimensions_involved": [
+          "Type system core",
+          "Memory model & ARC",
+          "Modules & core stdlib",
+          "Error handling model"
+        ],
+        "problem": "The standard I/O error type is spelled three ways: `IOError` (Type-core typealias example), `IoErr` (Memory `Result<Unit, IoErr>`), and `IoError` (stdlib/Error handling). Trivial but it is a shared prelude type appearing in signatures.",
+        "recommendation": "Standardize casing to `IoError` in the prelude and correct all examples."
+      },
+      {
+        "severity": "minor",
+        "dimensions_involved": [
+          "Syntax, grammar & sigils",
+          "Concurrency & async",
+          "Error handling model"
+        ],
+        "problem": "await/try precedence is described inconsistently. Syntax places `try`, `try!`, `await` in ONE right-associative prefix tier; Concurrency asserts distinct levels ('await binds tighter than try', with `?.` tightest). Both yield the same parse (`try (await (f()))`), but publishing two different precedence tables invites confusion and future divergence.",
+        "recommendation": "Have Concurrency reference Syntax's single right-assoc prefix tier as the source of truth rather than asserting separate precedence levels; note that same-tier right-assoc already produces `try await`."
+      },
+      {
+        "severity": "minor",
+        "dimensions_involved": [
+          "Concurrency & async",
+          "Null-safety & flow typing"
+        ],
+        "problem": "Timeout uses the nullability channel for what is arguably a failure. Concurrency's `withTimeoutOrNull(d){}: T?` returns `None` on timeout so it composes with `?:`, but Null-safety's own boundary states Option = reason-LESS absence and reasoned failures belong in Result. 'Timed out' is a reason, so this slightly bends the absence-vs-failure rule the language advertises as clean.",
+        "recommendation": "Keep the ergonomic `T?` form but document it as the one sanctioned 'failure-as-None' convenience, and steer callers who need the reason to the `withTimeout(): Result<_, Timeout>` variant."
+      },
+      {
+        "severity": "minor",
+        "dimensions_involved": [
+          "Generics & traits",
+          "Memory model & ARC",
+          "Modules & core stdlib"
+        ],
+        "problem": "`dyn`/type-erasure metadata is described three ways: Generics — fat pointer = data ptr + vtable; Memory — existential carries a value-witness table (size, align, copy, move, destroy); stdlib — heap object header holds a TypeDescriptor (size + destructor). Whether dynamic dispatch, ARC drop/copy, and the object header share one record or use three separate structures is unspecified, and they must agree for erased values to be ARC-correct.",
+        "recommendation": "Define a single type-info scheme — e.g. one type descriptor (size/align/copy/move/destroy/vtable) referenced by both the object header and the `dyn` fat pointer — and state that all three dimensions mean the same record."
+      }
+    ]
+  },
+  {
+    "issues": [
+      {
+        "severity": "blocker",
+        "dimensions_involved": [
+          "Generics & traits",
+          "Error handling model",
+          "Modules & core stdlib"
+        ],
+        "problem": "The trait-solver bootstrap subset is self-contradictory: it lists constrained/blanket impls (`impl<T: Display> Display for Vec<T>`) and associated-type-equality/projection constraints (`fun sumAll<I: Iterator>(...) where I.Item: Add, I.Item.Output = I.Item, I.Item: Default`) as IN bootstrap, while the same dimension's risk note claims resolution stays 'deterministic, first-order, non-backtracking' and even says to 'forbid associated-type-equality constraints.' These cannot both be true. A blanket impl forces the solver to speculatively unify an impl head against a goal type and then recursively discharge that impl's own `where` bounds — that IS backtracking search. `I.Item.Output = I.Item` forces projection normalization with unification of type variables, the single hardest correctness surface in a hand-written OCaml solver. Shipping these in stage-0 means the first solver you write is the hardest possible one.",
+        "recommendation": "Cut two things from bootstrap while keeping generics usable: (a) allow only concrete impl heads — `impl Trait for ConcreteType` including fully-applied constructors like `impl Add for Vec2` or `impl Iterator for TokenIter { type Item = Token }` — and DEFER all blanket/constrained impls; (b) allow abstract associated-type projection `I.Item` treated as an opaque nominal type constrained by `where I: Iterator`, but DEFER every associated-type EQUALITY constraint (`I.Item.Output = I.Item`) and multi-hop projection normalization. This keeps the solver a lookup-plus-substitution engine (no unification search); the compiler's own source must then use free functions / concrete impls instead of blanket impls. Rewrite the `sumAll` example accordingly — it does not belong in the bootstrap subset."
+      },
+      {
+        "severity": "blocker",
+        "dimensions_involved": [
+          "Syntax, grammar & sigils",
+          "Memory model & ARC",
+          "Generics & traits"
+        ],
+        "problem": "Closures that capture the environment are load-bearing in the bootstrap but nobody stages their implementation. The syntax bootstrap includes trailing lambdas, `it`, and function types, and the compiler self-hosts using `xs.filter { it % 2 == 0 }.map { it*it }.fold(0){acc,x->acc+x}`. Yet the memory dimension files 'closure capture conventions' as an OPEN QUESTION and the syntax dimension only fixes the `->` lexeme. A capturing closure requires: a heap/stack environment record, ARC retain of reference-typed captures plus drop-glue for that record, and a {code-ptr, env-ptr} fat-value calling convention that must thread through monomorphized higher-order generics like `fold<T, R>`. This is a real hand-written-AArch64 feature with direct ARC interaction, and it is implicitly required to compile the compiler itself — but it is scheduled nowhere.",
+        "recommendation": "Put ONE concrete closure form in the bootstrap subset explicitly and co-design it with ARC: represent every `(T)->R` as a {code-ptr, env-ptr} pair, capture-by-value with retain of reference captures, env laid out as a compiler-synthesized struct with standard drop-glue, non-escaping by default. DEFER escaping-capture mode choices (borrow-vs-move capture lists) and async-captured closures. If that is judged too costly for the first hand-compilation, take the alternative: forbid closures in the earliest stage-1 modules and require top-level functions + explicit `for`/`while` iterator loops there — but decide, because the current examples assume heavy closure use with no backing plan."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Memory model & ARC",
+          "Modules & core stdlib"
+        ],
+        "problem": "Direct cross-dimension contradiction, both sides claiming bootstrap. Memory/ARC bootstrap lists 'COW Array/String/Map + Box + isUniquelyReferenced,' i.e. value-semantic copy-on-write with a uniqueness check emitted before every mutation. Stdlib bootstrap decides the exact opposite: 'Collections are reference types with reference semantics... No copy-on-write,' explicitly rejecting Swift CoW as 'uniqueness-check complexity in a from-scratch backend.' You cannot hand-write stage-0 against both. CoW additionally requires value-semantics-on-assign for collections, which fights the class/reference model everything else assumes.",
+        "recommendation": "Adopt the stdlib position for bootstrap: `List`/`Map`/`StringBuilder` are ARC `class` reference types with reference semantics and an explicit `.clone()`; delete `isUniquelyReferenced` and CoW from the stage-0 subset and mark value-semantic CoW a deferred, post-bootstrap stdlib redesign (an open question flagged in stdlib anyway). Keep `String` immutable with ARC shared-storage slices — that needs no uniqueness machinery. Reconcile the two dimension docs to this single story before any codegen work starts."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Memory model & ARC"
+        ],
+        "problem": "Zeroing `weak` is placed in the minimal bootstrap subset, and the same dimension admits it is 'the trickiest piece' — it needs either a global weak side-table with locking or an inline weak-count plus a zero-on-dealloc scan of all weak slots, both of which perturb the object header layout shared with (deferred) concurrency. This is the hardest ARC mechanism, and it is not obviously required to hand-compile a synchronous compiler: the compiler's cyclic structures (AST parent pointers, symbol-table back-edges) can be expressed with arena indices or non-zeroing `unowned`.",
+        "recommendation": "DEFER zeroing `weak` to post-self-host. In bootstrap ship only non-zeroing `unowned` (a bare pointer, trap-on-use-after-free in debug is optional) and require the stage-0-and stage-1 compiler's own data structures to avoid strong reference cycles by construction — arena allocation + integer node IDs for back-edges. This removes the single trickiest runtime mechanism from stage-0 with no loss to the bootstrap program."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Memory model & ARC",
+          "Concurrency & async"
+        ],
+        "problem": "The memory bootstrap mandates affine move semantics with an implicit last-use-move liveness pass, moved-from invalidation diagnostics, AND move-only `unique` types — a second whole dataflow-plus-diagnostics subsystem beyond the ARC drop-insertion pass. But borrow-default already makes calls cheap SEMANTICALLY (the dimension says so), so last-use elision is pure optimization; and moved-from/linearity checking is a correctness obligation that exists ONLY because `unique` move-only types exist. Neither is needed to correctly compile a synchronous compiler that manages its files and subprocess pipes with ordinary reference types.",
+        "recommendation": "DEFER `unique` move-only types, implicit last-use-move elision, and the linearity checker out of bootstrap. Stage-0 keeps only: borrow-by-default calls, explicit `consuming`, `deinit`, `defer`, and naive scope-end release (retain on bind, release at scope exit). The compiler's OS resources become ordinary ARC `class` + `deinit`/`defer` (close-on-last-release), which needs no linearity analysis. Reintroduce move-only + elision at the later performance-hardening milestone once the ARC optimizer is being built anyway."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Memory model & ARC",
+          "Generics & traits",
+          "Modules & core stdlib"
+        ],
+        "problem": "The 'minimal bootstrap subset' is repeatedly described as low-to-moderate risk, but it is actually the entire hard engine and cannot be shrunk, because the self-hosted compiler's own stdlib forces it: compiling `List<T>`/`Map<K,V>`/`Option`/`Result`/`Display` requires generic monomorphization WITH per-instantiation ARC drop-glue, payloaded enums with exhaustive `when`, trait dispatch, closures, AND the AAPCS64 FFI — all at once, all hand-emitted to AArch64 before you can bootstrap anything. There is no smaller self-hosting subset, so the risk is front-loaded and under-stated, and no intra-bootstrap ordering is given to make the first hand-compilation tractable.",
+        "recommendation": "Define an explicit 'Kite-minus' hand-compilation floor: the smallest surface the OCaml stage-0 must emit AND in which the EARLIEST stage-1 modules are written — deliberately excluding user-defined generics and closures there, using only compiler-provided (non-user-generic) built-in `List`/`Map` monomorphized internally, top-level functions, and explicit loops. Then let later compiler modules use the full bootstrap subset. Commit to a build order: primitives + payloaded enums + `when` → ARC classes + `deinit` → built-in List/Map (compiler-intrinsic, not user-generic) → `extern \"C\"`/`Process` → THEN user generics/traits/closures. This turns an all-at-once hand-emit into an incrementally verifiable ladder."
+      },
+      {
+        "severity": "minor",
+        "dimensions_involved": [
+          "Memory model & ARC",
+          "Concurrency & async"
+        ],
+        "problem": "Memory bootstrap mandates atomic refcounts by default (LSE `ldadd`/`ldclr`) 'because objects can be shared across tasks' — but concurrency is entirely excluded from bootstrap and the stage-0 compiler is single-threaded and synchronous. Every retain/release pays an atomic RMW (and slightly more codegen) for a sharing scenario that cannot occur in the bootstrap program. The concurrency dimension itself prefers a non-atomic `Rc` default.",
+        "recommendation": "Bootstrap uses non-atomic refcounts (plain load/add/store on the strong count). Introduce the atomic-header path and `Shared<T>` only when the async runtime lands post-self-host, gated by `Sendable`. This is faster, simpler to emit, and aligns Memory with Concurrency's stated preference — removing a constraint that buys nothing until concurrency exists."
+      },
+      {
+        "severity": "minor",
+        "dimensions_involved": [
+          "Modules & core stdlib",
+          "Type system core"
+        ],
+        "problem": "The backend work is framed as 'implement AAPCS64,' conflating the internal Kite-to-Kite calling convention with the C ABI. Full AAPCS64 aggregate classification (HFA float-struct rules, the 16-byte split-vs-by-reference threshold, register-vs-stack packing) is fiddly and is the gating stdlib risk — but Kite controls both sides of every internal call and passes parameters as borrows (pointers) by default, so internal calls never need that classification.",
+        "recommendation": "Specify a deliberately simple INTERNAL convention distinct from the C ABI: scalars in x0–x7/d0–d7, ALL aggregates passed by hidden pointer (natural under borrow-default), by-value returns via an sret pointer. Reserve full AAPCS64 classification strictly for the `extern \"C\"` boundary and `@repr(C)` structs. This confines the fiddly ABI to the small FFI surface and keeps the 99% internal-call path trivial to hand-write."
+      },
+      {
+        "severity": "minor",
+        "dimensions_involved": [
+          "Syntax, grammar & sigils",
+          "Memory model & ARC",
+          "Error handling model"
+        ],
+        "problem": "Named + default arguments and call-style struct construction are in the syntax bootstrap, but the evaluation semantics of defaults are unspecified and interact badly with ARC + `try`. Example: `connect(host, port = 443, tls = true)` with a default that ALLOCATES a reference value — if a later positional argument is `try f()` and that Errs mid-call, the already-materialized default must be dropped in the right order. Arbitrary-expression defaults thus drag mid-call cleanup ordering into the earliest, hand-compiled front end.",
+        "recommendation": "In bootstrap, lower defaults as caller-side fill and restrict default values to constant/literal expressions (no ref-allocating or side-effecting defaults); DEFER arbitrary-expression defaults to post-bootstrap. Argument lowering then stays a trivial positional rewrite with no mid-call ARC-cleanup interaction, and struct constructors synthesized from fields inherit the same simple rule."
+      }
+    ],
+    "lens": "Feasibility (from-scratch backend & bootstrap)",
+    "overall": "The proposals are mostly implementable in an OCaml stage-0 with a hand-written AArch64 backend, but several 'minimal bootstrap' subsets are mis-scoped in ways that would sink the first hand-compilation. Two are blockers: the trait-solver bootstrap includes blanket/constrained impls and associated-type-equality constraints that directly contradict its own 'no-backtracking' claim (the hardest solver, shipped first), and environment-capturing closures are load-bearing for the self-hosted compiler yet staged nowhere. Beyond those, the bootstrap is quietly the entire hard engine (monomorphization + ARC drop-glue + enums + closures + AAPCS64 must all land together to compile the stdlib), so its 'low-to-moderate' risk label is optimistic and needs an explicit build ladder. Several concrete simplifications are available for free: resolve the COW-vs-reference-semantics collections contradiction toward reference semantics, defer zeroing `weak` (use arenas/indices), defer move-only `unique` types and the last-use-move liveness pass, use non-atomic refcounts until concurrency lands, and separate a simple internal calling convention from full AAPCS64. Panic=abort (no unwinder) and deferring async/`dyn`/const-generics are correctly staged and materially de-risk the backend."
+  },
+  {
+    "lens": "North-star fit (expressiveness #1, performance #2; not minimalism-first, not safety-above-all)",
+    "overall": "The proposal set is broadly well-aligned, but three findings are load-bearing. (1) A direct, unresolved contradiction between the Memory/ARC dimension (value-semantic copy-on-write collections and String) and the Modules/stdlib dimension (reference-semantic collections, no CoW) — and the Modules side justifies its choice explicitly with \"simpler to implement,\" i.e. minimalism overriding the more expressive/predictable option. (2) The same underlying concept — parameter/receiver ownership and references — is spelled three incompatible ways across dimensions (`mut self`/`own self` vs `inout`/`consuming`/`borrow` vs Rust-style `&mut Self`/`&Context`), which fractures the single-language feel that is the whole point of a Kotlin-flavored surface. (3) Two ergonomic Kotlin-parity features are cut for simplicity in ways that read as permanent: smart-casting property paths, and any generic variance. Each of these trades away expressiveness (north star #1) for implementation simplicity, which the mandate explicitly deprioritizes. Recommend resolving the collection-semantics conflict in favor of value/CoW, unifying the ownership syntax, and re-scoping the two cut features from \"deferred/permanent\" to \"bootstrap-deferred, committed for v1.\"",
+    "issues": [
+      {
+        "severity": "blocker",
+        "dimensions_involved": [
+          "Memory model & ARC",
+          "Modules & core stdlib",
+          "Type system core"
+        ],
+        "problem": "The two dimensions that must agree on how collections and String behave contradict each other. Memory/ARC decides: 'Copy-on-write value collections. Stdlib Array<T>, String, Map<K,V> are value types (value semantics, no aliasing surprises)... Mutation checks the buffer's refcount via isUniquelyReferenced.' Modules/stdlib decides the opposite: 'Collections (List<T>, Map<K,V>, StringBuilder) are reference types with reference semantics: assignment shares, mutation is visible through aliases... No copy-on-write,' and String is an immutable ARC buffer mutated only via StringBuilder. They even disagree on the name (Array vs List) and on whether String is mutable-CoW or immutable. Concretely, `var a = [1,2,3]; var b = a; b.push(4)` leaves a == [1,2,3] under Memory's model but a == [1,2,3,4] under Modules' model — opposite observable semantics for the most-used type in the language. Critically, the Modules rationale picks reference semantics because it is 'far simpler and more predictable to implement than Swift-style CoW' — minimalism-first reasoning explicitly overriding the expressiveness/safety win (no aliasing bugs, no defensive copies) that Memory chose CoW to get. That is a direct inversion of the north star.",
+        "recommendation": "Adopt the Memory/ARC value-semantic CoW model as the canonical answer and delete the reference-semantic collection decision from Modules. CoW gives the expressiveness win (value semantics, no aliasing footguns) at O(1) assignment cost, and the isUniquelyReferenced intrinsic is a one-instruction refcount==1 check — the implementation-simplicity argument against it is overstated. Fix the name to one term and make String immutable-with-shared-storage-slices (Modules) while backing mutable buffers with CoW (Memory), which are compatible once unified."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Memory model & ARC",
+          "Generics & traits",
+          "Concurrency & async",
+          "Syntax, grammar & sigils"
+        ],
+        "problem": "One concept — parameter/receiver ownership and borrowing — has three mutually inconsistent spellings across the proposals, which shatters the 'feels like one Kotlin/Swift language' goal. Generics dimension: receivers are `self` / `mut self` / `own self`. Memory dimension: params use `inout` (`&x` at call site) / `consuming`, receivers `self` / `mut self`, plus a `borrow` capture keyword. Syntax dimension: `self` / `mut self`, with the owned-receiver keyword 'reserved but not named.' Concurrency dimension writes the core Future trait in raw Rust notation: `fun poll(self: &mut Self, cx: &Context)` — using `&mut` and `&T` reference types that exist nowhere else in Kite's surface (the language has ARC pointers and `inout`, not first-class `&T`). A reader moving from a trait method to an async poll impl to a consuming parameter sees `own self`, `&mut Self`, and `consuming` all meaning ownership-adjacent things. This is complexity that serves neither expressiveness nor performance — it is accidental divergence.",
+        "recommendation": "Pick one ownership vocabulary and enforce it everywhere before v0. Recommend Swift-flavored keyword forms to match the surface: receivers `self` (borrow) / `mut self` (mutable borrow) / `consuming self` (owned); parameters `borrowing` (default) / `inout` / `consuming`. Rewrite the Future trait signature in that vocabulary (`fun poll(mut self, cx: Context): Poll<Output>` with Context passed by borrow) and drop all `&mut Self`/`&T` Rust notation, which has no defined meaning in Kite."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Null-safety & flow typing"
+        ],
+        "problem": "Smart-casting is restricted to local val/var bindings; 'arbitrary member access through possibly-mutable receivers is NOT smart-cast in the bootstrap (bind it to a local first).' The rationale set serves 'safety' and 'performance,' but the framing and open questions leave it ambiguous whether property-path narrowing ever arrives. This is a visible Kotlin-feel regression: Kotlin smart-casts `val` properties on stable paths, and users will constantly hit `if (config.timeout != null) { use(config.timeout.millis) }  // ERROR: still Timeout?`, forced to write `val t = config.timeout ?: return` first. For a language whose #1 tie-breaker is 'feels like Kotlin to write,' rejecting the single most iconic Kotlin smart-cast pattern to save analysis effort is a simplicity-for-ergonomics trade against the north star.",
+        "recommendation": "Keep the bootstrap restriction (locals only) but explicitly commit v1 to smart-casting property chains rooted in `val` (immutable) receivers through `val` fields — the exact soundness envelope Kotlin uses, which needs only a stable-path check, not full alias analysis. Reframe this from an open question to a committed post-bootstrap feature so it does not silently become permanent."
+      },
+      {
+        "severity": "major",
+        "dimensions_involved": [
+          "Type system core",
+          "Generics & traits"
+        ],
+        "problem": "Generics are invariant with all variance ('declaration-site out/in') deferred indefinitely, chosen to 'avoid a general variance/subtype solver entirely' (simplicity). But covariant read-only containers are a heavily-used Kotlin ergonomic (`List<out T>`), and Kite's own dyn-coercion story makes the gap acute: given `fun render(shapes: List<dyn Draw>)` and a `List<Circle>`, invariance rejects the call, forcing `shapes.map { it as dyn Draw }` — an allocation and a full copy to satisfy the type checker for a purely covariant read. Likewise `T <: T?` widening does not lift into containers, so `List<Int>` cannot flow where `List<Int?>` is wanted. This is expressiveness (and incidentally performance, via the forced copy) sacrificed for type-checker simplicity.",
+        "recommendation": "Bring declaration-site `out` (covariance) for produced type parameters into v1 rather than deferring all variance. Read-only covariance needs only a variance annotation plus a sign check at subtype sites — far short of a general variance solver — and it removes the most common invariance papercut (producer collections and covariant dyn coercion). Keep `in`/contravariance deferred if budget is tight."
+      },
+      {
+        "severity": "minor",
+        "dimensions_involved": [
+          "Error handling model",
+          "Memory model & ARC"
+        ],
+        "problem": "panic = abort with NO unwinding means Drop/deinit and defer blocks do NOT run on panic; only the OS reclaims memory. This is well-justified for the bootstrap backend (no DWARF/EH), but it is presented as a candidate permanent contract, and it quietly undercuts the ergonomic promise the whole ARC+RAII+defer design is selling: 'resources just clean up deterministically.' On panic they do not — an OS file handle, an external lock, a temp file, or a released-in-deinit kernel resource leaks. In an integer-overflow-panics-in-debug world, that path is hit routinely during development. The expressiveness pitch of RAII ('you never write cleanup') has a silent asterisk.",
+        "recommendation": "Keep panic=abort for stage-0, but commit (not merely list as an open question) to a `panic=unwind` build mode post-bootstrap that runs Drop/defer, so the RAII contract is honest for long-lived servers and test harnesses. At minimum, document the abort-skips-cleanup caveat prominently so it is a known, bounded limitation rather than a surprise."
+      },
+      {
+        "severity": "minor",
+        "dimensions_involved": [
+          "Generics & traits",
+          "Null-safety & flow typing"
+        ],
+        "problem": "Iterator end-of-stream is modeled as `fun next(mut self): Item?` explicitly 'to reuse the language's null-safety machinery instead of inventing a parallel Option type... serves simplicity.' Since T? IS Option<T> this is type-safe, but it leans on T?? nesting for correctness when the element type is itself nullable: an `Iterator<Item = String?>` must have `next()` return `(String?)?` and yield `Some(None)` for a present-but-null element, or `it.next() ?: break` terminates early on the first null element. That is a subtle authoring hazard (Rust chose a distinct Option return precisely to make `Some(None)` visible), introduced to shave one concept — a minimalism motivation the mandate deprioritizes.",
+        "recommendation": "Keep `Item?` as the surface (it reads well and composes with `?: break`), but call out in the Iterator contract that implementers of nullable-element iterators must return the nested `Item??` and yield the inner-None correctly, and provide a std combinator (e.g. `whileSome`) so the common loop never has to reason about the nesting. This preserves the ergonomic idiom without letting the simplicity shortcut become a correctness trap."
+      }
+    ]
+  }
+]

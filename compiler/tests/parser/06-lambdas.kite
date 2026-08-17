@@ -1,0 +1,10 @@
+fun m(): Int {
+  val a = { x -> x + 1 }
+  val b = { x: Int, y: Foo -> x }
+  val c = { -> 0 }
+  val d = { it }
+  xs.map { it * 2 }
+  f(x) { it }
+  val g = fold(0) { acc: Int, x: Int -> acc + x }
+  return 0
+}

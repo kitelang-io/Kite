@@ -1,0 +1,19 @@
+trait Shape { fun area(self): Int }
+struct Circle(val r: Int)
+struct Square(val s: Int)
+impl Shape for Circle { fun area(self): Int = self.r * self.r * 3 }
+impl Shape for Square { fun area(self): Int = self.s * self.s }
+fun main(): Int {
+  val shapes = listNew()
+  listPush(shapes, Circle(2))
+  listPush(shapes, Square(3))
+  listPush(shapes, Circle(1))
+  var total = 0
+  var i = 0
+  while (i < listLen(shapes)) {
+    val s = listGet(shapes, i)
+    total = total + s.area()
+    i = i + 1
+  }
+  return total
+}

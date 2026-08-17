@@ -1,0 +1,4 @@
+fun a(x: Int): Int { return if (x > 0) 1 else 2 }
+fun b(x: Int): Int { val y = if (x > 0) x else 0 - x  return y }
+fun c(x: Int): Int = if (x > 0) { val z = x + 1  z } else 0
+fun d(x: Int): Int { return if (x > 2) 10 else if (x > 1) 20 else 30 }

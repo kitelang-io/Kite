@@ -1,0 +1,3 @@
+@inline fun a(): Int = 0
+@derive(Eq, Ord) struct P(val x: Int)
+@repr(transparent) enum Color { Red; Green; Blue }

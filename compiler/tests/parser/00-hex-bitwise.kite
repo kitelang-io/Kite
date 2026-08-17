@@ -1,0 +1,6 @@
+fun m(): Int {
+  val a = 0xff & 0x0f | (1 << 4) ^ (n >> 2)
+  val b = 0xD2800540
+  val c = a == b & c
+  return a & b | c ^ 3
+}

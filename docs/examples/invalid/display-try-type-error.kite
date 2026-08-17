@@ -1,0 +1,20 @@
+// display-try-type-error.kite — BUG CASE (step 1a), NOT currently checkable (M5 feature:
+//   traits/impl, Formatter, `try`, string interpolation all land at M5).
+//
+// EXPECTED ERROR (once M5 semantics exist):
+//   type error: `= expr` body has type `Unit`, but `fmt` is declared to return
+//   `Result<Unit, FmtError>`.
+//
+// WHY: `try e` unwraps `Ok(v) -> v`, so `try out.write(...)` evaluates to the payload
+//   `Unit`, not the `Result`. The tail-auto-`Ok` rule applies ONLY to `try { }` BLOCKS
+//   (LANGUAGE-DESIGN-DETAIL.md, "Formatting fmt keeps Result<Unit, FmtError> in B"),
+//   never to an `= expr` body. `write` already returns `Result<Unit, FmtError>`, so the
+//   FIX is to drop the erroneous `try` (see valid/../LANGUAGE-DESIGN.md ~line 319).
+//
+// FIXED form:  fun fmt(self, out: mut Formatter): Result<Unit, FmtError> =
+//                  out.write("(${self.x}, ${self.y})")
+
+impl Display for Point {
+    fun fmt(self, out: mut Formatter): Result<Unit, FmtError> =
+        try out.write("(${self.x}, ${self.y})")
+}

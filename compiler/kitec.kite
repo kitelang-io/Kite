@@ -1,0 +1,13 @@
+// compiler/kitec.kite — the compiler's entry point / module manifest.
+//
+// This is what the build feeds to the compiler as its own source: instead of a shell `cat` of the four
+// translation units, the compiler assembles ITSELF through its OWN import mechanism (dogfooding). These
+// are QUOTED imports, i.e. flat textual includes (no name mangling) — see lowerInput/resolveImports —
+// so every cross-file call (lex, genExpr, assembleReloc, …) keeps its global name, exactly as the old
+// `cat` produced. The order is the old cat order: frontend → codegen → backend → driver (which holds
+// main). Paths are cwd-relative to the repo root, matching how readFile resolves everything else.
+import "compiler/frontend/kfront.kite"
+import "compiler/sema/kcheck.kite"
+import "compiler/codegen/codegen.kite"
+import "compiler/backend/arm64/arm64.kite"
+import "compiler/driver/klower.kite"

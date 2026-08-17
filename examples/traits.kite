@@ -1,0 +1,51 @@
+import kite::collections
+
+enum Ordering { Less; Equal; Greater }
+
+// trait with supertrait, associated type, sig + default method
+trait Eq {
+    fun eq(self, other: Self): Bool
+    fun ne(self, other: Self): Bool = !self.eq(other)
+}
+
+trait Ord: Eq {
+    fun cmp(self, other: Self): Ordering
+}
+
+trait Iterator {
+    type Item
+    fun next(mut self): Item?
+}
+
+// generic struct with a method body + derive annotation
+@derive(Eq, Ord, Hash, Clone, Copy, Debug)
+struct Vec2(pub val x: Int, pub val y: Int) {
+    fun lengthSq(self): Int {
+        return self.x * self.x + self.y * self.y
+    }
+}
+
+// trait impl for a concrete type, associated type binding, operator method
+impl Add for Vec2 {
+    type Output = Vec2
+    fun add(self, rhs: Vec2): Vec2 = Vec2(self.x + rhs.x, self.y + rhs.y)
+}
+
+// generic function with bound + where clause + inout param
+fun <T: Ord> maxOf(a: T, b: T): T {
+    return if (a.cmp(b) == Ordering::Greater) a else b
+}
+
+fun <I> collectInts(it: inout I): List<Int> where I: Iterator {
+    var out = makeList()
+    while (true) {
+        val x = it.next() ?: break
+        out.push(x)
+    }
+    return out
+}
+
+// generic impl over a container with a parameter bound
+impl<T: Display> Display for Boxed<T> {
+    fun fmt(self, out: inout Formatter): Result<Unit, FmtError> = self.value.fmt(out)
+}

@@ -1,0 +1,30 @@
+// enum_eval.kite — payloaded enums, `when (subject)` with variant patterns, recursion.
+// Currently-checkable subset: enum, when(subject) enum-payload destructuring,
+// `Op::Add` variant qualification, recursive functions.
+
+enum Op { Add; Sub; Mul }
+
+enum Expr {
+    Lit(Int)
+    Bin(Op, Expr, Expr)
+}
+
+fun apply(op: Op, a: Int, b: Int): Int {
+    return when (op) {
+        Op::Add -> a + b
+        Op::Sub -> a - b
+        Op::Mul -> a * b
+    }
+}
+
+fun eval(e: Expr): Int {
+    return when (e) {
+        Lit(n)        -> n
+        Bin(op, l, r) -> apply(op, eval(l), eval(r))
+    }
+}
+
+fun main(): Int {
+    val e = Bin(Op::Add, Lit(2), Bin(Op::Mul, Lit(3), Lit(4)))
+    return eval(e)
+}

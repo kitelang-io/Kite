@@ -1,0 +1,11 @@
+fun m(): Int {
+  val a = obj?.x?.y!!
+  val b = p ?: q ?: r
+  val c = x || y ?: z
+  val d = a?.b ?: c
+  val e = f::<Int>()
+  val g = collect::<List<Int>, String>(xs)
+  val h = a[i][j]
+  val k = m::<K, V>()[key]
+  return 0
+}

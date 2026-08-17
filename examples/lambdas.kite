@@ -1,0 +1,7 @@
+fun demo(xs: List<Int>): Int {
+    val evens = xs.filter { it % 2 == 0 }.map { it * it }.fold(0) { a, x -> a + x }
+    val g = { a: Int, b: Int -> a + b }
+    val h = { -> 42 }
+    forEach(xs) { println(it) }
+    return evens
+}

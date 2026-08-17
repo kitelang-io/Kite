@@ -1,0 +1,11 @@
+import kite::core
+import kite::alloc
+
+fun main(): Int {
+  val ns = rangeList(6)
+  val sq = mapList(ns, { n -> n * n })
+  val s = sumList(filterList(sq, { n -> n >= 9 }))
+  val g = gcdI(48, 36)
+  val p = powI(2, 10)
+  return s + g + (p % 1000)
+}

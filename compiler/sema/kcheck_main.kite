@@ -1,0 +1,12 @@
+// compiler/sema/kcheck_main.kite — the standalone `kitec check` tool's entry point.
+// kcheck.kite is a library (no main); this file provides main so the checker can be built and run on
+// its own (the differential test compiles kfront.kite + kcheck.kite + this). It prints diagnostics in
+// the same format the OCaml oracle `kitec check` uses (path prefix aside), reading /tmp/kcheck_input.kite.
+fun main(): Int {
+  val diags = checkDiags(lex(readFile("/tmp/kcheck_input.kite")), 0)
+  if (listLen(diags) == 0) { println("ok (name resolution + type check passed)") ; return 0 }
+  var i = 0
+  while (i < listLen(diags)) { val m: String = listGet(diags, i) ; println(concat("error: ", m)) ; i = i + 1 }
+  println(concat(intToStr(listLen(diags)), " semantic error(s)"))
+  return listLen(diags)
+}
