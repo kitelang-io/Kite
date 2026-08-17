@@ -22,5 +22,12 @@ echo "=== [2/2] integrated fixpoint (kcc2==kcc3) ==="
 "$T/k2" compiler/kitec.kite "$T/k3" >/dev/null 2>&1; [ -f "$T/k3" ] || fail "kcc3 not produced (kcc2 crashed?)"; chmod +x "$T/k3"
 cmp -s "$T/k2" "$T/k3" && echo "  kcc2 == kcc3 ✓ ($(wc -c <"$T/k2") bytes)" || fail "kcc2 != kcc3"
 
-echo "✅ GATE PASSED (no OCaml, no shared /tmp) — suite green, kcc2==kcc3"
+echo "=== [robustness] malformed input rejected, never segfaults ==="
+BAD=compiler/tests/bugs/malformed-input-must-not-segfault.kite
+"$T/k2" check "$BAD" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 139 ] && fail "compiler SEGFAULTED (139) on malformed input — parser bounds-check regressed"
+[ "$rc" -eq 0 ] && fail "compiler ACCEPTED malformed input (should error)"
+echo "  malformed input -> exit $rc (non-zero, not signal-killed) ✓"
+
+echo "✅ GATE PASSED (no OCaml, no shared /tmp) — suite green, kcc2==kcc3, robust to malformed input"
 rm -rf "$T"

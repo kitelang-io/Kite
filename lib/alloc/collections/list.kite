@@ -4,27 +4,67 @@
 // Following Kotlin, a type's convention methods (the desugar landing points) live WITH the type, not
 // in a separate sugar library; the [..]/{..} constructors are top-level like Kotlin listOf()/mapOf().
 // Names are global (unmangled): the prelude injects them.
-fun listNew(): List { val h = __rawAlloc(24) __rawStore(h, 0, 0) __rawStore(h, 8, 4) __rawStore(h, 16, __rawAlloc(32)) return h }
-fun listLen(l: List): Int { return __rawLoad(l, 0) }
-fun listGet(l: List, i: Int): Int { return __rawLoad(__rawLoad(l, 16), i * 8) }
-fun listSet(l: List, i: Int, x: consuming Int): Int { __rawStore(__rawLoad(l, 16), i * 8, x) return 0 }
-fun listPush(l: List, x: consuming Int): Int {
-  val n = __rawLoad(l, 0)
-  val cap = __rawLoad(l, 8)
-  if (n == cap) { val nc = cap * 2 __rawStore(l, 8, nc) __rawStore(l, 16, __rawRealloc(__rawLoad(l, 16), nc * 8)) }
-  __rawStore(__rawLoad(l, 16), n * 8, x)
-  __rawStore(l, 0, n + 1)
-  return 0
+//
+// List is a real CLASS: {n: count, cap: capacity, data: heap word-buffer}. listNew builds it with the
+// class constructor and the ops read/write its fields. NOTE: List is EXEMPT from automatic ARC (see
+// isBuiltinNominal in klower.kite) — its elements are type-erased Int words that listPush can't retain,
+// and the compiler nests lists-in-lists (structF/funP/variantTys), so a naive release would free an
+// inner list while the outer still holds its raw pointer (UAF). So List stays leak-managed as before;
+// the class only gives it a visible layout + methods.
+// Methods live IN the class body (self-style, like Vec) — these ARE the real implementation, mangled to
+// List_push / List_get / List_len / List_length by the method system. `push`/`get`/`set`/`len`, plus a
+// `length` getter alias (so `xs.length` no-parens resolves here).
+class List(var n: Int, var cap: Int, var data: Int) {
+  fun push(self, x: consuming Int): Int {
+    // grow-if-full. Guard cap==0 explicitly: 0*2 is still 0, so a lazily-allocated (cap 0) List would
+    // realloc 0 bytes and write OOB at offset 0, then never grow (n==cap forever). Today list() starts
+    // cap at 4 so this can't happen, but the guard keeps push correct if a cap-0 constructor is added.
+    if (self.n == self.cap) {
+      if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.data = __rawRealloc(self.data, self.cap * 8)
+    }
+    __rawStore(self.data, self.n * 8, x)
+    self.n = self.n + 1
+    return 0
+  }
+  fun get(self, i: Int): Int { return __rawLoad(self.data, i * 8) }
+  fun set(self, i: Int, x: consuming Int): Int { __rawStore(self.data, i * 8, x)  return 0 }
+  fun len(self): Int { return self.n }
+  fun length(self): Int { return self.n }
 }
-fun __mapGetS(m: List, k: String): Int { var i = 0 while (i < listLen(m)) { if (strEq(listGet(m, i), k)) { return listGet(m, i + 1) } i = i + 2 } return 0 }
-fun __mapGetI(m: List, k: Int): Int { var i = 0 while (i < listLen(m)) { if (listGet(m, i) == k) { return listGet(m, i + 1) } i = i + 2 } return 0 }
-// map[k] = v : update k's value in place, else append [k, v]. Backs `m[k] = v` for Int/String keys.
-fun __mapSetI(m: List, k: Int, v: Int): Int { var i = 0 while (i < listLen(m)) { if (listGet(m, i) == k) { listSet(m, i + 1, v) return 0 } i = i + 2 } listPush(m, k) listPush(m, v) return 0 }
-fun __mapSetS(m: List, k: String, v: Int): Int { var i = 0 while (i < listLen(m)) { if (strEq(listGet(m, i), k)) { listSet(m, i + 1, v) return 0 } i = i + 2 } listPush(m, k) listPush(m, v) return 0 }
-fun list(): List { return listNew() }
-fun map(): Map { return listNew() }
-fun List_push(l: List, x: Int): Int { return listPush(l, x) }
-fun List_get(l: List, i: Int): Int { return listGet(l, i) }
-fun List_set(l: List, i: Int, x: Int): Int { return listSet(l, i, x) }
-fun List_len(l: List): Int { return listLen(l) }
-fun Map_size(m: Map): Int { return listLen(m) / 2 }
+fun listNew(): List { return list() }
+// free-function API — thin delegates to the methods, kept because the compiler's own 2000+ call sites
+// and the [..] literal lowering (klower) emit these names.
+fun listLen(l: List): Int { return l.len() }
+fun listGet(l: List, i: Int): Int { return l.get(i) }
+fun listSet(l: List, i: Int, x: consuming Int): Int { return l.set(i, x) }
+fun listPush(l: List, x: consuming Int): Int { return l.push(x) }
+fun list(): List { return List(0, 4, __rawAlloc(4 * 8)) }
+
+// --- Map: a REAL nominal class (no longer a List-as-[k,v] alias) --------------------------------------
+// Storage is two parallel word-lists {keys@0, vals@8}: keys[i] pairs with vals[i]. String-keyed methods
+// (get/set/has/size/keys) are the m.get/set/... surface AND back m["k"]/m["k"]=v; an Int-keyed path
+// (getI/setI) backs m[intKey]. Like List, Map is EXEMPT from automatic ARC (isBuiltinNominal in
+// klower.kite): keys/vals are type-erased word Lists whose elements can't be retained, and the compiler
+// nests containers, so a naive deep-release would double-free. So Map stays leak-managed, consistent
+// with List; the class only gives it a visible layout + methods. isRelField (codegen) already excludes
+// both Map and its List fields from deep-release.
+class Map(var keys: List, var vals: List)
+fun mapNewM(): Map { return Map(listNew(), listNew()) }
+fun map(): Map { return mapNewM() }
+fun Map_size(m: Map): Int { return listLen(m.keys) }
+fun Map_get(m: Map, k: String): Int { var i = 0 while (i < listLen(m.keys)) { if (strEq(listGet(m.keys, i), k)) { return listGet(m.vals, i) } i = i + 1 } return 0 }
+fun Map_has(m: Map, k: String): Bool { var i = 0 while (i < listLen(m.keys)) { if (strEq(listGet(m.keys, i), k)) { return true } i = i + 1 } return false }
+// m.set / m["k"]=v : update k's value in place, else append (k, v).
+fun Map_set(m: Map, k: String, v: Int): Int { var i = 0 while (i < listLen(m.keys)) { if (strEq(listGet(m.keys, i), k)) { listSet(m.vals, i, v) return 0 } i = i + 1 } listPush(m.keys, k) listPush(m.vals, v) return 0 }
+// the keys, in insertion order — for iteration (`for (k in m.keys())`).
+fun Map_keys(m: Map): List { return m.keys }
+// Int-keyed path (m[intKey]): `==` compare instead of strEq.
+fun Map_getI(m: Map, k: Int): Int { var i = 0 while (i < listLen(m.keys)) { if (listGet(m.keys, i) == k) { return listGet(m.vals, i) } i = i + 1 } return 0 }
+fun Map_setI(m: Map, k: Int, v: Int): Int { var i = 0 while (i < listLen(m.keys)) { if (listGet(m.keys, i) == k) { listSet(m.vals, i, v) return 0 } i = i + 1 } listPush(m.keys, k) listPush(m.vals, v) return 0 }
+// index-dispatch entry points (unchanged names, now over the real Map): klower lowerIndex/lowerIndexStore
+// route m[k]/m[k]=v here, and these forward to the Map methods above.
+fun __mapGetS(m: Map, k: String): Int { return Map_get(m, k) }
+fun __mapGetI(m: Map, k: Int): Int { return Map_getI(m, k) }
+fun __mapSetS(m: Map, k: String, v: Int): Int { return Map_set(m, k, v) }
+fun __mapSetI(m: Map, k: Int, v: Int): Int { return Map_setI(m, k, v) }

@@ -1,0 +1,7 @@
+// Parser-dump driver for the parser differential test: assemble kfront (the parser) + kprint (the AST
+// printer) into a standalone binary via the SELF-HOSTED compiler (kcc), Fledge-free. kprint.kite carries
+// the `main` that reads /tmp/kparse_input.kite, parses it, and prints the AST — matching the OCaml
+// oracle's `parse` output byte-for-byte. (Fledge can no longer build this since the compiler moved to
+// method-call syntax, so run-parser-tests.sh builds it with kcc instead.)
+import "compiler/frontend/kfront.kite"
+import "compiler/frontend/kprint.kite"

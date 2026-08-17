@@ -1,0 +1,2 @@
+error: line 1: unresolved name: zzz
+1 semantic error(s)

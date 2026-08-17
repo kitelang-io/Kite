@@ -1,0 +1,41 @@
+// break / continue in for-ranges and while loops, plus nested-loop break (inner only).
+// Expected exit code: 77
+fun sumBreak(): Int {         // 0..10, break at 5 -> 0+1+2+3+4 = 10
+  var s = 0
+  for (i in 0..10) {
+    if (i == 5) { break }
+    s = s + i
+  }
+  return s
+}
+fun sumContinue(): Int {      // 0..9, skip 5 -> 45-5 = 40
+  var s = 0
+  for (i in 0..9) {
+    if (i == 5) { continue }
+    s = s + i
+  }
+  return s
+}
+fun whileBreak(): Int {       // 0+1+..+6 = 21
+  var i = 0
+  var s = 0
+  while (i < 100) {
+    if (i == 7) { break }
+    s = s + i
+    i = i + 1
+  }
+  return s
+}
+fun nestedBreak(): Int {      // 3 outer * 2 inner-hits = 6
+  var c = 0
+  for (i in 0..2) {
+    for (j in 0..5) {
+      if (j == 2) { break }
+      c = c + 1
+    }
+  }
+  return c
+}
+fun main(): Int {
+  return sumBreak() + sumContinue() + whileBreak() + nestedBreak()   // 10+40+21+6 = 77
+}

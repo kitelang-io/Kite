@@ -1,0 +1,2 @@
+error: line 2: wrong number of arguments: expected 1, got 2
+1 semantic error(s)

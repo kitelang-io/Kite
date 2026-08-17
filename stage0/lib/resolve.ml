@@ -25,10 +25,16 @@ let builtins =
       "unit"; "it";
       "Some"; "None"; "Ok"; "Err";
       "string"; "listOf"; "mapOf"; "setOf";
+      "list"; "map"; "toInt"; "comptime"; "__argv";
       (* backend-implemented value builtins (Fledge stage-0 intrinsics) *)
       "strLen"; "charAt"; "strEq"; "concat"; "substr"; "intToStr";
       "listNew"; "listPush"; "listGet"; "listSet"; "listLen"; "readFile"; "writeFile";
-      "fopenW"; "fputByte"; "fcloseF" ]
+      "fopenW"; "fputByte"; "fcloseF";
+      (* ARC + raw-memory + map intrinsics (mirror kcheck.kite's isBuiltin;
+         __argv/list/map/toInt/comptime are already listed above) *)
+      "__retain"; "__release"; "__refcount"; "__decRefcount"; "__freeObj"; "__allocRC"; "__typeId";
+      "__rawAlloc"; "__rawFree"; "__rawRealloc"; "__rawLoad"; "__rawStore"; "__rawLoadByte"; "__rawStoreByte";
+      "__mapGetS"; "__mapGetI" ]
 
 type ctx = {
   globals : SS.t;

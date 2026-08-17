@@ -1,0 +1,2 @@
+fun pair<T>(a: T, b: T): T = a
+fun m(): Int { pair(1, "x")  return 0 }

@@ -1,0 +1,26 @@
+// compound assignment (x op= e) on locals, list elements, and struct fields.
+// Each `x op= e` desugars in the parser to `x = x op e`.
+// Expected exit code: 96
+struct Box(var n: Int)
+fun main(): Int {
+  var x = 3
+  x += 4          // 7
+  x *= 2          // 14
+  x -= 1          // 13
+  x %= 10         // 3
+  x /= 1          // 3
+
+  val a = [1, 2, 3]
+  a[1] += 10      // a = [1, 12, 3]
+  a[2] *= 5       // a = [1, 12, 15]
+  val listSum = a[0] + a[1] + a[2]   // 28
+
+  val b = Box(5)
+  b.n += 6        // 11
+  b.n *= 4        // 44
+
+  var acc = 0
+  for (i in 1..6) { acc += i }       // 1+2+3+4+5+6 = 21
+
+  return x + listSum + b.n + acc     // 3 + 28 + 44 + 21 = 96
+}

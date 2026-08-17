@@ -1,5 +1,8 @@
-// kite::alloc::string — heap String helpers.
-fun strRepeat(s: String, n: Int): String { var out = ""  var i = 0  while (i < n) { out = concat(out, s)  i = i + 1 }  return out }
-fun joinList(xs: List, sep: String): String { var out = ""  var i = 0  while (i < listLen(xs)) { if (i > 0) { out = concat(out, sep) }  out = concat(out, listGet(xs, i))  i = i + 1 }  return out }
+// kite::alloc::string — allocating String UTILITIES, plus the `Str` builder (re-exported below).
+// This mirrors kite::alloc::collections (List's higher-order utilities): the String type and its
+// convention methods live in kite::core::string (auto-prelude); these are opt-in extras you `import`.
+// `strRepeat` is the free-function alias of the `s.repeat(n)` convention method (String_repeat, prelude).
+fun strRepeat(s: String, n: Int): String { return String_repeat(s, n) }
+fun joinList(xs: List, sep: String): String { var out = ""  var i = 0  while (i < xs.len()) { if (i > 0) { out = concat(out, sep) }  out = concat(out, xs.get(i))  i = i + 1 }  return out }
 
 pub import kite::alloc::string::strbuf

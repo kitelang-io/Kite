@@ -1,28 +1,49 @@
 #!/bin/zsh
-# Differential test for the M2 semantic checker (frontend/kfront.kite + sema/kcheck.kite) vs the
-# OCaml oracle `kitec check`. Builds it, then checks `kcheck F` == `kitec check F` (path prefix
-# stripped) byte-for-byte for every compiler source file + check-probe.
+# Differential test for the M2 semantic checker (frontend/kfront.kite + sema/kcheck.kite) vs the OCaml
+# oracle. The Kite checker is run via the SELF-HOSTED compiler (`kcc check`) — Fledge can no longer
+# compile the method-call syntax. Two-part per file:
+#   1. CONTENT: `kcc check F` message text/order/count must match the oracle `check F` byte-for-byte
+#      (path prefix stripped; kcc's "line N: " position prefix stripped; trailer "semantic error(s)" vs
+#      "error(s)" normalized) — validates message CONTENT against the independent OCaml oracle.
+#   2. POSITION: for probes with a golden expectation (compiler/tests/check/expected/<name>.txt), the RAW
+#      position-bearing output must match the golden (same trailer normalization) — pins the line numbers.
+# The oracle (dune stage0 parse/check) is the OCaml reference impl; it does NOT compile Kite, so it is
+# unaffected by the compiler moving to method syntax. `dune --root .` forces the worktree as dune root.
 # Usage: compiler/tests/run-check-tests.sh
 export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 ROOT=${0:A:h:h:h}
 cd "$ROOT"
-O=$ROOT/_build/default/stage0/bin/main.exe
 
-echo "building kfront.kite + sema/kcheck.kite (library) + sema/kcheck_main.kite (entry) ..."
-dune exec stage0/bin/main.exe -- exe compiler/frontend/kfront.kite compiler/sema/kcheck.kite compiler/sema/kcheck_main.kite >/tmp/kck_build.log 2>&1 \
-  || { echo "BUILD FAILED"; tail -5 /tmp/kck_build.log; exit 1; }
-mv compiler/frontend/kfront /tmp/kcheck; chmod +x /tmp/kcheck
+echo "building the self-hosted checker (kcc) via the seed ..."
+TMPD=$(mktemp -d); KCC="$TMPD/kcc"
+"$ROOT/bootstrap/kite-seed" compiler/kitec.kite "$KCC" >"$TMPD/build.log" 2>&1
+[ -f "$KCC" ] || { echo "SEED BUILD FAILED"; cat "$TMPD/build.log"; exit 1; }
+chmod +x "$KCC"
+norm() { sed -E 's/([0-9]+) semantic error/\1 error/; s/^ok .*/ok/'; }   # normalize the count trailer + the clean-pass "ok (...)" line
 
 one() {
-  "$O" check "$1" 2>&1 | sed 's|^[^:]*: ||' > /tmp/kck_ref.txt
-  cp "$1" /tmp/kcheck_input.kite
-  /tmp/kcheck 2>/dev/null | grep -v ' -> exit code ' > /tmp/kck_got.txt
-  if diff -q /tmp/kck_ref.txt /tmp/kck_got.txt >/dev/null; then echo "  PASS $1"; return 0
-  else echo "  FAIL $1"; diff /tmp/kck_ref.txt /tmp/kck_got.txt | head -20; return 1; fi
+  # oracle content reference: path prefix stripped, trailer normalized
+  dune exec --root . stage0/bin/main.exe -- check "$1" 2>&1 | sed 's|^[^:]*: ||' | norm > /tmp/kck_ref.txt
+  # raw kcc checker output (position-bearing)
+  "$KCC" check "$1" 2>&1 > /tmp/kck_raw.txt
+  # content view: drop the "line N: " position prefix so message text is comparable to the oracle
+  sed -E 's|^error: line [0-9]+: |error: |' /tmp/kck_raw.txt > /tmp/kck_got.txt
+  local ok=1
+  if ! diff -q /tmp/kck_ref.txt /tmp/kck_got.txt >/dev/null; then
+    echo "  FAIL(content) $1"; diff /tmp/kck_ref.txt /tmp/kck_got.txt | head -20; ok=0
+  fi
+  # position view: compare RAW output to the golden line-number expectation, when one exists
+  local gold="${1:h}/expected/${1:t:r}.txt"
+  if [ -f "$gold" ]; then
+    if ! diff -q <(norm < "$gold") /tmp/kck_raw.txt >/dev/null; then
+      echo "  FAIL(position) $1"; diff <(norm < "$gold") /tmp/kck_raw.txt | head -20; ok=0
+    fi
+  fi
+  if [ $ok -eq 1 ]; then echo "  PASS $1"; return 0; else return 1; fi
 }
 
 pass=0; fail=0
-FILES=(examples/hello.kite examples/native_demo.kite examples/native_loops.kite
+FILES=(examples/demos/hello.kite examples/demos/native_demo.kite examples/demos/native_loops.kite
        bootstrap/*.kite
        compiler/frontend/*.kite compiler/sema/*.kite compiler/codegen/*.kite
        compiler/backend/arm64/*.kite compiler/driver/*.kite compiler/tests/kenc_test.kite

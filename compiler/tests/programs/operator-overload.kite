@@ -1,0 +1,14 @@
+// Operator overloading via the trait system (kite::core::ops): the LEFT operand's concrete impl of the
+// operator trait resolves `a op b` to the mangled method. Proves: a user `impl Add for V2` (V2 + V2),
+// String's prelude `impl Add for String` overloading `+` as concatenation, and that primitive Int
+// arithmetic (+ - *) with no impl still lowers to the built-in machine ops.
+struct V2(val x: Int, val y: Int)
+impl Add for V2 { fun add(self, rhs: V2): V2 { return V2(self.x + rhs.x, self.y + rhs.y) } }
+fun main(): Int {
+  val c = V2(1, 2) + V2(10, 20)   // user Add impl -> V2(11, 22)
+  var acc = c.x + c.y             // Int + still primitive: 33
+  val s = "foo" + "bar" + "baz"   // String + overload -> "foobarbaz" (len 9)
+  acc = acc + strLen(s)           // 33 + 9 = 42
+  acc = acc * (7 - 2)             // Int - and * still primitive: 42 * 5 = 210
+  return acc                      // 210
+}

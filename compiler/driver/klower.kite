@@ -9,7 +9,7 @@
 // then lower) so forward references resolve. Constructs outside kenc's codegen (lambdas, floats,
 // map literals, traits/impl, nullable ops) are still reported via lowFail.
 
-struct Lo(val ctr: List, val locN: List, val locT: List, val fN: List, val fR: List, val sN: List, val sFN: List, val sFT: List, val lifted: List, val gctr: List, val classN: List, val arcOwned: List, val traitN: List, val constN: List, val constV: List, val cfuncs: List, val traitMethN: List, val traitMethT: List, val pmN: List, val pmM: List)
+struct Lo(val ctr: List, val locN: List, val locT: List, val fN: List, val fR: List, val sN: List, val sFN: List, val sFT: List, val lifted: List, val gctr: List, val classN: List, val arcOwned: List, val traitN: List, val constN: List, val constV: List, val cfuncs: List, val traitMethN: List, val traitMethT: List, val pmN: List, val pmM: List, val variantN: List, val variantTys: List)
 struct PFun(val owner: String, val fd: FFunc)   // owner "" = free function; else the struct type
 
 fun lastSeg(path: String): String {
@@ -20,11 +20,11 @@ fun lastSeg(path: String): String {
 fun lowFail(msg: String): Int { println(concat("klower: unsupported construct: ", msg)) ; return 0 }
 fun memListL(l: List, n: String): Bool {
   var i = 0
-  while (i < listLen(l)) { val x: String = listGet(l, i) ; if (strEq(x, n)) { return true } ; i = i + 1 }
+  while (i < l.len()) { val x: String = l.get(i) ; if (strEq(x, n)) { return true } ; i = i + 1 }
   return false
 }
-fun freshName(lo: Lo, pre: String): String { val n: Int = listGet(lo.ctr, 0) ; listSet(lo.ctr, 0, n + 1) ; return concat(pre, intToStr(n)) }
-fun bindLoc(lo: Lo, nm: String, tag: String): Int { listPush(lo.locN, nm) ; listPush(lo.locT, tag) ; return 0 }
+fun freshName(lo: Lo, pre: String): String { val n: Int = lo.ctr.get(0) ; lo.ctr.set(0, n + 1) ; return concat(pre, intToStr(n)) }
+fun bindLoc(lo: Lo, nm: String, tag: String): Int { lo.locN.push(nm) ; lo.locT.push(tag) ; return 0 }
 
 // ---------- coarse type tags ----------
 // normalize a type string to a coarse tag: "List<Int>"->"List", "Int?"->"Int", "a::B"->"B", ""->"?"
@@ -50,8 +50,8 @@ fun stripMode(ty: String): String {
   return ty
 }
 fun localTag(lo: Lo, nm: String): String {
-  var i = listLen(lo.locN) - 1
-  while (i >= 0) { if (strEq(listGet(lo.locN, i), nm)) { return listGet(lo.locT, i) } ; i = i - 1 }
+  var i = lo.locN.len() - 1
+  while (i >= 0) { if (strEq(lo.locN.get(i), nm)) { return lo.locT.get(i) } ; i = i - 1 }
   return "?"
 }
 fun builtinRetTag(nm: String): String {
@@ -64,28 +64,43 @@ fun funRetTag(lo: Lo, nm: String): String {
   val b = builtinRetTag(nm)
   if (strEq(b, "") == false) { return b }
   var i = 0
-  while (i < listLen(lo.fN)) { if (strEq(listGet(lo.fN, i), nm)) { return tyTag(listGet(lo.fR, i)) } ; i = i + 1 }
+  while (i < lo.fN.len()) { if (strEq(lo.fN.get(i), nm)) { return tyTag(lo.fR.get(i)) } ; i = i + 1 }
   if (memListL(lo.sN, nm)) { return nm }   // struct constructor
   return "?"
 }
 fun fieldTag(lo: Lo, a: FExpr, f: String): String {
   val at = tagOf(lo, a)
   var i = 0
-  while (i < listLen(lo.sN)) {
-    if (strEq(listGet(lo.sN, i), at)) {
-      val fns: List = listGet(lo.sFN, i)
-      val fts: List = listGet(lo.sFT, i)
+  while (i < lo.sN.len()) {
+    if (strEq(lo.sN.get(i), at)) {
+      val fns: List = lo.sFN.get(i)
+      val fts: List = lo.sFT.get(i)
       var j = 0
-      while (j < listLen(fns)) { if (strEq(listGet(fns, j), f)) { return tyTag(listGet(fts, j)) } ; j = j + 1 }
+      while (j < fns.len()) { if (strEq(fns.get(j), f)) { return tyTag(fts.get(j)) } ; j = j + 1 }
       return "?"
     }
     i = i + 1
   }
   return "?"
 }
+// Is `f` a DECLARED field of struct/class type `recvTag`? Distinguishes a real field access from a
+// property getter/setter (a bare `obj.name` where `name` is a nullary convention method, not a field).
+fun isFieldOf(lo: Lo, recvTag: String, f: String): Bool {
+  var i = 0
+  while (i < lo.sN.len()) {
+    if (strEq(lo.sN.get(i), recvTag)) {
+      val fns: List = lo.sFN.get(i)
+      var j = 0
+      while (j < fns.len()) { if (strEq(fns.get(j), f)) { return true } ; j = j + 1 }
+      return false
+    }
+    i = i + 1
+  }
+  return false
+}
 fun tagBin(lo: Lo, op: String, a: FExpr, b: FExpr): String {
   if (strEq(op,"==") || strEq(op,"!=") || strEq(op,"<") || strEq(op,">") || strEq(op,"<=") || strEq(op,">=") || strEq(op,"&&") || strEq(op,"||")) { return "Bool" }
-  if (strEq(op,"..")) { return "Range" }
+  if (strEq(op,"..") || strEq(op,"..<")) { return "Range" }
   val fl = strEq(tagOf(lo, a), "Float") || strEq(tagOf(lo, b), "Float")
   if (strEq(op,"+")) { if (fl) { return "Float" } if (strEq(tagOf(lo, a),"String") || strEq(tagOf(lo, b),"String")) { return "String" } return "Int" }
   if (fl) { return "Float" }
@@ -94,8 +109,34 @@ fun tagBin(lo: Lo, op: String, a: FExpr, b: FExpr): String {
 fun isArithOrCmp(op: String): Bool {
   return strEq(op,"+") || strEq(op,"-") || strEq(op,"*") || strEq(op,"/") || strEq(op,"<") || strEq(op,">") || strEq(op,"<=") || strEq(op,">=") || strEq(op,"==") || strEq(op,"!=")
 }
-// float arithmetic/comparison (either operand Float) -> EFBin; otherwise the integer EBin
+// operator overloading: the arithmetic operators map to trait methods (+ -> add, - -> sub, * -> mul,
+// / -> div, % -> rem). isOverloadableOp gates the desugar; opMethodName is the method name for `op`.
+fun isOverloadableOp(op: String): Bool {
+  return strEq(op,"+") || strEq(op,"-") || strEq(op,"*") || strEq(op,"/") || strEq(op,"%")
+}
+fun opMethodName(op: String): String {
+  if (strEq(op, "+")) { return "add" }
+  if (strEq(op, "-")) { return "sub" }
+  if (strEq(op, "*")) { return "mul" }
+  if (strEq(op, "/")) { return "div" }
+  return "rem"
+}
+// float arithmetic/comparison (either operand Float) -> EFBin; otherwise the integer EBin.
+// OPERATOR OVERLOADING: `a op b` desugars to the operator method when the LEFT operand's type has a
+// CONCRETE impl of it (String_add, V2_add, ...). We resolve DIRECTLY to the mangled static method with
+// both operands already-lowered as args — NOT via methodCallee (which, once `add` is a trait method,
+// would dynamic-dispatch `__dyn_Add_add` for ANY operand incl. Int -> a bad switch on a header-less Int).
+// So we guard strictly on the concrete mangled method existing (funDefined). Int/Float with no impl fall
+// through to the primitive EFBin/EBin below — zero-cost for the numeric core (self-host stays byte-identical
+// because the compiler's own sources only ever `+` integers, whose type tag is "Int", never a defined op method).
 fun lowerBin(lo: Lo, op: String, l: FExpr, r: FExpr): Expr {
+  if (isOverloadableOp(op)) {
+    val om = mangleMethod(tagOf(lo, l), opMethodName(op))
+    if (funDefined(lo, om)) {
+      val ca = list() ; ca.push(lowerExpr(lo, l)) ; ca.push(lowerExpr(lo, r))
+      return ECall(om, ca)
+    }
+  }
   if (isArithOrCmp(op) && (strEq(tagOf(lo, l), "Float") || strEq(tagOf(lo, r), "Float"))) {
     return EFBin(op, lowerExpr(lo, l), lowerExpr(lo, r))
   }
@@ -126,9 +167,36 @@ fun methodCallee(lo: Lo, recv: FExpr, m: String): String {
   // erased / unknown-typed receiver (e.g. an element pulled from a List<Shape>): if `m` is a trait method,
   // still dynamic-dispatch on the object's type-id header. Concrete + free-fn cases were handled above.
   val ti = indexOfL(lo.traitMethN, m)
-  if (ti >= 0) { return concat("__dyn_", concat(listGet(lo.traitMethT, ti), concat("_", m))) }
+  if (ti >= 0) { return concat("__dyn_", concat(lo.traitMethT.get(ti), concat("_", m))) }
   return m
 }
+// PROPERTY GETTER: a bare `obj.name` (no parens) where `name` is NOT a field resolves to the nullary
+// convention method `<Type>_name(obj)` when one is DEFINED. Mirrors methodCallee's "definite method"
+// branches (trait-typed / struct-method / builtin-nominal-method / erased-trait-method) but EXCLUDES
+// the bare-UFCS fallback: a getter fires only when a real accessor method exists, so plain field
+// access and unresolved names keep their existing lowering (this makes the feature purely additive).
+fun hasGetterMethod(lo: Lo, recv: FExpr, m: String): Bool {
+  val rt = tagOf(lo, recv)
+  if (memListL(lo.traitN, rt)) { return true }
+  val mangled = mangleMethod(rt, m)
+  if (memListL(lo.sN, rt) && funDefined(lo, mangled)) { return true }
+  if (isBuiltinNominal(rt) && funDefined(lo, mangled)) { return true }
+  if (indexOfL(lo.traitMethN, m) >= 0) { return true }
+  return false
+}
+// PROPERTY SETTER: `obj.name = v` where `name` is NOT a field resolves to the setter convention method
+// `<Type>_name_set(obj, v)` when one is DEFINED. Returns "" when there is no setter (caller keeps the
+// existing field-store path). Uses the same resolution shape as the getter, on the `<name>_set` method.
+fun setterCallee(lo: Lo, recv: FExpr, m: String): String {
+  val sm = concat(m, "_set")
+  val rt = tagOf(lo, recv)
+  if (memListL(lo.traitN, rt)) { val mgd = concat("__dyn_", concat(rt, concat("_", sm))) ; if (funDefined(lo, mgd)) { return mgd } ; return "" }
+  val mangled = mangleMethod(rt, sm)
+  if (memListL(lo.sN, rt) && funDefined(lo, mangled)) { return mangled }
+  if (isBuiltinNominal(rt) && funDefined(lo, mangled)) { return mangled }
+  return ""
+}
+fun hasSetter(lo: Lo, recv: FExpr, m: String): Bool { return strEq(setterCallee(lo, recv, m), "") == false }
 fun callRetTag(lo: Lo, callee: FExpr): String {
   return when (callee) {
     FEField(recv, m) -> funRetTag(lo, methodCallee(lo, recv, m))
@@ -168,32 +236,32 @@ fun calleeName(callee: FExpr): String {
   }
 }
 fun consFront(x: Expr, rest: List): List {
-  val out = listNew()
-  listPush(out, x)
+  val out = list()
+  out.push(x)
   var i = 0
-  while (i < listLen(rest)) { listPush(out, listGet(rest, i)) ; i = i + 1 }
+  while (i < rest.len()) { out.push(rest.get(i)) ; i = i + 1 }
   return out
 }
 
 // ---------- closures: lift lambdas + capture enclosing locals ----------
-fun one(x: String): List { val l = listNew() ; listPush(l, x) ; return l }
+fun one(x: String): List { val l = list() ; l.push(x) ; return l }
 fun extendB(bound: List, names: List): List {
-  val nb = listNew()
+  val nb = list()
   var i = 0
-  while (i < listLen(bound)) { listPush(nb, listGet(bound, i)) ; i = i + 1 }
+  while (i < bound.len()) { nb.push(bound.get(i)) ; i = i + 1 }
   var j = 0
-  while (j < listLen(names)) { listPush(nb, listGet(names, j)) ; j = j + 1 }
+  while (j < names.len()) { nb.push(names.get(j)) ; j = j + 1 }
   return nb
 }
 fun splitLamNames(s: String): List {
-  val out = listNew()
+  val out = list()
   if (strEq(s, "")) { return out }
   val n = strLen(s) ; var i = 0 ; var start = 0
   while (i <= n) {
     if (i == n || charAt(s, i) == 44) {
       var e = start ; while (e < i && charAt(s, e) == 32) { e = e + 1 }
       var stop = e ; while (stop < i && charAt(s, stop) != 58) { stop = stop + 1 }
-      listPush(out, substr(s, e, stop - e)) ; start = i + 1
+      out.push(substr(s, e, stop - e)) ; start = i + 1
     }
     i = i + 1
   }
@@ -201,28 +269,28 @@ fun splitLamNames(s: String): List {
 }
 fun patVarsInto(pat: FPat, out: List): Int {
   when (pat) {
-    FPBind(s) -> listPush(out, s)
-    FPCtor(pth, subs) -> { var i = 0 ; while (i < listLen(subs)) { patVarsInto(listGet(subs, i), out) ; i = i + 1 } 0 }
-    FPRecord(pth, flds, hasRest) -> { var i = 0 ; while (i < listLen(flds)) { val f: FRFld = listGet(flds, i) ; if (f.hasPat == 1) { patVarsInto(f.pat, out) } else { listPush(out, f.name) } ; i = i + 1 } 0 }
+    FPBind(s) -> out.push(s)
+    FPCtor(pth, subs) -> { var i = 0 ; while (i < subs.len()) { patVarsInto(subs.get(i), out) ; i = i + 1 } 0 }
+    FPRecord(pth, flds, hasRest) -> { var i = 0 ; while (i < flds.len()) { val f: FRFld = flds.get(i) ; if (f.hasPat == 1) { patVarsInto(f.pat, out) } else { out.push(f.name) } ; i = i + 1 } 0 }
     else -> 0
   }
   return 0
 }
-fun patVars(pat: FPat): List { val out = listNew() ; patVarsInto(pat, out) ; return out }
+fun patVars(pat: FPat): List { val out = list() ; patVarsInto(pat, out) ; return out }
 // collect free variables of `e` (referenced idents that are enclosing locals, not bound within `e`)
 fun fvArgs(lo: Lo, bound: List, args: List, out: List): Int {
   var i = 0
-  while (i < listLen(args)) { val a: FArg = listGet(args, i) ; fvExpr(lo, bound, a.expr, out) ; i = i + 1 }
+  while (i < args.len()) { val a: FArg = args.get(i) ; fvExpr(lo, bound, a.expr, out) ; i = i + 1 }
   return 0
 }
 fun fvList(lo: Lo, bound: List, es: List, out: List): Int {
   var i = 0
-  while (i < listLen(es)) { fvExpr(lo, bound, listGet(es, i), out) ; i = i + 1 }
+  while (i < es.len()) { fvExpr(lo, bound, es.get(i), out) ; i = i + 1 }
   return 0
 }
 fun fvInterp(lo: Lo, bound: List, parts: List, out: List): Int {
   var i = 0
-  while (i < listLen(parts)) { val pt: FIPart = listGet(parts, i) ; when (pt) { FIExpr(e) -> fvExpr(lo, bound, e, out) ; else -> 0 } ; i = i + 1 }
+  while (i < parts.len()) { val pt: FIPart = parts.get(i) ; when (pt) { FIExpr(e) -> fvExpr(lo, bound, e, out) ; else -> 0 } ; i = i + 1 }
   return 0
 }
 fun fvStmt(lo: Lo, bound: List, s: FStmt, out: List): List {
@@ -239,17 +307,17 @@ fun fvStmt(lo: Lo, bound: List, s: FStmt, out: List): List {
 fun fvBlock(lo: Lo, bound: List, stmts: List, res: FExpr, out: List): Int {
   var b = bound
   var i = 0
-  while (i < listLen(stmts)) { b = fvStmt(lo, b, listGet(stmts, i), out) ; i = i + 1 }
+  while (i < stmts.len()) { b = fvStmt(lo, b, stmts.get(i), out) ; i = i + 1 }
   fvExpr(lo, b, res, out)
   return 0
 }
 fun fvWhen(lo: Lo, bound: List, hasSubj: Int, subj: FExpr, arms: List, out: List): Int {
   if (hasSubj == 1) { fvExpr(lo, bound, subj, out) }
   var i = 0
-  while (i < listLen(arms)) {
-    val a: FArm = listGet(arms, i)
+  while (i < arms.len()) {
+    val a: FArm = arms.get(i)
     var b = bound
-    if (a.kind == 2) { var j = 0 ; while (j < listLen(a.pats)) { b = extendB(b, patVars(listGet(a.pats, j))) ; j = j + 1 } }
+    if (a.kind == 2) { var j = 0 ; while (j < a.pats.len()) { b = extendB(b, patVars(a.pats.get(j))) ; j = j + 1 } }
     else { if (a.kind == 0) { fvExpr(lo, b, a.lhs, out) } }
     if (isNoResF(a.guard) == false) { fvExpr(lo, b, a.guard, out) }
     fvExpr(lo, b, a.body, out)
@@ -259,8 +327,8 @@ fun fvWhen(lo: Lo, bound: List, hasSubj: Int, subj: FExpr, arms: List, out: List
 }
 fun fvExpr(lo: Lo, bound: List, e: FExpr, out: List): Int {
   when (e) {
-    FEIdent(nm) -> { if (memListL(bound, nm) == false && memListL(lo.locN, nm) && memListL(out, nm) == false) { listPush(out, nm) } 0 }
-    FEThis -> { if (memListL(bound, "this") == false && memListL(lo.locN, "this") && memListL(out, "this") == false) { listPush(out, "this") } 0 }
+    FEIdent(nm) -> { if (memListL(bound, nm) == false && memListL(lo.locN, nm) && memListL(out, nm) == false) { out.push(nm) } 0 }
+    FEThis -> { if (memListL(bound, "this") == false && memListL(lo.locN, "this") && memListL(out, "this") == false) { out.push("this") } 0 }
     FEUnary(op, x) -> fvExpr(lo, bound, x, out)
     FEBin(op, a, b) -> { fvExpr(lo, bound, a, out) ; fvExpr(lo, bound, b, out) }
     FEField(a, f) -> fvExpr(lo, bound, a, out)
@@ -285,49 +353,49 @@ fun fvExpr(lo: Lo, bound: List, e: FExpr, out: List): Int {
 // { params -> body }  ->  lift a top-level __lamN(env, params) that reads captures from env;
 // the site evaluates to a closure __closNew("__lamN", cap0, cap1, ...).
 fun lowerLambda(lo: Lo, params: String, body: FExpr): Expr {
-  val id: Int = listGet(lo.gctr, 0) ; listSet(lo.gctr, 0, id + 1)
+  val id: Int = lo.gctr.get(0) ; lo.gctr.set(0, id + 1)
   val name = concat("__lam", intToStr(id))
   val pnames = splitLamNames(params)
-  val bound = listNew()
-  var pi = 0 ; while (pi < listLen(pnames)) { listPush(bound, listGet(pnames, pi)) ; pi = pi + 1 }
-  val caps = listNew()
+  val bound = list()
+  var pi = 0 ; while (pi < pnames.len()) { bound.push(pnames.get(pi)) ; pi = pi + 1 }
+  val caps = list()
   fvExpr(lo, bound, body, caps)
   // lifted function: params = env + lambda params; body loads captures then runs
-  val lnames = listNew() ; listPush(lnames, "env")
-  val ltys = listNew() ; listPush(ltys, "?")
-  var qi = 0 ; while (qi < listLen(pnames)) { listPush(lnames, listGet(pnames, qi)) ; listPush(ltys, "?") ; qi = qi + 1 }
-  val lctr = listNew() ; listPush(lctr, 0)
-  val llo = Lo(lctr, listNew(), listNew(), lo.fN, lo.fR, lo.sN, lo.sFN, lo.sFT, lo.lifted, lo.gctr, lo.classN, listNew(), lo.traitN, lo.constN, lo.constV, lo.cfuncs, lo.traitMethN, lo.traitMethT, lo.pmN, lo.pmM)
+  val lnames = list() ; lnames.push("env")
+  val ltys = list() ; ltys.push("?")
+  var qi = 0 ; while (qi < pnames.len()) { lnames.push(pnames.get(qi)) ; ltys.push("?") ; qi = qi + 1 }
+  val lctr = list() ; lctr.push(0)
+  val llo = Lo(lctr, list(), list(), lo.fN, lo.fR, lo.sN, lo.sFN, lo.sFT, lo.lifted, lo.gctr, lo.classN, list(), lo.traitN, lo.constN, lo.constV, lo.cfuncs, lo.traitMethN, lo.traitMethT, lo.pmN, lo.pmM, lo.variantN, lo.variantTys)
   bindLoc(llo, "env", "?")
-  var ri = 0 ; while (ri < listLen(pnames)) { bindLoc(llo, listGet(pnames, ri), "?") ; ri = ri + 1 }
-  val lstmts = listNew()
+  var ri = 0 ; while (ri < pnames.len()) { bindLoc(llo, pnames.get(ri), "?") ; ri = ri + 1 }
+  val lstmts = list()
   var ci = 0
-  while (ci < listLen(caps)) {
-    val cn: String = listGet(caps, ci)
+  while (ci < caps.len()) {
+    val cn: String = caps.get(ci)
     bindLoc(llo, cn, localTag(lo, cn))
-    val ga = listNew() ; listPush(ga, EIdent("env")) ; listPush(ga, EInt(intToStr(ci)))
-    listPush(lstmts, SLet(cn, ECall("__closGet", ga)))
+    val ga = list() ; ga.push(EIdent("env")) ; ga.push(EInt(intToStr(ci)))
+    lstmts.push(SLet(cn, ECall("__closGet", ga)))
     ci = ci + 1
   }
   val lbody = lowerExpr(llo, body)
-  listPush(lo.lifted, Func(name, lnames, ltys, EBlock(lstmts, lbody)))
+  lo.lifted.push(Func(name, lnames, ltys, EBlock(lstmts, lbody)))
   // closure value: __closNew("__lamN", cap0, cap1, ...)
-  val cargs = listNew() ; listPush(cargs, EStr(name))
-  var di = 0 ; while (di < listLen(caps)) { listPush(cargs, EIdent(listGet(caps, di))) ; di = di + 1 }
+  val cargs = list() ; cargs.push(EStr(name))
+  var di = 0 ; while (di < caps.len()) { cargs.push(EIdent(caps.get(di))) ; di = di + 1 }
   return ECall("__closNew", cargs)
 }
 fun closCall(lo: Lo, envE: Expr, args: List): Expr { return ECall("__closCall", consFront(envE, lowerArgs(lo, args))) }
 fun lowerArgs(lo: Lo, args: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(args)) { val a: FArg = listGet(args, i) ; listPush(out, lowerExpr(lo, a.expr)) ; i = i + 1 }
+  while (i < args.len()) { val a: FArg = args.get(i) ; out.push(lowerExpr(lo, a.expr)) ; i = i + 1 }
   return out
 }
-fun argExprAt(args: List, i: Int): FExpr { val a: FArg = listGet(args, i) ; return a.expr }
+fun argExprAt(args: List, i: Int): FExpr { val a: FArg = args.get(i) ; return a.expr }
 // true iff the call has exactly one Float argument. NOTE: `&&` is NOT short-circuit here (bitwise), so
 // this MUST guard the length internally before touching args[0] — else a zero-arg call reads out of bounds.
 fun oneFloatArg(lo: Lo, args: List): Bool {
-  if (listLen(args) != 1) { return false }
+  if (args.len() != 1) { return false }
   return strEq(tagOf(lo, argExprAt(args, 0)), "Float")
 }
 // A bare ident that is a LOCAL is a closure value -> indirect call; otherwise a direct call to a
@@ -361,18 +429,18 @@ fun cevalBin(op: String, a: Int, b: Int): Int {
 // if, while, return, and CALLS to pure integer functions (incl. recursion), via the function table `funcs`.
 // Pure-integer only: no heap (lists/strings/structs), no side effects. `names`/`vals` are the variable env.
 fun ceVarGet(names: List, vals: List, nm: String): Int {
-  var i = listLen(names) - 1
-  while (i >= 0) { if (strEq(listGet(names, i), nm)) { return listGet(vals, i) } ; i = i - 1 }
+  var i = names.len() - 1
+  while (i >= 0) { if (strEq(names.get(i), nm)) { return vals.get(i) } ; i = i - 1 }
   return 0
 }
 fun ceVarSet(names: List, vals: List, nm: String, v: Int): Int {
-  var i = listLen(names) - 1
-  while (i >= 0) { if (strEq(listGet(names, i), nm)) { listSet(vals, i, v) ; return 0 } ; i = i - 1 }
+  var i = names.len() - 1
+  while (i >= 0) { if (strEq(names.get(i), nm)) { vals.set(i, v) ; return 0 } ; i = i - 1 }
   return 0
 }
 fun ceFindFunc(funcs: List, nm: String): Int {
   var i = 0
-  while (i < listLen(funcs)) { val f: FFunc = listGet(funcs, i) ; if (strEq(f.name, nm)) { return i } ; i = i + 1 }
+  while (i < funcs.len()) { val f: FFunc = funcs.get(i) ; if (strEq(f.name, nm)) { return i } ; i = i + 1 }
   return 0 - 1
 }
 // The compile-time interpreter carries REAL Kite heap values (strings, lists) as machine words through
@@ -380,9 +448,9 @@ fun ceFindFunc(funcs: List, nm: String): Int {
 // lists (build a list in a loop, concat strings, ...) and reduce an Int-valued result. FEStr yields the string
 // word; FEList builds a real list by evaluating each element; the string/list builtins run for real.
 fun ceBuildList(names: List, vals: List, funcs: List, es: List): Int {
-  val l = listNew()
+  val l = list()
   var i = 0
-  while (i < listLen(es)) { listPush(l, ceEval(names, vals, funcs, listGet(es, i))) ; i = i + 1 }
+  while (i < es.len()) { l.push(ceEval(names, vals, funcs, es.get(i))) ; i = i + 1 }
   return l
 }
 fun ceEval(names: List, vals: List, funcs: List, e: FExpr): Int {
@@ -401,37 +469,37 @@ fun ceEval(names: List, vals: List, funcs: List, e: FExpr): Int {
     else -> { lowFail("comptime: unsupported expression") ; 0 }
   }
 }
-fun ceArg(names: List, vals: List, funcs: List, args: List, i: Int): Int { val a: FArg = listGet(args, i) ; return ceEval(names, vals, funcs, a.expr) }
+fun ceArg(names: List, vals: List, funcs: List, args: List, i: Int): Int { val a: FArg = args.get(i) ; return ceEval(names, vals, funcs, a.expr) }
 fun ceCall(names: List, vals: List, funcs: List, callee: FExpr, args: List): Int {
   val fn = calleeName(callee)
   // compile-time builtins over strings / lists — run the REAL builtins on evaluated (possibly computed) args
-  if (strEq(fn, "strLen") && listLen(args) == 1) { return strLen(ceArg(names, vals, funcs, args, 0)) }
-  if (strEq(fn, "charAt") && listLen(args) == 2) { return charAt(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1)) }
-  if (strEq(fn, "substr") && listLen(args) == 3) { return substr(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1), ceArg(names, vals, funcs, args, 2)) }
-  if (strEq(fn, "concat") && listLen(args) == 2) { return concat(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1)) }
-  if (strEq(fn, "intToStr") && listLen(args) == 1) { return intToStr(ceArg(names, vals, funcs, args, 0)) }
-  if (strEq(fn, "listNew") && listLen(args) == 0) { return listNew() }
-  if (strEq(fn, "listPush") && listLen(args) == 2) { return listPush(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1)) }
-  if (strEq(fn, "listGet") && listLen(args) == 2) { return listGet(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1)) }
-  if (strEq(fn, "listSet") && listLen(args) == 3) { return listSet(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1), ceArg(names, vals, funcs, args, 2)) }
-  if (strEq(fn, "listLen") && listLen(args) == 1) { return listLen(ceArg(names, vals, funcs, args, 0)) }
+  if (strEq(fn, "strLen") && args.len() == 1) { return strLen(ceArg(names, vals, funcs, args, 0)) }
+  if (strEq(fn, "charAt") && args.len() == 2) { return charAt(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1)) }
+  if (strEq(fn, "substr") && args.len() == 3) { return substr(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1), ceArg(names, vals, funcs, args, 2)) }
+  if (strEq(fn, "concat") && args.len() == 2) { return concat(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1)) }
+  if (strEq(fn, "intToStr") && args.len() == 1) { return intToStr(ceArg(names, vals, funcs, args, 0)) }
+  if (strEq(fn, "listNew") && args.len() == 0) { return list() }
+  if (strEq(fn, "listPush") && args.len() == 2) { return listPush(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1)) }
+  if (strEq(fn, "listGet") && args.len() == 2) { return listGet(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1)) }
+  if (strEq(fn, "listSet") && args.len() == 3) { return listSet(ceArg(names, vals, funcs, args, 0), ceArg(names, vals, funcs, args, 1), ceArg(names, vals, funcs, args, 2)) }
+  if (strEq(fn, "listLen") && args.len() == 1) { return listLen(ceArg(names, vals, funcs, args, 0)) }
   val idx = ceFindFunc(funcs, fn)
   if (idx < 0) { return 0 }
-  val fd: FFunc = listGet(funcs, idx)
-  val pn = listNew() ; val pv = listNew()
+  val fd: FFunc = funcs.get(idx)
+  val pn = list() ; val pv = list()
   var i = 0
-  while (i < listLen(fd.params)) {
-    val pp: FParam = listGet(fd.params, i) ; val av: FArg = listGet(args, i)
-    listPush(pn, pp.name) ; listPush(pv, ceEval(names, vals, funcs, av.expr)) ; i = i + 1
+  while (i < fd.params.len()) {
+    val pp: FParam = fd.params.get(i) ; val av: FArg = args.get(i)
+    pn.push(pp.name) ; pv.push(ceEval(names, vals, funcs, av.expr)) ; i = i + 1
   }
   return ceRunBody(pn, pv, funcs, fd.body)
 }
 fun ceRunBody(names: List, vals: List, funcs: List, body: FExpr): Int {
   return when (body) {
     FEBlock(stmts, res) -> {
-      val ret = listNew() ; listPush(ret, 0) ; listPush(ret, 0)   // [returned?, value]
+      val ret = list() ; ret.push(0) ; ret.push(0)   // [returned?, value]
       ceExec(names, vals, funcs, stmts, ret)
-      if (listGet(ret, 0) == 1) { listGet(ret, 1) } else { if (isNoResF(res)) { 0 } else { ceEval(names, vals, funcs, res) } }
+      if (ret.get(0) == 1) { ret.get(1) } else { if (isNoResF(res)) { 0 } else { ceEval(names, vals, funcs, res) } }
     }
     else -> ceEval(names, vals, funcs, body)
   }
@@ -441,20 +509,20 @@ fun ceRunBody(names: List, vals: List, funcs: List, body: FExpr): Int {
 fun ceExecExpr(names: List, vals: List, funcs: List, e: FExpr, ret: List): Int {
   when (e) {
     FEIf(c, t, el) -> { if (ceEval(names, vals, funcs, c) != 0) { ceExecExpr(names, vals, funcs, t, ret) } else { ceExecExpr(names, vals, funcs, el, ret) } }
-    FEBlock(stmts, res) -> { ceExec(names, vals, funcs, stmts, ret) ; if (isNoResF(res) == false && listGet(ret, 0) == 0) { ceExecExpr(names, vals, funcs, res, ret) } ; 0 }
-    FERet(x) -> { listSet(ret, 1, ceEval(names, vals, funcs, x)) ; listSet(ret, 0, 1) ; 0 }
+    FEBlock(stmts, res) -> { ceExec(names, vals, funcs, stmts, ret) ; if (isNoResF(res) == false && ret.get(0) == 0) { ceExecExpr(names, vals, funcs, res, ret) } ; 0 }
+    FERet(x) -> { ret.set(1, ceEval(names, vals, funcs, x)) ; ret.set(0, 1) ; 0 }
     else -> { ceEval(names, vals, funcs, e) ; 0 }
   }
   return 0
 }
 fun ceExec(names: List, vals: List, funcs: List, stmts: List, ret: List): Int {
   var i = 0
-  while (i < listLen(stmts) && listGet(ret, 0) == 0) {
-    val s: FStmt = listGet(stmts, i)
+  while (i < stmts.len() && ret.get(0) == 0) {
+    val s: FStmt = stmts.get(i)
     when (s) {
-      FSLet(isVar, nm, ty, init) -> { val v = ceEval(names, vals, funcs, init) ; listPush(names, nm) ; listPush(vals, v) ; 0 }
-      FSReturnV(x) -> { listSet(ret, 1, ceEval(names, vals, funcs, x)) ; listSet(ret, 0, 1) ; 0 }
-      FSReturnU -> { listSet(ret, 0, 1) ; 0 }
+      FSLet(isVar, nm, ty, init) -> { val v = ceEval(names, vals, funcs, init) ; names.push(nm) ; vals.push(v) ; 0 }
+      FSReturnV(x) -> { ret.set(1, ceEval(names, vals, funcs, x)) ; ret.set(0, 1) ; 0 }
+      FSReturnU -> { ret.set(0, 1) ; 0 }
       FSAssign(lhs, rhs) -> { val v = ceEval(names, vals, funcs, rhs) ; ceExecAssign(names, vals, lhs, v) ; 0 }
       FSWhile(c, b) -> { ceWhile(names, vals, funcs, c, b, ret) ; 0 }
       FSExprS(x) -> { ceExecExpr(names, vals, funcs, x, ret) ; 0 }
@@ -469,24 +537,24 @@ fun ceExecAssign(names: List, vals: List, lhs: FExpr, v: Int): Int {
   return 0
 }
 fun ceWhile(names: List, vals: List, funcs: List, c: FExpr, body: FExpr, ret: List): Int {
-  while (ceEval(names, vals, funcs, c) != 0 && listGet(ret, 0) == 0) {
+  while (ceEval(names, vals, funcs, c) != 0 && ret.get(0) == 0) {
     ceExecExpr(names, vals, funcs, body, ret)
   }
   return 0
 }
 // top-level constant-expression eval (empty variable env)
-fun ceval(funcs: List, e: FExpr): Int { return ceEval(listNew(), listNew(), funcs, e) }
+fun ceval(funcs: List, e: FExpr): Int { return ceEval(list(), list(), funcs, e) }
 // comptime eval that seeds the env with the program's consts (so comptime(SOME_CONST + 1) works)
 fun cevalWithConsts(lo: Lo, e: FExpr): Int {
-  val en = listNew() ; val ev = listNew()
+  val en = list() ; val ev = list()
   var i = 0
-  while (i < listLen(lo.constN)) { listPush(en, listGet(lo.constN, i)) ; listPush(ev, parseIntK(listGet(lo.constV, i))) ; i = i + 1 }
+  while (i < lo.constN.len()) { en.push(lo.constN.get(i)) ; ev.push(parseIntK(lo.constV.get(i))) ; i = i + 1 }
   return ceEval(en, ev, lo.cfuncs, e)
 }
 fun paramModeAt(lo: Lo, fname: String, i: Int): String {
   var k = 0
-  while (k < listLen(lo.pmN)) {
-    if (strEq(listGet(lo.pmN, k), fname)) { val modes: List = listGet(lo.pmM, k) ; if (i < listLen(modes)) { return listGet(modes, i) } ; return "" }
+  while (k < lo.pmN.len()) {
+    if (strEq(lo.pmN.get(k), fname)) { val modes: List = lo.pmM.get(k) ; if (i < modes.len()) { return modes.get(i) } ; return "" }
     k = k + 1
   }
   return ""
@@ -523,30 +591,30 @@ fun argNeedsRelease(lo: Lo, nm: String, i: Int, e: FExpr): Bool {
 fun lowerPlainCall(lo: Lo, nm: String, args: List): Expr {
   var need = 0
   var i = 0
-  while (i < listLen(args)) { if (argNeedsRelease(lo, nm, i, argExprAt(args, i))) { need = 1 } ; i = i + 1 }
+  while (i < args.len()) { if (argNeedsRelease(lo, nm, i, argExprAt(args, i))) { need = 1 } ; i = i + 1 }
   if (need == 0) { return ECall(nm, lowerArgs(lo, args)) }
-  val stmts = listNew()
-  val callArgs = listNew()
-  val rels = listNew()
+  val stmts = list()
+  val callArgs = list()
+  val rels = list()
   var j = 0
-  while (j < listLen(args)) {
+  while (j < args.len()) {
     val ae = argExprAt(args, j)
     val t = freshName(lo, "_at")
-    listPush(stmts, SLet(t, lowerExpr(lo, ae)))
-    listPush(callArgs, EIdent(t))
-    if (argNeedsRelease(lo, nm, j, ae)) { listPush(rels, t) }
+    stmts.push(SLet(t, lowerExpr(lo, ae)))
+    callArgs.push(EIdent(t))
+    if (argNeedsRelease(lo, nm, j, ae)) { rels.push(t) }
     j = j + 1
   }
   val rn = freshName(lo, "_ar")
-  listPush(stmts, SLet(rn, ECall(nm, callArgs)))
+  stmts.push(SLet(rn, ECall(nm, callArgs)))
   var r = 0
-  while (r < listLen(rels)) { val ra = listNew() ; listPush(ra, EIdent(listGet(rels, r))) ; listPush(stmts, SExprS(ECall("__release", ra))) ; r = r + 1 }
+  while (r < rels.len()) { val ra = list() ; ra.push(EIdent(rels.get(r))) ; stmts.push(SExprS(ECall("__release", ra))) ; r = r + 1 }
   return EBlock(stmts, EIdent(rn))
 }
 fun lowerCall(lo: Lo, callee: FExpr, args: List): Expr {
   return when (callee) {
     FEIdent(nm) -> {
-      if (strEq(nm, "comptime") && listLen(args) == 1) { val fa: FArg = listGet(args, 0) ; EInt(intToStr(cevalWithConsts(lo, fa.expr))) }
+      if (strEq(nm, "comptime") && args.len() == 1) { val fa: FArg = args.get(0) ; EInt(intToStr(cevalWithConsts(lo, fa.expr))) }
       else { if ((strEq(nm, "println") || strEq(nm, "print")) && oneFloatArg(lo, args)) { ECall(concat(nm, "F"), lowerArgs(lo, args)) }
       else { if (memListL(lo.locN, nm)) { closCall(lo, EIdent(nm), args) } else { lowerPlainCall(lo, nm, args) } } }
     }
@@ -556,33 +624,36 @@ fun lowerCall(lo: Lo, callee: FExpr, args: List): Expr {
     else -> closCall(lo, lowerExpr(lo, callee), args)
   }
 }
-// [a, b, c] -> { val _lN = listNew() ; listPush(_lN, a) ; ... ; _lN }
+// [a, b, c] -> { val _l = list() ; _l.push(a) ; ... ; _l } — emits the list() constructor + the
+// List_push method (methods-only: the free listNew/listPush are being retired).
 fun lowerList(lo: Lo, es: List): Expr {
   val nm = freshName(lo, "__lst")
-  val stmts = listNew()
-  listPush(stmts, SLet(nm, ECall("listNew", listNew())))
+  val stmts = list()
+  stmts.push(SLet(nm, ECall("list", list())))
   var i = 0
-  while (i < listLen(es)) {
-    val a2 = listNew() ; listPush(a2, EIdent(nm)) ; listPush(a2, lowerExpr(lo, listGet(es, i)))
-    listPush(stmts, SExprS(ECall("listPush", a2)))
+  while (i < es.len()) {
+    val a2 = list() ; a2.push(EIdent(nm)) ; a2.push(lowerExpr(lo, es.get(i)))
+    stmts.push(SExprS(ECall("List_push", a2)))
     i = i + 1
   }
   return EBlock(stmts, EIdent(nm))
 }
-// maps are modeled as a flat alternating [k0,v0,k1,v1,...] list; these tiny lookup helpers are
-// injected (parsed from Kite source) into every program's function set.
-// [k0: v0, k1: v1] -> { val _m = listNew(); listPush(_m,k0); listPush(_m,v0); ...; _m }
+// {..} builds a REAL Map (class Map(keys, vals), lib/alloc/collections/list.kite). Construction is a
+// pure append into the two parallel word-lists — NO key comparison — so it is correct for both Int and
+// String keys (comparison only happens later at m[k]/m[k]=v via __mapGet/Set S|I). The `.keys`/`.vals`
+// field offsets resolve because `_m`'s codegen local-type is inferred as Map from mapNewM()'s return.
+// [k0: v0, k1: v1] -> { val _m = mapNewM(); listPush(_m.keys,k0); listPush(_m.vals,v0); ...; _m }
 fun lowerMap(lo: Lo, ents: List): Expr {
   val nm = freshName(lo, "__map")
-  val stmts = listNew()
-  listPush(stmts, SLet(nm, ECall("listNew", listNew())))
+  val stmts = list()
+  stmts.push(SLet(nm, ECall("mapNewM", list())))
   var i = 0
-  while (i < listLen(ents)) {
-    val en: FMapEnt = listGet(ents, i)
-    val ka = listNew() ; listPush(ka, EIdent(nm)) ; listPush(ka, lowerExpr(lo, en.k))
-    listPush(stmts, SExprS(ECall("listPush", ka)))
-    val va = listNew() ; listPush(va, EIdent(nm)) ; listPush(va, lowerExpr(lo, en.v))
-    listPush(stmts, SExprS(ECall("listPush", va)))
+  while (i < ents.len()) {
+    val en: FMapEnt = ents.get(i)
+    val ka = list() ; ka.push(EField(EIdent(nm), "keys")) ; ka.push(lowerExpr(lo, en.k))
+    stmts.push(SExprS(ECall("listPush", ka)))
+    val va = list() ; va.push(EField(EIdent(nm), "vals")) ; va.push(lowerExpr(lo, en.v))
+    stmts.push(SExprS(ECall("listPush", va)))
     i = i + 1
   }
   return EBlock(stmts, EIdent(nm))
@@ -590,7 +661,7 @@ fun lowerMap(lo: Lo, ents: List): Expr {
 // a[i] -> charAt (String) / __mapGetS|I (Map, by key type) / listGet (List/default)
 fun lowerIndex(lo: Lo, a: FExpr, ix: FExpr): Expr {
   val at = tagOf(lo, a)
-  val args = listNew() ; listPush(args, lowerExpr(lo, a)) ; listPush(args, lowerExpr(lo, ix))
+  val args = list() ; args.push(lowerExpr(lo, a)) ; args.push(lowerExpr(lo, ix))
   if (strEq(at, "String")) { return ECall("charAt", args) }
   if (strEq(at, "Map")) {
     if (strEq(tagOf(lo, ix), "String")) { return ECall("__mapGetS", args) }
@@ -601,18 +672,18 @@ fun lowerIndex(lo: Lo, a: FExpr, ix: FExpr): Expr {
 // string interpolation -> concat chain; each $expr becomes intToStr(expr) unless it is a String
 fun interpPiece(lo: Lo, e: FExpr): Expr {
   if (strEq(tagOf(lo, e), "String")) { return lowerExpr(lo, e) }
-  val a = listNew() ; listPush(a, lowerExpr(lo, e))
+  val a = list() ; a.push(lowerExpr(lo, e))
   return ECall("intToStr", a)
 }
 fun lowerInterp(lo: Lo, parts: List): Expr {
   var acc = EStr("")
   var started = 0
   var i = 0
-  while (i < listLen(parts)) {
-    val pt: FIPart = listGet(parts, i)
+  while (i < parts.len()) {
+    val pt: FIPart = parts.get(i)
     val piece = when (pt) { FILit(s) -> EStr(s) ; FIExpr(e) -> interpPiece(lo, e) ; else -> EStr("") }
     if (started == 0) { acc = piece ; started = 1 }
-    else { val ca = listNew() ; listPush(ca, acc) ; listPush(ca, piece) ; acc = ECall("concat", ca) }
+    else { val ca = list() ; ca.push(acc) ; ca.push(piece) ; acc = ECall("concat", ca) }
     i = i + 1
   }
   return acc
@@ -625,12 +696,14 @@ fun lowerExpr(lo: Lo, e: FExpr): Expr {
     FENull -> EInt("0")
     FEStr(t, r) -> EStr(t)
     FEInterp(parts, r) -> lowerInterp(lo, parts)
-    FEIdent(nm) -> { val ci = indexOfL(lo.constN, nm) ; if (ci >= 0) { EInt(listGet(lo.constV, ci)) } else { EIdent(nm) } }
+    FEIdent(nm) -> { val ci = indexOfL(lo.constN, nm) ; if (ci >= 0) { EInt(lo.constV.get(ci)) } else { EIdent(nm) } }
     FEThis -> EIdent("this")
     FEFloat(t) -> EFLit(t)
     FEUnary(op, x) -> EUnary(op, lowerExpr(lo, x))
     FEBin(op, l, r) -> lowerBin(lo, op, l, r)
-    FEField(x, nm) -> EField(lowerExpr(lo, x), nm)
+    FEField(x, nm) -> if (isFieldOf(lo, tagOf(lo, x), nm)) { EField(lowerExpr(lo, x), nm) }
+                      else { if (hasGetterMethod(lo, x, nm)) { ECall(methodCallee(lo, x, nm), consFront(lowerExpr(lo, x), list())) }
+                      else { EField(lowerExpr(lo, x), nm) } }
     FEStatic(x, nm) -> EIdent(nm)
     FECall(callee, args) -> lowerCall(lo, callee, args)
     FEIndex(a, ix) -> lowerIndex(lo, a, ix)
@@ -646,6 +719,8 @@ fun lowerExpr(lo: Lo, e: FExpr): Expr {
     FENotNull(a) -> lowerNotNull(lo, a)
     FEElvis(a, b) -> lowerElvis(lo, a, b)
     FENoRes -> ENoRes
+    FEBrk -> EBrk
+    FECont -> ECont
     else -> { lowFail("expression") ; ENoRes }
   }
 }
@@ -658,19 +733,19 @@ fun guardTemp(lo: Lo, a: FExpr, pre: String): String {
 }
 fun lowerSafe(lo: Lo, a: FExpr, f: String): Expr {
   val t = guardTemp(lo, a, "_sf")
-  val stmts = listNew() ; listPush(stmts, SLet(t, lowerExpr(lo, a)))
+  val stmts = list() ; stmts.push(SLet(t, lowerExpr(lo, a)))
   val cond = EBin("==", EIdent(t), EInt("0"))
   return EBlock(stmts, EIf(cond, EInt("0"), EField(EIdent(t), f)))
 }
 fun lowerNotNull(lo: Lo, a: FExpr): Expr {
   val t = guardTemp(lo, a, "_nn")
-  val stmts = listNew() ; listPush(stmts, SLet(t, lowerExpr(lo, a)))
+  val stmts = list() ; stmts.push(SLet(t, lowerExpr(lo, a)))
   val cond = EBin("==", EIdent(t), EInt("0"))
-  return EBlock(stmts, EIf(cond, ECall("__abort", listNew()), EIdent(t)))
+  return EBlock(stmts, EIf(cond, ECall("__abort", list()), EIdent(t)))
 }
 fun lowerElvis(lo: Lo, a: FExpr, b: FExpr): Expr {
   val t = guardTemp(lo, a, "_ev")
-  val stmts = listNew() ; listPush(stmts, SLet(t, lowerExpr(lo, a)))
+  val stmts = list() ; stmts.push(SLet(t, lowerExpr(lo, a)))
   val cond = EBin("==", EIdent(t), EInt("0"))
   return EBlock(stmts, EIf(cond, lowerExpr(lo, b), EIdent(t)))
 }
@@ -682,11 +757,11 @@ fun lowerElvis(lo: Lo, a: FExpr, b: FExpr): Expr {
 fun lowerAssignInto(lo: Lo, out: List, nm: String, rhs: FExpr): Int {
   val tmp = freshName(lo, "_rc")
   var rv = lowerExpr(lo, rhs)
-  if (isFreshCtor(lo, rhs) == false) { val a = listNew() ; listPush(a, rv) ; rv = ECall("__retain", a) }
-  listPush(out, SLet(tmp, rv))
-  val relA = listNew() ; listPush(relA, EIdent(nm))
-  listPush(out, SExprS(ECall("__release", relA)))
-  listPush(out, SAssign(nm, EIdent(tmp)))
+  if (isFreshCtor(lo, rhs) == false) { val a = list() ; a.push(rv) ; rv = ECall("__retain", a) }
+  out.push(SLet(tmp, rv))
+  val relA = list() ; relA.push(EIdent(nm))
+  out.push(SExprS(ECall("__release", relA)))
+  out.push(SAssign(nm, EIdent(tmp)))
   return 0
 }
 fun isOwnedClassAssign(lo: Lo, lhs: FExpr): Bool {
@@ -697,86 +772,91 @@ fun isOwnedClassAssign(lo: Lo, lhs: FExpr): Bool {
 // evaluated ONCE into a temp so a side-effecting `obj` isn't run twice (old-release + store).
 fun lowerFieldAssignInto(lo: Lo, out: List, obj: FExpr, f: String, rhs: FExpr): Int {
   val to = freshName(lo, "_ro")
-  listPush(out, SLet(to, lowerExpr(lo, obj)))
+  out.push(SLet(to, lowerExpr(lo, obj)))
   var rv = lowerExpr(lo, rhs)
-  if (isFreshCtor(lo, rhs) == false) { val a = listNew() ; listPush(a, rv) ; rv = ECall("__retain", a) }
+  if (isFreshCtor(lo, rhs) == false) { val a = list() ; a.push(rv) ; rv = ECall("__retain", a) }
   val tn = freshName(lo, "_rn")
-  listPush(out, SLet(tn, rv))
-  val relA = listNew() ; listPush(relA, EField(EIdent(to), f))
-  listPush(out, SExprS(ECall("__release", relA)))
-  listPush(out, SAssignF(EIdent(to), f, EIdent(tn)))
+  out.push(SLet(tn, rv))
+  val relA = list() ; relA.push(EField(EIdent(to), f))
+  out.push(SExprS(ECall("__release", relA)))
+  out.push(SAssignF(EIdent(to), f, EIdent(tn)))
   return 0
 }
 // route an assignment: owned-class var -> balanced var-reassign; class-typed field -> balanced field
 // store; everything else -> plain lowering. (The compiler is class-free, so this never fires for it.)
 fun lowerAssignStmtInto(lo: Lo, out: List, s: FStmt, lhs: FExpr, rhs: FExpr): Int {
   return when (lhs) {
-    FEIdent(nm) -> if (memListL(lo.arcOwned, nm)) { lowerAssignInto(lo, out, nm, rhs) } else { listPush(out, lowerStmt(lo, s)) ; 0 }
-    FEField(obj, f) -> if (isClassTag(lo, fieldTag(lo, obj, f))) { lowerFieldAssignInto(lo, out, obj, f, rhs) } else { listPush(out, lowerStmt(lo, s)) ; 0 }
-    else -> { listPush(out, lowerStmt(lo, s)) ; 0 }
+    FEIdent(nm) -> if (memListL(lo.arcOwned, nm)) { lowerAssignInto(lo, out, nm, rhs) } else { out.push(lowerStmt(lo, s)) ; 0 }
+    FEField(obj, f) -> if (isClassTag(lo, fieldTag(lo, obj, f))) { lowerFieldAssignInto(lo, out, obj, f, rhs) } else { out.push(lowerStmt(lo, s)) ; 0 }
+    else -> { out.push(lowerStmt(lo, s)) ; 0 }
   }
 }
 fun lowerStmtInto(lo: Lo, out: List, s: FStmt): Int {
   return when (s) {
     FSFor(v, it, b) -> lowerForInto(lo, out, v, it, b)
     FSAssign(lhs, rhs) -> lowerAssignStmtInto(lo, out, s, lhs, rhs)
-    else -> { listPush(out, lowerStmt(lo, s)) ; 0 }
+    else -> { out.push(lowerStmt(lo, s)) ; 0 }
   }
 }
 fun assignName(lhs: FExpr): String { return when (lhs) { FEIdent(nm) -> nm ; else -> "" } }
 fun lowerStmts(lo: Lo, stmts: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(stmts)) { lowerStmtInto(lo, out, listGet(stmts, i)) ; i = i + 1 }
+  while (i < stmts.len()) { lowerStmtInto(lo, out, stmts.get(i)) ; i = i + 1 }
   return out
 }
 fun lowerBodyInto(lo: Lo, out: List, body: FExpr): Int {
   return when (body) {
     FEBlock(bstmts, res) -> {
       var i = 0
-      while (i < listLen(bstmts)) { lowerStmtInto(lo, out, listGet(bstmts, i)) ; i = i + 1 }
-      if (isNoResF(res) == false) { listPush(out, SExprS(lowerExpr(lo, res))) }
+      while (i < bstmts.len()) { lowerStmtInto(lo, out, bstmts.get(i)) ; i = i + 1 }
+      if (isNoResF(res) == false) { out.push(SExprS(lowerExpr(lo, res))) }
       0
     }
-    else -> { listPush(out, SExprS(lowerExpr(lo, body))) ; 0 }
+    else -> { out.push(SExprS(lowerExpr(lo, body))) ; 0 }
   }
 }
 fun lowerForInto(lo: Lo, out: List, v: String, it: FExpr, body: FExpr): Int {
   return when (it) {
-    FEBin(op, lo2, hi) -> if (strEq(op, "..")) { lowerForRange(lo, out, v, lo2, hi, body) } else { lowerForEach(lo, out, v, it, body) }
+    FEBin(op, lo2, hi) ->
+      if (strEq(op, "..")) { lowerForRange(lo, out, v, lo2, hi, body, "<=") }
+      else { if (strEq(op, "..<")) { lowerForRange(lo, out, v, lo2, hi, body, "<") }
+      else { lowerForEach(lo, out, v, it, body) } }
     else -> lowerForEach(lo, out, v, it, body)
   }
 }
-fun lowerForRange(lo: Lo, out: List, v: String, loE: FExpr, hi: FExpr, body: FExpr): Int {
+// `for (v in a..b)` / `a..<b` -> a counted loop. cmp is "<=" for inclusive `..`, "<" for exclusive `..<`.
+// The `v = v + 1` increment is the loop STEP (emitted at the continue target), so `continue` advances v.
+fun lowerForRange(lo: Lo, out: List, v: String, loE: FExpr, hi: FExpr, body: FExpr, cmp: String): Int {
   bindLoc(lo, v, "Int")
-  val stmts = listNew()
+  val stmts = list()
   lowerBodyInto(lo, stmts, body)
-  listPush(stmts, SAssign(v, EBin("+", EIdent(v), EInt("1"))))
-  listPush(out, SLet(v, lowerExpr(lo, loE)))
-  listPush(out, SWhile(EBin("<=", EIdent(v), lowerExpr(lo, hi)), EBlock(stmts, ENoRes)))
+  val step = SAssign(v, EBin("+", EIdent(v), EInt("1")))
+  out.push(SLet(v, lowerExpr(lo, loE)))
+  out.push(SLoop(EBin(cmp, EIdent(v), lowerExpr(lo, hi)), EBlock(stmts, ENoRes), step))
   return 0
 }
 fun lowerForEach(lo: Lo, out: List, v: String, it: FExpr, body: FExpr): Int {
   bindLoc(lo, v, "?")
   val lst = freshName(lo, "__it")
   val idx = freshName(lo, "__i")
-  listPush(out, SLet(lst, lowerExpr(lo, it)))
-  listPush(out, SLet(idx, EInt("0")))
-  val ga = listNew() ; listPush(ga, EIdent(lst)) ; listPush(ga, EIdent(idx))
-  val stmts = listNew()
-  listPush(stmts, SLet(v, ECall("listGet", ga)))
+  out.push(SLet(lst, lowerExpr(lo, it)))
+  out.push(SLet(idx, EInt("0")))
+  val ga = list() ; ga.push(EIdent(lst)) ; ga.push(EIdent(idx))
+  val stmts = list()
+  stmts.push(SLet(v, ECall("listGet", ga)))
   lowerBodyInto(lo, stmts, body)
-  listPush(stmts, SAssign(idx, EBin("+", EIdent(idx), EInt("1"))))
-  val la = listNew() ; listPush(la, EIdent(lst))
-  listPush(out, SWhile(EBin("<", EIdent(idx), ECall("listLen", la)), EBlock(stmts, ENoRes)))
+  val la = list() ; la.push(EIdent(lst))
+  val step = SAssign(idx, EBin("+", EIdent(idx), EInt("1")))
+  out.push(SLoop(EBin("<", EIdent(idx), ECall("listLen", la)), EBlock(stmts, ENoRes), step))
   return 0
 }
 // index STORE `a[i] = v`, mirroring lowerIndex's load dispatch: List -> listSet, Map -> __mapSet(S/I),
 // String is immutable so it's rejected.
 fun lowerIndexStore(lo: Lo, a: FExpr, ix: FExpr, rhs: FExpr): Stmt {
   val at = tagOf(lo, a)
-  val args = listNew()
-  listPush(args, lowerExpr(lo, a)) ; listPush(args, lowerExpr(lo, ix)) ; listPush(args, lowerExpr(lo, rhs))
+  val args = list()
+  args.push(lowerExpr(lo, a)) ; args.push(lowerExpr(lo, ix)) ; args.push(lowerExpr(lo, rhs))
   if (strEq(at, "String")) { lowFail("cannot store into an immutable String index") ; return SExprS(EInt("0")) }
   if (strEq(at, "Map")) {
     if (strEq(tagOf(lo, ix), "String")) { return SExprS(ECall("__mapSetS", args)) }
@@ -784,10 +864,13 @@ fun lowerIndexStore(lo: Lo, a: FExpr, ix: FExpr, rhs: FExpr): Stmt {
   }
   return SExprS(ECall("listSet", args))
 }
+fun pairE(a: Expr, b: Expr): List { val l = list() ; l.push(a) ; l.push(b) ; return l }
 fun lowerAssign(lo: Lo, lhs: FExpr, rhs: FExpr): Stmt {
   return when (lhs) {
     FEIdent(nm) -> SAssign(nm, lowerExpr(lo, rhs))
-    FEField(b, f) -> SAssignF(lowerExpr(lo, b), f, lowerExpr(lo, rhs))
+    FEField(b, f) -> if (isFieldOf(lo, tagOf(lo, b), f)) { SAssignF(lowerExpr(lo, b), f, lowerExpr(lo, rhs)) }
+                     else { if (hasSetter(lo, b, f)) { SExprS(ECall(setterCallee(lo, b, f), pairE(lowerExpr(lo, b), lowerExpr(lo, rhs)))) }
+                     else { SAssignF(lowerExpr(lo, b), f, lowerExpr(lo, rhs)) } }
     FEIndex(a, ix) -> lowerIndexStore(lo, a, ix, rhs)
     else -> { lowFail("assignment target") ; SExprS(lowerExpr(lo, rhs)) }
   }
@@ -798,8 +881,8 @@ fun lowerLet(lo: Lo, nm: String, ty: String, init: FExpr): Stmt {
   // class ARC: a class-typed local is an owned reference. A fresh constructor already carries its
   // +1; binding an EXISTING class value (alias) takes a new co-ownership, so retain it.
   if (isClassTag(lo, tag)) {
-    listPush(lo.arcOwned, nm)
-    if (isFreshCtor(lo, init) == false) { val a = listNew() ; listPush(a, initE) ; initE = ECall("__retain", a) }
+    lo.arcOwned.push(nm)
+    if (isFreshCtor(lo, init) == false) { val a = list() ; a.push(initE) ; initE = ECall("__retain", a) }
   }
   bindLoc(lo, nm, tag)
   if (strEq(ty, "")) { return SLet(nm, initE) }
@@ -812,16 +895,16 @@ fun lowerStmt(lo: Lo, s: FStmt): Stmt {
     FSReturnU -> SReturnU
     FSExprS(x) -> SExprS(lowerExpr(lo, x))
     FSAssign(lhs, rhs) -> lowerAssign(lo, lhs, rhs)
-    FSWhile(c, b) -> SWhile(lowerExpr(lo, c), lowerExpr(lo, b))
+    FSWhile(c, b) -> SLoop(lowerExpr(lo, c), lowerExpr(lo, b), SExprS(ENoRes))   // empty step: `continue` re-tests the condition
     else -> { lowFail("statement") ; SReturnU }
   }
 }
 
 // ---------- pattern lowering ----------
 fun lowerPats(subs: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(subs)) { val s: FPat = listGet(subs, i) ; listPush(out, lowerPat(s)) ; i = i + 1 }
+  while (i < subs.len()) { val s: FPat = subs.get(i) ; out.push(lowerPat(s)) ; i = i + 1 }
   return out
 }
 fun lowerPat(p: FPat): Pat {
@@ -837,13 +920,39 @@ fun lowerPat(p: FPat): Pat {
     else -> { lowFail("pattern") ; PWild }
   }
 }
+// payload types declared for an enum constructor (e.g. JArr -> ["List"]); empty if unknown.
+fun ctorPayloadTys(lo: Lo, ctorName: String): List {
+  var i = 0
+  while (i < lo.variantN.len()) { if (strEq(lo.variantN.get(i), ctorName)) { return lo.variantTys.get(i) } ; i = i + 1 }
+  return list()
+}
+// bind a single pattern variable with a known type (a leaf FPBind); recurse for a nested constructor.
+fun bindPatVarTyped(lo: Lo, pat: FPat, ty: String): Int {
+  when (pat) {
+    FPBind(s) -> bindLoc(lo, s, ty)
+    else -> bindPatVars(lo, pat)
+  }
+  return 0
+}
+// Bind the variables a pattern introduces, tagging each with its STATIC type so method dispatch on a
+// destructured payload works (e.g. `when (j) { JArr(xs) -> xs.len() }` mangles to List_len, not a bare
+// unresolved `len`). Constructor payload types come from the enum's variant table (ctorPayloadTys).
 fun bindPatVars(lo: Lo, pat: FPat): Int {
   when (pat) {
     FPBind(s) -> bindLoc(lo, s, "?")
-    FPCtor(pth, subs) -> { var i = 0 ; while (i < listLen(subs)) { bindPatVars(lo, listGet(subs, i)) ; i = i + 1 } ; 0 }
+    FPCtor(pth, subs) -> {
+      val ptys = ctorPayloadTys(lo, pth)
+      var i = 0
+      while (i < subs.len()) {
+        val ty = if (i < ptys.len()) { tyTag(ptys.get(i)) } else { "?" }
+        bindPatVarTyped(lo, subs.get(i), ty)
+        i = i + 1
+      }
+      0
+    }
     FPRecord(pth, flds, hasRest) -> {
       var i = 0
-      while (i < listLen(flds)) { val f: FRFld = listGet(flds, i) ; if (f.hasPat == 1) { bindPatVars(lo, f.pat) } else { bindLoc(lo, f.name, "?") } ; i = i + 1 }
+      while (i < flds.len()) { val f: FRFld = flds.get(i) ; if (f.hasPat == 1) { bindPatVars(lo, f.pat) } else { bindLoc(lo, f.name, "?") } ; i = i + 1 }
       0
     }
     else -> 0
@@ -853,31 +962,31 @@ fun bindPatVars(lo: Lo, pat: FPat): Int {
 fun lowerArm(lo: Lo, a: FArm): Arm {
   if (a.kind == 1) { return Arm(1, PWild, lowerExpr(lo, a.body)) }
   if (a.kind == 0) { lowFail("subjectless when arm") ; return Arm(1, PWild, lowerExpr(lo, a.body)) }
-  val first: FPat = listGet(a.pats, 0)
+  val first: FPat = a.pats.get(0)
   bindPatVars(lo, first)
   return Arm(0, lowerPat(first), lowerExpr(lo, a.body))
 }
 fun lowerArms(lo: Lo, arms: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(arms)) { val a: FArm = listGet(arms, i) ; listPush(out, lowerArm(lo, a)) ; i = i + 1 }
+  while (i < arms.len()) { val a: FArm = arms.get(i) ; out.push(lowerArm(lo, a)) ; i = i + 1 }
   return out
 }
 
 // ---------- declaration collection (2-phase) ----------
 fun collectStruct(td: FTDecl, structN: List, structF: List, structFT: List): Int {
-  val fields = listNew()
-  val ftys = listNew()
+  val fields = list()
+  val ftys = list()
   var i = 0
-  while (i < listLen(td.fields)) { val f: FFld = listGet(td.fields, i) ; listPush(fields, f.name) ; listPush(ftys, f.ty) ; i = i + 1 }
-  listPush(structN, td.name) ; listPush(structF, fields) ; listPush(structFT, ftys)
+  while (i < td.fields.len()) { val f: FFld = td.fields.get(i) ; fields.push(f.name) ; ftys.push(f.ty) ; i = i + 1 }
+  structN.push(td.name) ; structF.push(fields) ; structFT.push(ftys)
   return 0
 }
 fun collectMethodSigs(td: FTDecl, pfuns: List, fN: List, fR: List): Int {
   var i = 0
-  while (i < listLen(td.methods)) {
-    val m: FFunc = listGet(td.methods, i)
-    listPush(pfuns, PFun(td.name, m)) ; listPush(fN, mangleMethod(td.name, m.name)) ; listPush(fR, m.ret)
+  while (i < td.methods.len()) {
+    val m: FFunc = td.methods.get(i)
+    pfuns.push(PFun(td.name, m)) ; fN.push(mangleMethod(td.name, m.name)) ; fR.push(m.ret)
     i = i + 1
   }
   return 0
@@ -886,17 +995,17 @@ fun collectMethodSigs(td: FTDecl, pfuns: List, fN: List, fR: List): Int {
 // routine calls it when the last reference drops (see codegen buildRelRoutine / hasDeinit).
 fun collectDeinit(td: FTDecl, pfuns: List, fN: List, fR: List): Int {
   if (isNoResF(td.dtor)) { return 0 }
-  val df = FFunc(listNew(), "deinit", "", "self", listNew(), "Int", "", td.dtor)
-  listPush(pfuns, PFun(td.name, df)) ; listPush(fN, mangleMethod(td.name, "deinit")) ; listPush(fR, "Int")
+  val df = FFunc(list(), "deinit", "", "self", list(), "Int", "", td.dtor)
+  pfuns.push(PFun(td.name, df)) ; fN.push(mangleMethod(td.name, "deinit")) ; fR.push("Int")
   return 0
 }
 // impl-block methods (trait impls or inherent impls) register exactly like struct-body methods,
 // owned by the `for` type. traitName is only a contract marker — static dispatch needs only the type.
 fun collectImplMethods(im: FImplDecl, pfuns: List, fN: List, fR: List): Int {
   var i = 0
-  while (i < listLen(im.methods)) {
-    val m: FFunc = listGet(im.methods, i)
-    listPush(pfuns, PFun(im.forTy, m)) ; listPush(fN, mangleMethod(im.forTy, m.name)) ; listPush(fR, m.ret)
+  while (i < im.methods.len()) {
+    val m: FFunc = im.methods.get(i)
+    pfuns.push(PFun(im.forTy, m)) ; fN.push(mangleMethod(im.forTy, m.name)) ; fR.push(m.ret)
     i = i + 1
   }
   return 0
@@ -904,9 +1013,9 @@ fun collectImplMethods(im: FImplDecl, pfuns: List, fN: List, fR: List): Int {
 fun collectEnum(ed: FEDecl, variantN: List, variantTag: List, variantTys: List): Int {
   var tag = 0
   var i = 0
-  while (i < listLen(ed.variants)) {
-    val v: FVariant = listGet(ed.variants, i)
-    listPush(variantN, v.name) ; listPush(variantTag, tag) ; listPush(variantTys, v.tys) ; tag = tag + 1
+  while (i < ed.variants.len()) {
+    val v: FVariant = ed.variants.get(i)
+    variantN.push(v.name) ; variantTag.push(tag) ; variantTys.push(v.tys) ; tag = tag + 1
     i = i + 1
   }
   return 0
@@ -919,7 +1028,13 @@ fun collectEnum(ed: FEDecl, variantN: List, variantTag: List, variantTys: List):
 // owned class locals are released at scope exit; a returned local transfers ownership (not released).
 // v1 limitation: only fall-through + TOP-LEVEL return statements are cleaned up (a return nested inside
 // if/when leaks its owned locals — safe, never a double-free). `var` reassignment isn't balanced yet.
-fun isClassTag(lo: Lo, t: String): Bool { return memListL(lo.classN, t) }
+// A class gets automatic retain/release, but the built-in container nominals (List/Map) are EXEMPT:
+// they are word-lists whose elements are type-erased Int words, so listPush can't retain a class
+// element, and the compiler stores lists-inside-lists (structF/funP/variantTys) whose inner list a
+// naive release would free while the outer still holds the raw pointer (UAF). So List/Map stay
+// leak-managed exactly as when they were opaque builtins — declaring `class List` only gives them a
+// visible layout + methods, never ARC. Real user classes are unaffected.
+fun isClassTag(lo: Lo, t: String): Bool { return memListL(lo.classN, t) && (isBuiltinNominal(t) == false) }
 fun isCtorCallee(lo: Lo, callee: FExpr): Bool {
   return when (callee) { FEIdent(nm) -> memListL(lo.sN, nm) ; else -> false }
 }
@@ -928,18 +1043,18 @@ fun isFreshCtor(lo: Lo, e: FExpr): Bool {
 }
 fun arcReleaseInto(out: List, cls: List, exceptNm: String): Int {
   var i = 0
-  while (i < listLen(cls)) {
-    val c: String = listGet(cls, i)
-    if (strEq(c, exceptNm) == false) { val a = listNew() ; listPush(a, EIdent(c)) ; listPush(out, SExprS(ECall("__release", a))) }
+  while (i < cls.len()) {
+    val c: String = cls.get(i)
+    if (strEq(c, exceptNm) == false) { val a = list() ; a.push(EIdent(c)) ; out.push(SExprS(ECall("__release", a))) }
     i = i + 1
   }
   return 0
 }
 fun arcRetName(e: Expr): String { return when (e) { EIdent(n) -> n ; else -> "" } }
-fun arcRelList(cls: List, exceptNm: String): List { val out = listNew() ; arcReleaseInto(out, cls, exceptNm) ; return out }
+fun arcRelList(cls: List, exceptNm: String): List { val out = list() ; arcReleaseInto(out, cls, exceptNm) ; return out }
 fun arcZeroInto(out: List, cls: List): Int {
   var i = 0
-  while (i < listLen(cls)) { listPush(out, SAssign(listGet(cls, i), EInt("0"))) ; i = i + 1 }
+  while (i < cls.len()) { out.push(SAssign(cls.get(i), EInt("0"))) ; i = i + 1 }
   return 0
 }
 // recursive rewrite: release owned class locals before EVERY return (top-level + nested in if/when/blocks).
@@ -950,13 +1065,13 @@ fun arcRet(lo: Lo, cls: List, v: Expr): Expr {
   val rn = arcRetName(v)
   if (memListL(cls, rn)) { return EBlock(arcRelList(cls, rn), v) }
   val t = freshName(lo, "_ar")
-  val ss = listNew() ; listPush(ss, SLet(t, v)) ; arcReleaseInto(ss, cls, "")
+  val ss = list() ; ss.push(SLet(t, v)) ; arcReleaseInto(ss, cls, "")
   return EBlock(ss, EIdent(t))
 }
 fun arcRwArms(lo: Lo, cls: List, arms: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(arms)) { val a: Arm = listGet(arms, i) ; listPush(out, Arm(a.isElse, a.pat, arcRwExpr(lo, cls, a.body))) ; i = i + 1 }
+  while (i < arms.len()) { val a: Arm = arms.get(i) ; out.push(Arm(a.isElse, a.pat, arcRwExpr(lo, cls, a.body))) ; i = i + 1 }
   return out
 }
 fun arcRwExpr(lo: Lo, cls: List, e: Expr): Expr {
@@ -969,46 +1084,47 @@ fun arcRwExpr(lo: Lo, cls: List, e: Expr): Expr {
   }
 }
 fun arcRwStmts(lo: Lo, cls: List, stmts: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(stmts)) {
-    val s: Stmt = listGet(stmts, i)
+  while (i < stmts.len()) {
+    val s: Stmt = stmts.get(i)
     when (s) {
       SReturnV(e) -> {
         val rn = arcRetName(e)
-        if (memListL(cls, rn)) { arcReleaseInto(out, cls, rn) ; listPush(out, SReturnV(e)) }
-        else { val t = freshName(lo, "_ar") ; listPush(out, SLet(t, e)) ; arcReleaseInto(out, cls, "") ; listPush(out, SReturnV(EIdent(t))) }
+        if (memListL(cls, rn)) { arcReleaseInto(out, cls, rn) ; out.push(SReturnV(e)) }
+        else { val t = freshName(lo, "_ar") ; out.push(SLet(t, e)) ; arcReleaseInto(out, cls, "") ; out.push(SReturnV(EIdent(t))) }
       }
-      SReturnU -> { arcReleaseInto(out, cls, "") ; listPush(out, SReturnU) }
-      SExprS(e) -> { listPush(out, SExprS(arcRwExpr(lo, cls, e))) ; 0 }
-      SWhile(c, b) -> { listPush(out, SWhile(c, arcRwExpr(lo, cls, b))) ; 0 }
-      else -> { listPush(out, s) ; 0 }
+      SReturnU -> { arcReleaseInto(out, cls, "") ; out.push(SReturnU) }
+      SExprS(e) -> { out.push(SExprS(arcRwExpr(lo, cls, e))) ; 0 }
+      SWhile(c, b) -> { out.push(SWhile(c, arcRwExpr(lo, cls, b))) ; 0 }
+      SLoop(c, b, st) -> { out.push(SLoop(c, arcRwExpr(lo, cls, b), st)) ; 0 }
+      else -> { out.push(s) ; 0 }
     }
     i = i + 1
   }
   return out
 }
 fun arcInjectBody(lo: Lo, body: Expr, cls: List): Expr {
-  if (listLen(cls) == 0) { return body }
+  if (cls.len() == 0) { return body }
   return when (body) {
     EBlock(stmts, res) -> {
-      val out = listNew()
+      val out = list()
       arcZeroInto(out, cls)
       val rw = arcRwStmts(lo, cls, stmts)
       var i = 0
-      while (i < listLen(rw)) { listPush(out, listGet(rw, i)) ; i = i + 1 }
+      while (i < rw.len()) { out.push(rw.get(i)) ; i = i + 1 }
       if (isNoRes(res)) { arcReleaseInto(out, cls, "") ; EBlock(out, ENoRes) }
       else {
         val r2 = arcRwExpr(lo, cls, res)
         val rn = arcRetName(r2)
         if (memListL(cls, rn)) { arcReleaseInto(out, cls, rn) ; EBlock(out, r2) }
-        else { val t = freshName(lo, "_ar") ; listPush(out, SLet(t, r2)) ; arcReleaseInto(out, cls, "") ; EBlock(out, EIdent(t)) }
+        else { val t = freshName(lo, "_ar") ; out.push(SLet(t, r2)) ; arcReleaseInto(out, cls, "") ; EBlock(out, EIdent(t)) }
       }
     }
     else -> {
-      val out = listNew()
+      val out = list()
       arcZeroInto(out, cls)
-      val t = freshName(lo, "_ar") ; listPush(out, SLet(t, arcRwExpr(lo, cls, body))) ; arcReleaseInto(out, cls, "")
+      val t = freshName(lo, "_ar") ; out.push(SLet(t, arcRwExpr(lo, cls, body))) ; arcReleaseInto(out, cls, "")
       EBlock(out, EIdent(t))
     }
   }
@@ -1016,74 +1132,74 @@ fun arcInjectBody(lo: Lo, body: Expr, cls: List): Expr {
 // ---------- dynamic trait dispatch: generate a ___dyn_<Trait>_<m> switch over the object's type-id ----------
 fun indexOfL(l: List, n: String): Int {
   var i = 0
-  while (i < listLen(l)) { if (strEq(listGet(l, i), n)) { return i } ; i = i + 1 }
+  while (i < l.len()) { if (strEq(l.get(i), n)) { return i } ; i = i + 1 }
   return 0 - 1
 }
 fun findTraitDeclIdx(traitDecls: List, name: String): Int {
   var i = 0
-  while (i < listLen(traitDecls)) { val tr: FTraitDecl = listGet(traitDecls, i) ; if (strEq(tr.name, name)) { return i } ; i = i + 1 }
+  while (i < traitDecls.len()) { val tr: FTraitDecl = traitDecls.get(i) ; if (strEq(tr.name, name)) { return i } ; i = i + 1 }
   return 0 - 1
 }
-fun oneStmt(s: Stmt): List { val l = listNew() ; listPush(l, s) ; return l }
+fun oneStmt(s: Stmt): List { val l = list() ; l.push(s) ; return l }
 // implementations of trait `tn` (parallel implTrait/implType lists) -> the list of impl type names
 fun implTypesOf(implTrait: List, implType: List, tn: String): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(implTrait)) { if (strEq(listGet(implTrait, i), tn)) { listPush(out, listGet(implType, i)) } ; i = i + 1 }
+  while (i < implTrait.len()) { if (strEq(implTrait.get(i), tn)) { out.push(implType.get(i)) } ; i = i + 1 }
   return out
 }
 // build  fun ___dyn_T_m(obj, <method params>): Ret { val __t = __typeId(obj)
 //   if (__t == id(Ty0)) return Ty0_m(obj, params) ; ... ; return 0 }
 fun buildDispatcher(traitName: String, m: FFunc, implTypes: List, structN: List): Func {
-  val pnames = listNew() ; listPush(pnames, "obj")
-  val ptys = listNew() ; listPush(ptys, traitName)
+  val pnames = list() ; pnames.push("obj")
+  val ptys = list() ; ptys.push(traitName)
   var i = 0
-  while (i < listLen(m.params)) { val pp: FParam = listGet(m.params, i) ; listPush(pnames, pp.name) ; listPush(ptys, pp.ty) ; i = i + 1 }
-  val stmts = listNew()
-  val tArgs = listNew() ; listPush(tArgs, EIdent("obj"))
-  listPush(stmts, SLet("__t", ECall("__typeId", tArgs)))
+  while (i < m.params.len()) { val pp: FParam = m.params.get(i) ; pnames.push(pp.name) ; ptys.push(pp.ty) ; i = i + 1 }
+  val stmts = list()
+  val tArgs = list() ; tArgs.push(EIdent("obj"))
+  stmts.push(SLet("__t", ECall("__typeId", tArgs)))
   var j = 0
-  while (j < listLen(implTypes)) {
-    val ty: String = listGet(implTypes, j)
+  while (j < implTypes.len()) {
+    val ty: String = implTypes.get(j)
     val id = indexOfL(structN, ty)
-    val cargs = listNew() ; listPush(cargs, EIdent("obj"))
+    val cargs = list() ; cargs.push(EIdent("obj"))
     var k = 0
-    while (k < listLen(m.params)) { val pp: FParam = listGet(m.params, k) ; listPush(cargs, EIdent(pp.name)) ; k = k + 1 }
+    while (k < m.params.len()) { val pp: FParam = m.params.get(k) ; cargs.push(EIdent(pp.name)) ; k = k + 1 }
     val callE = ECall(mangleMethod(ty, m.name), cargs)
     val cond = EBin("==", EIdent("__t"), EInt(intToStr(id)))
-    listPush(stmts, SExprS(EIf(cond, EBlock(oneStmt(SReturnV(callE)), ENoRes), ENoRes)))
+    stmts.push(SExprS(EIf(cond, EBlock(oneStmt(SReturnV(callE)), ENoRes), ENoRes)))
     j = j + 1
   }
-  listPush(stmts, SReturnV(EInt("0")))
+  stmts.push(SReturnV(EInt("0")))
   return Func(concat("__dyn_", concat(traitName, concat("_", m.name))), pnames, ptys, EBlock(stmts, ENoRes))
 }
 // generate every trait method's dispatcher; register names/returns so calls resolve during lowering
 fun genDispatchers(traitDecls: List, implTrait: List, implType: List, structN: List, fN: List, fR: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(traitDecls)) {
-    val tr: FTraitDecl = listGet(traitDecls, i)
+  while (i < traitDecls.len()) {
+    val tr: FTraitDecl = traitDecls.get(i)
     val impls = implTypesOf(implTrait, implType, tr.name)
     var j = 0
-    while (j < listLen(tr.methods)) {
-      val m: FFunc = listGet(tr.methods, j)
+    while (j < tr.methods.len()) {
+      val m: FFunc = tr.methods.get(j)
       val d = buildDispatcher(tr.name, m, impls, structN)
-      listPush(out, d) ; listPush(fN, d.name) ; listPush(fR, m.ret)
+      out.push(d) ; fN.push(d.name) ; fR.push(m.ret)
       j = j + 1
     }
     i = i + 1
   }
   return out
 }
-fun lowerFuncFull(pf: PFun, fN: List, fR: List, sN: List, sFN: List, sFT: List, lifted: List, gctr: List, classN: List, traitN: List, constN: List, constV: List, cfuncs: List, traitMethN: List, traitMethT: List, pmN: List, pmM: List): Func {
+fun lowerFuncFull(pf: PFun, fN: List, fR: List, sN: List, sFN: List, sFT: List, lifted: List, gctr: List, classN: List, traitN: List, constN: List, constV: List, cfuncs: List, traitMethN: List, traitMethT: List, pmN: List, pmM: List, variantN: List, variantTys: List): Func {
   val fd = pf.fd
-  val ctr = listNew() ; listPush(ctr, 0)
-  val lo = Lo(ctr, listNew(), listNew(), fN, fR, sN, sFN, sFT, lifted, gctr, classN, listNew(), traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM)
-  val names = listNew()
-  val tys = listNew()
-  if (strEq(pf.owner, "") == false && strEq(fd.recv, "") == false) { listPush(names, "this") ; listPush(tys, pf.owner) ; bindLoc(lo, "this", pf.owner) }
+  val ctr = list() ; ctr.push(0)
+  val lo = Lo(ctr, list(), list(), fN, fR, sN, sFN, sFT, lifted, gctr, classN, list(), traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys)
+  val names = list()
+  val tys = list()
+  if (strEq(pf.owner, "") == false && strEq(fd.recv, "") == false) { names.push("this") ; tys.push(pf.owner) ; bindLoc(lo, "this", pf.owner) }
   var i = 0
-  while (i < listLen(fd.params)) { val pp: FParam = listGet(fd.params, i) ; val bt = stripMode(pp.ty) ; listPush(names, pp.name) ; listPush(tys, bt) ; bindLoc(lo, pp.name, tyTag(bt)) ; i = i + 1 }
+  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i) ; val bt = stripMode(pp.ty) ; names.push(pp.name) ; tys.push(bt) ; bindLoc(lo, pp.name, tyTag(bt)) ; i = i + 1 }
   val bodyE = lowerExpr(lo, fd.body)
   return Func(mangleMethod(pf.owner, fd.name), names, tys, arcInjectBody(lo, bodyE, lo.arcOwned))
 }
@@ -1107,7 +1223,7 @@ fun confIsComment(line: String): Int {
   return 0
 }
 fun preludeConfPaths(): List {
-  val out = listNew()
+  val out = list()
   val src = readFile("compiler/prelude.conf")
   val n = strLen(src)
   var i = 0
@@ -1118,7 +1234,7 @@ fun preludeConfPaths(): List {
     if (brk == 1) {
       if (confIsComment(line) == 0) {
         val p = impExtractPath(concat("import ", line))
-        if (strEq(p, "") == false) { listPush(out, p) }
+        if (strEq(p, "") == false) { out.push(p) }
       }
       line = ""
     } else { line = concat(line, substr(src, i, 1)) }
@@ -1126,15 +1242,33 @@ fun preludeConfPaths(): List {
   }
   return out
 }
-// parse the injected library helpers into the unlowered-function set (each named module = all-funcs)
-fun injectHelpers(pfuns: List, fN: List, fR: List): Int {
+// Collect ONE top-level declaration at the cursor into the sig/type tables, returning 1 if it consumed
+// a known decl or 0 if the token isn't a decl-start (caller stops). Shared by parseLower's main loop AND
+// injectHelpers, so the prelude can carry ANY declaration (class/struct/enum/trait/impl/const), not just
+// functions — this is what lets `class List` live in lib/ as a real stdlib type.
+fun collectDecl(p: P, annos: List, pfuns: List, fN: List, fR: List, structN: List, structF: List, structFT: List, classN: List, traitN: List, traitDecls: List, implTrait: List, implType: List, constN: List, constExprs: List, variantN: List, variantTag: List, variantTys: List): Int {
+  val k = pk(p)
+  if (k == 10) { val fd = parseFunc(p, annos) ; pfuns.push(PFun("", fd)) ; fN.push(fd.name) ; fR.push(fd.ret) ; return 1 }
+  if (k == 54) { val td0 = parseTypeDecl(p, annos, 0) ; collectStruct(td0, structN, structF, structFT) ; collectMethodSigs(td0, pfuns, fN, fR) ; return 1 }
+  if (k == 65) { val td1 = parseTypeDecl(p, annos, 1) ; collectStruct(td1, structN, structF, structFT) ; classN.push(td1.name) ; collectMethodSigs(td1, pfuns, fN, fR) ; collectDeinit(td1, pfuns, fN, fR) ; return 1 }
+  if (k == 55) { collectEnum(parseEnum(p, annos), variantN, variantTag, variantTys) ; return 1 }
+  if (k == 66) { val tr = parseTrait(p, annos) ; traitN.push(tr.name) ; traitDecls.push(tr) ; return 1 }
+  if (k == 67) { val im = parseImpl(p, annos) ; collectImplMethods(im, pfuns, fN, fR) ; if (strEq(im.traitName, "") == false) { implTrait.push(im.traitName) ; implType.push(im.forTy) } ; return 1 }
+  if (k == 58) { parseImport(p) ; return 1 }
+  if (k == 80) { val cd = parseConst(p) ; constN.push(cd.name) ; constExprs.push(cd.expr) ; return 1 }
+  return 0
+}
+// parse the injected library helpers (prelude modules) into the sig/type tables. A module may declare
+// types (e.g. `class List`) as well as functions; collectDecl handles every decl kind.
+fun injectHelpers(pfuns: List, fN: List, fR: List, structN: List, structF: List, structFT: List, classN: List, traitN: List, traitDecls: List, implTrait: List, implType: List, constN: List, constExprs: List, variantN: List, variantTag: List, variantTys: List): Int {
   val paths = preludeConfPaths()
   var pi = 0
-  while (pi < listLen(paths)) {
-    val hp = P(lex(readFile(listGet(paths, pi))), 0)
-    while (pk(hp) == 10) {
-      val fd = parseFunc(hp, listNew())
-      listPush(pfuns, PFun("", fd)) ; listPush(fN, fd.name) ; listPush(fR, fd.ret)
+  while (pi < paths.len()) {
+    val hp = P(lex(readFile(paths.get(pi))), 0)
+    var go = 1
+    while (go == 1) {
+      if (pk(hp) == 0) { go = 0 }
+      else { val annos = parseAnnos(hp) ; if (collectDecl(hp, annos, pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys) == 0) { go = 0 } }
     }
     pi = pi + 1
   }
@@ -1143,30 +1277,21 @@ fun injectHelpers(pfuns: List, fN: List, fR: List): Int {
 struct LR(val funcs: List, val structN: List, val structF: List, val structFT: List, val variantN: List, val variantTag: List, val variantTys: List, val funN: List, val funRet: List)
 fun parseLower(toks: List): LR {
   val p = P(toks, 0)
-  val pfuns = listNew()
-  val structN = listNew() ; val structF = listNew() ; val structFT = listNew()
-  val classN = listNew()
-  val traitN = listNew() ; val traitDecls = listNew() ; val implTrait = listNew() ; val implType = listNew()
-  val constN = listNew() ; val constExprs = listNew()
-  val variantN = listNew() ; val variantTag = listNew() ; val variantTys = listNew()
-  val fN = listNew() ; val fR = listNew()
-  injectHelpers(pfuns, fN, fR)
+  val pfuns = list()
+  val structN = list() ; val structF = list() ; val structFT = list()
+  val classN = list()
+  val traitN = list() ; val traitDecls = list() ; val implTrait = list() ; val implType = list()
+  val constN = list() ; val constExprs = list()
+  val variantN = list() ; val variantTag = list() ; val variantTys = list()
+  val fN = list() ; val fR = list()
+  injectHelpers(pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys)
   // phase 1: parse, collect signatures, keep functions unlowered
   var go = 1
   while (go == 1) {
     if (pk(p) == 0) { go = 0 }
     else {
       val annos = parseAnnos(p)
-      val k = pk(p)
-      if (k == 10) { val fd = parseFunc(p, annos) ; listPush(pfuns, PFun("", fd)) ; listPush(fN, fd.name) ; listPush(fR, fd.ret) }
-      else { if (k == 54) { val td0 = parseTypeDecl(p, annos, 0) ; collectStruct(td0, structN, structF, structFT) ; collectMethodSigs(td0, pfuns, fN, fR) }
-      else { if (k == 65) { val td1 = parseTypeDecl(p, annos, 1) ; collectStruct(td1, structN, structF, structFT) ; listPush(classN, td1.name) ; collectMethodSigs(td1, pfuns, fN, fR) ; collectDeinit(td1, pfuns, fN, fR) }
-      else { if (k == 55) { collectEnum(parseEnum(p, annos), variantN, variantTag, variantTys) }
-      else { if (k == 66) { val tr = parseTrait(p, annos) ; listPush(traitN, tr.name) ; listPush(traitDecls, tr) }
-      else { if (k == 67) { val im = parseImpl(p, annos) ; collectImplMethods(im, pfuns, fN, fR) ; if (strEq(im.traitName, "") == false) { listPush(implTrait, im.traitName) ; listPush(implType, im.forTy) } }
-      else { if (k == 58) { parseImport(p) ; 0 }
-      else { if (k == 80) { val cd = parseConst(p) ; listPush(constN, cd.name) ; listPush(constExprs, cd.expr) }
-      else { go = 0 } } } } } } } }
+      if (collectDecl(p, annos, pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys) == 0) { go = 0 }
     }
   }
   return finishLower(pfuns, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, fN, fR)
@@ -1174,23 +1299,23 @@ fun parseLower(toks: List): LR {
 // phase 2 (shared by parseLower and parseLowerModules): synthesize trait defaults, evaluate consts,
 // register trait-method + dispatcher names, then lower every collected function.
 fun finishLower(pfuns: List, structN: List, structF: List, structFT: List, classN: List, traitN: List, traitDecls: List, implTrait: List, implType: List, constN: List, constExprs: List, variantN: List, variantTag: List, variantTys: List, fN: List, fR: List): LR {
-  val constV = listNew()
+  val constV = list()
   // trait DEFAULT methods: for each `impl Trait for Type` that doesn't override a trait method carrying a
   // body, synthesize `<Type>_<method>` from that default body (bound to `this: Type`). Must run after all
   // impls are collected (so the override check is accurate) and before dispatchers/phase-2.
   var sdi = 0
-  while (sdi < listLen(implTrait)) {
-    val stn: String = listGet(implTrait, sdi)
-    val sty: String = listGet(implType, sdi)
+  while (sdi < implTrait.len()) {
+    val stn: String = implTrait.get(sdi)
+    val sty: String = implType.get(sdi)
     val tdix = findTraitDeclIdx(traitDecls, stn)
     if (tdix >= 0) {
-      val str: FTraitDecl = listGet(traitDecls, tdix)
+      val str: FTraitDecl = traitDecls.get(tdix)
       var smi = 0
-      while (smi < listLen(str.methods)) {
-        val sm: FFunc = listGet(str.methods, smi)
+      while (smi < str.methods.len()) {
+        val sm: FFunc = str.methods.get(smi)
         if (isNoResF(sm.body) == false) {
           val smn = mangleMethod(sty, sm.name)
-          if (memListL(fN, smn) == false) { listPush(pfuns, PFun(sty, sm)) ; listPush(fN, smn) ; listPush(fR, sm.ret) }
+          if (memListL(fN, smn) == false) { pfuns.push(PFun(sty, sm)) ; fN.push(smn) ; fR.push(sm.ret) }
         }
         smi = smi + 1
       }
@@ -1199,23 +1324,23 @@ fun finishLower(pfuns: List, structN: List, structF: List, structFT: List, class
   }
   // build the compile-time function table (free functions), then evaluate consts in order (a const may
   // reference earlier consts and any function) so `const N = fib(10)` and `comptime(...)` can run them.
-  val cfuncs = listNew()
+  val cfuncs = list()
   var cfi = 0
-  while (cfi < listLen(pfuns)) { val pf: PFun = listGet(pfuns, cfi) ; if (strEq(pf.owner, "")) { listPush(cfuncs, pf.fd) } ; cfi = cfi + 1 }
-  val ceEnvN = listNew() ; val ceEnvV = listNew()
+  while (cfi < pfuns.len()) { val pf: PFun = pfuns.get(cfi) ; if (strEq(pf.owner, "")) { cfuncs.push(pf.fd) } ; cfi = cfi + 1 }
+  val ceEnvN = list() ; val ceEnvV = list()
   var cei = 0
-  while (cei < listLen(constExprs)) {
-    val cv = ceEval(ceEnvN, ceEnvV, cfuncs, listGet(constExprs, cei))
-    listPush(ceEnvN, listGet(constN, cei)) ; listPush(ceEnvV, cv) ; listPush(constV, intToStr(cv))
+  while (cei < constExprs.len()) {
+    val cv = ceEval(ceEnvN, ceEnvV, cfuncs, constExprs.get(cei))
+    ceEnvN.push(constN.get(cei)) ; ceEnvV.push(cv) ; constV.push(intToStr(cv))
     cei = cei + 1
   }
   // trait-method registry (method name -> owning trait) so an erased receiver's method call can dynamic-dispatch
-  val traitMethN = listNew() ; val traitMethT = listNew()
+  val traitMethN = list() ; val traitMethT = list()
   var tmi = 0
-  while (tmi < listLen(traitDecls)) {
-    val tr: FTraitDecl = listGet(traitDecls, tmi)
+  while (tmi < traitDecls.len()) {
+    val tr: FTraitDecl = traitDecls.get(tmi)
     var tmj = 0
-    while (tmj < listLen(tr.methods)) { val tm: FFunc = listGet(tr.methods, tmj) ; listPush(traitMethN, tm.name) ; listPush(traitMethT, tr.name) ; tmj = tmj + 1 }
+    while (tmj < tr.methods.len()) { val tm: FFunc = tr.methods.get(tmj) ; traitMethN.push(tm.name) ; traitMethT.push(tr.name) ; tmj = tmj + 1 }
     tmi = tmi + 1
   }
   // trait dispatchers: generated + name-registered BEFORE phase 2 so trait-typed method calls resolve
@@ -1223,29 +1348,29 @@ fun finishLower(pfuns: List, structN: List, structF: List, structFT: List, class
   // ownership-mode table for TOP-LEVEL free functions (owner==""): name -> per-param mode list. Used by
   // lowerPlainCall to decide whether a class temp passed as an arg is BORROWED (release after) or
   // TRANSFERRED (consuming — callee owns it). Built once here; empty for the class-free compiler.
-  val pmN = listNew() ; val pmM = listNew()
+  val pmN = list() ; val pmM = list()
   var pmi = 0
-  while (pmi < listLen(pfuns)) {
-    val pf0: PFun = listGet(pfuns, pmi)
+  while (pmi < pfuns.len()) {
+    val pf0: PFun = pfuns.get(pmi)
     if (strEq(pf0.owner, "")) {
-      listPush(pmN, pf0.fd.name)
-      val modes = listNew()
+      pmN.push(pf0.fd.name)
+      val modes = list()
       var ppi = 0
-      while (ppi < listLen(pf0.fd.params)) { val pp0: FParam = listGet(pf0.fd.params, ppi) ; listPush(modes, paramMode(pp0.ty)) ; ppi = ppi + 1 }
-      listPush(pmM, modes)
+      while (ppi < pf0.fd.params.len()) { val pp0: FParam = pf0.fd.params.get(ppi) ; modes.push(paramMode(pp0.ty)) ; ppi = ppi + 1 }
+      pmM.push(modes)
     }
     pmi = pmi + 1
   }
   // phase 2: lower every function now that all signatures are known; lambdas lift into `lifted`
-  val funcs = listNew()
-  val lifted = listNew()
-  val gctr = listNew() ; listPush(gctr, 0)
+  val funcs = list()
+  val lifted = list()
+  val gctr = list() ; gctr.push(0)
   var i = 0
-  while (i < listLen(pfuns)) { val pf: PFun = listGet(pfuns, i) ; listPush(funcs, lowerFuncFull(pf, fN, fR, structN, structF, structFT, lifted, gctr, classN, traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM)) ; i = i + 1 }
+  while (i < pfuns.len()) { val pf: PFun = pfuns.get(i) ; funcs.push(lowerFuncFull(pf, fN, fR, structN, structF, structFT, lifted, gctr, classN, traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys)) ; i = i + 1 }
   var j = 0
-  while (j < listLen(lifted)) { listPush(funcs, listGet(lifted, j)) ; j = j + 1 }
+  while (j < lifted.len()) { funcs.push(lifted.get(j)) ; j = j + 1 }
   var d = 0
-  while (d < listLen(dispatchers)) { listPush(funcs, listGet(dispatchers, d)) ; d = d + 1 }
+  while (d < dispatchers.len()) { funcs.push(dispatchers.get(d)) ; d = d + 1 }
   return LR(funcs, structN, structF, structFT, variantN, variantTag, variantTys, fN, fR)
 }
 // ---------- module system: `import "path"` resolved by inlining files, with transitive dedup ----------
@@ -1302,12 +1427,17 @@ fun impExtractPath(line: String): String {
   if (strLen(path) >= 5) { if (strEq(substr(path, 0, 5), "kite/")) { path = concat("lib/", substr(path, 5, strLen(path) - 5)) } }
   return concat(path, ".kite")
 }
+// Inline a QUOTED include flat; PRESERVE a namespace (`import kite::a::b`) import line so the module
+// system can still see it downstream. This is what lets the two import kinds be MIXED in one file:
+// quoted includes get flattened here, and any remaining namespace imports route the result to the
+// module path. (Previously a namespace line was dropped, forcing an all-or-nothing choice.)
 fun impProcLine(line: String, seen: List): String {
   if (impIsImport(line) == false) { return line }
-  val path = impExtractQuoted(line)
-  if (strEq(path, "") || memListL(seen, path)) { return "" }
-  listPush(seen, path)
-  return resolveImports(readFile(path), seen)
+  val q = impExtractQuoted(line)
+  if (strEq(q, "")) { return line }                    // namespace import -> keep the line for collectModules
+  if (memListL(seen, q)) { return "" }                 // quoted include already inlined -> drop
+  seen.push(q)
+  return resolveImports(readFile(q), seen)
 }
 fun resolveImports(src: String, seen: List): String {
   var result = ""
@@ -1385,10 +1515,10 @@ fun collectModLine(line: String, seen: List, mods: List): Int {
   val path = impExtractPath(line)
   if (strEq(path, "")) { return 0 }
   if (memListL(seen, path)) { return 0 }
-  listPush(seen, path)
+  seen.push(path)
   val f = readFile(path)
   collectModImports(f, seen, mods)
-  listPush(mods, Mod(modName(path), f))
+  mods.push(Mod(modName(path), f))
   return 0
 }
 fun collectModImports(src: String, seen: List, mods: List): Int {
@@ -1405,10 +1535,10 @@ fun collectModImports(src: String, seen: List, mods: List): Int {
   return 0
 }
 fun collectModules(rawInput: String): List {
-  val mods = listNew()
-  val seen = listNew()
+  val mods = list()
+  val seen = list()
   collectModImports(rawInput, seen, mods)
-  listPush(mods, Mod("", rawInput))
+  mods.push(Mod("", rawInput))
   return mods
 }
 // ---- scope-aware reference rename (mirrors fvExpr binder tracking exactly) ----
@@ -1416,7 +1546,7 @@ fun renResolve(rc: Ren, bound: List, nm: String): String {
   if (memListL(bound, nm)) { return nm }
   if (memListL(rc.L, nm)) { return mangleMod(rc.m, nm) }
   val i = indexOfL(rc.aN, nm)
-  if (i >= 0) { return listGet(rc.aT, i) }
+  if (i >= 0) { return rc.aT.get(i) }
   return nm
 }
 fun renStatic(rc: Ren, bound: List, a: FExpr, nm: String): FExpr {
@@ -1426,65 +1556,65 @@ fun renStatic(rc: Ren, bound: List, a: FExpr, nm: String): FExpr {
   }
 }
 fun renArgs(rc: Ren, bound: List, args: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(args)) { val ar: FArg = listGet(args, i) ; listPush(out, FArg(ar.name, renExpr(rc, bound, ar.expr))) ; i = i + 1 }
+  while (i < args.len()) { val ar: FArg = args.get(i) ; out.push(FArg(ar.name, renExpr(rc, bound, ar.expr))) ; i = i + 1 }
   return out
 }
 fun renExprList(rc: Ren, bound: List, es: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(es)) { listPush(out, renExpr(rc, bound, listGet(es, i))) ; i = i + 1 }
+  while (i < es.len()) { out.push(renExpr(rc, bound, es.get(i))) ; i = i + 1 }
   return out
 }
 fun renMap(rc: Ren, bound: List, ents: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(ents)) { val en: FMapEnt = listGet(ents, i) ; listPush(out, FMapEnt(renExpr(rc, bound, en.k), renExpr(rc, bound, en.v))) ; i = i + 1 }
+  while (i < ents.len()) { val en: FMapEnt = ents.get(i) ; out.push(FMapEnt(renExpr(rc, bound, en.k), renExpr(rc, bound, en.v))) ; i = i + 1 }
   return out
 }
 fun renParts(rc: Ren, bound: List, parts: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(parts)) {
-    val pt: FIPart = listGet(parts, i)
+  while (i < parts.len()) {
+    val pt: FIPart = parts.get(i)
     val np = when (pt) { FIExpr(e) -> FIExpr(renExpr(rc, bound, e)) ; else -> pt }
-    listPush(out, np)
+    out.push(np)
     i = i + 1
   }
   return out
 }
 fun renArms(rc: Ren, bound: List, arms: List): List {
-  val out = listNew()
+  val out = list()
   var i = 0
-  while (i < listLen(arms)) {
-    val a: FArm = listGet(arms, i)
+  while (i < arms.len()) {
+    val a: FArm = arms.get(i)
     var b = bound
-    if (a.kind == 2) { var j = 0 ; while (j < listLen(a.pats)) { b = extendB(b, patVars(listGet(a.pats, j))) ; j = j + 1 } }
+    if (a.kind == 2) { var j = 0 ; while (j < a.pats.len()) { b = extendB(b, patVars(a.pats.get(j))) ; j = j + 1 } }
     val nlhs = if (a.kind == 0) { renExpr(rc, b, a.lhs) } else { a.lhs }
     val nguard = if (isNoResF(a.guard)) { a.guard } else { renExpr(rc, b, a.guard) }
-    listPush(out, FArm(a.kind, nlhs, a.pats, nguard, renExpr(rc, b, a.body)))
+    out.push(FArm(a.kind, nlhs, a.pats, nguard, renExpr(rc, b, a.body)))
     i = i + 1
   }
   return out
 }
 fun renStmtInto(rc: Ren, bound: List, s: FStmt, out: List): List {
   return when (s) {
-    FSLet(isVar, nm, ty, init) -> { listPush(out, FSLet(isVar, nm, ty, renExpr(rc, bound, init))) ; extendB(bound, one(nm)) }
-    FSExprS(e) -> { listPush(out, FSExprS(renExpr(rc, bound, e))) ; bound }
-    FSAssign(l, r) -> { listPush(out, FSAssign(renExpr(rc, bound, l), renExpr(rc, bound, r))) ; bound }
-    FSReturnV(e) -> { listPush(out, FSReturnV(renExpr(rc, bound, e))) ; bound }
-    FSReturnU -> { listPush(out, FSReturnU) ; bound }
-    FSWhile(c, bd) -> { listPush(out, FSWhile(renExpr(rc, bound, c), renExpr(rc, bound, bd))) ; bound }
-    FSFor(v, it, bd) -> { listPush(out, FSFor(v, renExpr(rc, bound, it), renExpr(rc, extendB(bound, one(v)), bd))) ; bound }
-    else -> { listPush(out, s) ; bound }
+    FSLet(isVar, nm, ty, init) -> { out.push(FSLet(isVar, nm, ty, renExpr(rc, bound, init))) ; extendB(bound, one(nm)) }
+    FSExprS(e) -> { out.push(FSExprS(renExpr(rc, bound, e))) ; bound }
+    FSAssign(l, r) -> { out.push(FSAssign(renExpr(rc, bound, l), renExpr(rc, bound, r))) ; bound }
+    FSReturnV(e) -> { out.push(FSReturnV(renExpr(rc, bound, e))) ; bound }
+    FSReturnU -> { out.push(FSReturnU) ; bound }
+    FSWhile(c, bd) -> { out.push(FSWhile(renExpr(rc, bound, c), renExpr(rc, bound, bd))) ; bound }
+    FSFor(v, it, bd) -> { out.push(FSFor(v, renExpr(rc, bound, it), renExpr(rc, extendB(bound, one(v)), bd))) ; bound }
+    else -> { out.push(s) ; bound }
   }
 }
 fun renBlock(rc: Ren, bound: List, stmts: List, res: FExpr): FExpr {
-  val out = listNew()
+  val out = list()
   var b = bound
   var i = 0
-  while (i < listLen(stmts)) { b = renStmtInto(rc, b, listGet(stmts, i), out) ; i = i + 1 }
+  while (i < stmts.len()) { b = renStmtInto(rc, b, stmts.get(i), out) ; i = i + 1 }
   return FEBlock(out, renExpr(rc, b, res))
 }
 fun renExpr(rc: Ren, bound: List, e: FExpr): FExpr {
@@ -1512,10 +1642,10 @@ fun renExpr(rc: Ren, bound: List, e: FExpr): FExpr {
   }
 }
 fun renFunc(rc: Ren, fd: FFunc): FFunc {
-  val bound = listNew()
-  if (strEq(fd.recv, "") == false) { listPush(bound, "this") ; listPush(bound, fd.recv) }
+  val bound = list()
+  if (strEq(fd.recv, "") == false) { bound.push("this") ; bound.push(fd.recv) }
   var i = 0
-  while (i < listLen(fd.params)) { val pp: FParam = listGet(fd.params, i) ; listPush(bound, pp.name) ; i = i + 1 }
+  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i) ; bound.push(pp.name) ; i = i + 1 }
   return FFunc(fd.annos, mangleMod(rc.m, fd.name), fd.gen, fd.recv, fd.params, fd.ret, fd.whr, renExpr(rc, bound, fd.body))
 }
 // ---- parse one module's decls into a RawMod (no renaming yet; L = its free-function names) ----
@@ -1528,9 +1658,9 @@ fun nsLastSeg(s: String): String {
 }
 fun parseModuleRaw(name: String, src: String): RawMod {
   val p = P(lex(src), 0)
-  val funcs = listNew() ; val tdecls = listNew() ; val edecls = listNew()
-  val traits = listNew() ; val impls = listNew() ; val consts = listNew()
-  val uses = listNew() ; val L = listNew() ; val imps = listNew() ; val impPub = listNew()
+  val funcs = list() ; val tdecls = list() ; val edecls = list()
+  val traits = list() ; val impls = list() ; val consts = list()
+  val uses = list() ; val L = list() ; val imps = list() ; val impPub = list()
   var go = 1
   while (go == 1) {
     if (pk(p) == 0) { go = 0 }
@@ -1539,15 +1669,15 @@ fun parseModuleRaw(name: String, src: String): RawMod {
       var isPub = 0
       if (pk(p) == 56) { eat(p) ; isPub = 1 }          // `pub` prefix (public re-export when on an import)
       val k = pk(p)
-      if (k == 10) { val fd = parseFunc(p, annos) ; listPush(funcs, fd) ; listPush(L, fd.name) }
-      else { if (k == 54) { listPush(tdecls, parseTypeDecl(p, annos, 0)) }
-      else { if (k == 65) { listPush(tdecls, parseTypeDecl(p, annos, 1)) }
-      else { if (k == 55) { listPush(edecls, parseEnum(p, annos)) }
-      else { if (k == 66) { listPush(traits, parseTrait(p, annos)) }
-      else { if (k == 67) { listPush(impls, parseImpl(p, annos)) }
-      else { if (k == 58) { val ip = parseImport(p) ; listPush(imps, nsLastSeg(ip)) ; listPush(impPub, isPub) }
-      else { if (k == 80) { listPush(consts, parseConst(p)) }
-      else { if (k == 81) { listPush(uses, parseUse(p)) }
+      if (k == 10) { val fd = parseFunc(p, annos) ; funcs.push(fd) ; L.push(fd.name) }
+      else { if (k == 54) { tdecls.push(parseTypeDecl(p, annos, 0)) }
+      else { if (k == 65) { tdecls.push(parseTypeDecl(p, annos, 1)) }
+      else { if (k == 55) { edecls.push(parseEnum(p, annos)) }
+      else { if (k == 66) { traits.push(parseTrait(p, annos)) }
+      else { if (k == 67) { impls.push(parseImpl(p, annos)) }
+      else { if (k == 58) { val ip = parseImport(p) ; imps.push(nsLastSeg(ip)) ; impPub.push(isPub) }
+      else { if (k == 80) { consts.push(parseConst(p)) }
+      else { if (k == 81) { uses.push(parseUse(p)) }
       else { go = 0 } } } } } } } } }
     }
   }
@@ -1557,22 +1687,22 @@ fun parseModuleRaw(name: String, src: String): RawMod {
 // of every imported module's bare names (first module wins; never overrides own names or use aliases).
 fun findRawMod(rawmods: List, name: String): Int {
   var i = 0
-  while (i < listLen(rawmods)) { val rm: RawMod = listGet(rawmods, i) ; if (strEq(rm.name, name)) { return i } ; i = i + 1 }
+  while (i < rawmods.len()) { val rm: RawMod = rawmods.get(i) ; if (strEq(rm.name, name)) { return i } ; i = i + 1 }
   return 0 - 1
 }
 // EXPORT SURFACE of module `name` = its own free-fn names (mangled) + the surfaces of its `pub import`s.
 // A plain `import` is a private dependency (its names are NOT re-exported). `seen` guards import cycles.
 fun exportSurface(rawmods: List, name: String, outN: List, outT: List, seen: List): Int {
   if (memListL(seen, name)) { return 0 }
-  listPush(seen, name)
+  seen.push(name)
   val idx = findRawMod(rawmods, name)
   if (idx < 0) { return 0 }
-  val rm: RawMod = listGet(rawmods, idx)
+  val rm: RawMod = rawmods.get(idx)
   var i = 0
-  while (i < listLen(rm.L)) { listPush(outN, listGet(rm.L, i)) ; listPush(outT, mangleMod(name, listGet(rm.L, i))) ; i = i + 1 }
+  while (i < rm.L.len()) { outN.push(rm.L.get(i)) ; outT.push(mangleMod(name, rm.L.get(i))) ; i = i + 1 }
   var j = 0
-  while (j < listLen(rm.imps)) {
-    if (listGet(rm.impPub, j) == 1) { exportSurface(rawmods, listGet(rm.imps, j), outN, outT, seen) }
+  while (j < rm.imps.len()) {
+    if (rm.impPub.get(j) == 1) { exportSurface(rawmods, rm.imps.get(j), outN, outT, seen) }
     j = j + 1
   }
   return 0
@@ -1580,17 +1710,17 @@ fun exportSurface(rawmods: List, name: String, outN: List, outT: List, seen: Lis
 // a module's alias table: `use` aliases first, then the EXPORT SURFACE of every module IT imports (pub or
 // private — a module may use what it privately imports). Own names and use-aliases win over auto-imports.
 fun buildRen(rm: RawMod, rawmods: List, MODS: List): Ren {
-  val aN = listNew() ; val aT = listNew()
+  val aN = list() ; val aT = list()
   var i = 0
-  while (i < listLen(rm.uses)) { val u: FUse = listGet(rm.uses, i) ; listPush(aN, u.name) ; listPush(aT, mangleMod(u.mod, u.name)) ; i = i + 1 }
+  while (i < rm.uses.len()) { val u: FUse = rm.uses.get(i) ; aN.push(u.name) ; aT.push(mangleMod(u.mod, u.name)) ; i = i + 1 }
   var mi = 0
-  while (mi < listLen(rm.imps)) {
-    val sN = listNew() ; val sT = listNew() ; val seen = listNew()
-    exportSurface(rawmods, listGet(rm.imps, mi), sN, sT, seen)
+  while (mi < rm.imps.len()) {
+    val sN = list() ; val sT = list() ; val seen = list()
+    exportSurface(rawmods, rm.imps.get(mi), sN, sT, seen)
     var si = 0
-    while (si < listLen(sN)) {
-      val nm: String = listGet(sN, si)
-      if (memListL(aN, nm) == false) { if (memListL(rm.L, nm) == false) { listPush(aN, nm) ; listPush(aT, listGet(sT, si)) } }
+    while (si < sN.len()) {
+      val nm: String = sN.get(si)
+      if (memListL(aN, nm) == false) { if (memListL(rm.L, nm) == false) { aN.push(nm) ; aT.push(sT.get(si)) } }
       si = si + 1
     }
     mi = mi + 1
@@ -1600,56 +1730,56 @@ fun buildRen(rm: RawMod, rawmods: List, MODS: List): Ren {
 // rename this module's free functions and collect ALL its decls into the shared aggregate lists
 fun collectModuleDecls(rc: Ren, rm: RawMod, pfuns: List, structN: List, structF: List, structFT: List, classN: List, traitN: List, traitDecls: List, implTrait: List, implType: List, constN: List, constExprs: List, variantN: List, variantTag: List, variantTys: List, fN: List, fR: List): Int {
   var i = 0
-  while (i < listLen(rm.funcs)) {
-    val nfd = renFunc(rc, listGet(rm.funcs, i))
-    listPush(pfuns, PFun("", nfd)) ; listPush(fN, nfd.name) ; listPush(fR, nfd.ret)
+  while (i < rm.funcs.len()) {
+    val nfd = renFunc(rc, rm.funcs.get(i))
+    pfuns.push(PFun("", nfd)) ; fN.push(nfd.name) ; fR.push(nfd.ret)
     i = i + 1
   }
   var ti = 0
-  while (ti < listLen(rm.tdecls)) {
-    val td: FTDecl = listGet(rm.tdecls, ti)
+  while (ti < rm.tdecls.len()) {
+    val td: FTDecl = rm.tdecls.get(ti)
     collectStruct(td, structN, structF, structFT)
-    if (td.kind == 1) { listPush(classN, td.name) }
+    if (td.kind == 1) { classN.push(td.name) }
     collectMethodSigs(td, pfuns, fN, fR)
     if (td.kind == 1) { collectDeinit(td, pfuns, fN, fR) }
     ti = ti + 1
   }
   var ei = 0
-  while (ei < listLen(rm.edecls)) { collectEnum(listGet(rm.edecls, ei), variantN, variantTag, variantTys) ; ei = ei + 1 }
+  while (ei < rm.edecls.len()) { collectEnum(rm.edecls.get(ei), variantN, variantTag, variantTys) ; ei = ei + 1 }
   var tr = 0
-  while (tr < listLen(rm.traits)) { val trd: FTraitDecl = listGet(rm.traits, tr) ; listPush(traitN, trd.name) ; listPush(traitDecls, trd) ; tr = tr + 1 }
+  while (tr < rm.traits.len()) { val trd: FTraitDecl = rm.traits.get(tr) ; traitN.push(trd.name) ; traitDecls.push(trd) ; tr = tr + 1 }
   var ii = 0
-  while (ii < listLen(rm.impls)) {
-    val im: FImplDecl = listGet(rm.impls, ii)
+  while (ii < rm.impls.len()) {
+    val im: FImplDecl = rm.impls.get(ii)
     collectImplMethods(im, pfuns, fN, fR)
-    if (strEq(im.traitName, "") == false) { listPush(implTrait, im.traitName) ; listPush(implType, im.forTy) }
+    if (strEq(im.traitName, "") == false) { implTrait.push(im.traitName) ; implType.push(im.forTy) }
     ii = ii + 1
   }
   var ci = 0
-  while (ci < listLen(rm.consts)) { val cd: FConstDecl = listGet(rm.consts, ci) ; listPush(constN, cd.name) ; listPush(constExprs, cd.expr) ; ci = ci + 1 }
+  while (ci < rm.consts.len()) { val cd: FConstDecl = rm.consts.get(ci) ; constN.push(cd.name) ; constExprs.push(cd.expr) ; ci = ci + 1 }
   return 0
 }
 fun parseLowerModules(mods: List): LR {
-  val rawmods = listNew()
-  val MODS = listNew()
+  val rawmods = list()
+  val MODS = list()
   var mp = 0
-  while (mp < listLen(mods)) {
-    val md: Mod = listGet(mods, mp)
-    listPush(rawmods, parseModuleRaw(md.name, md.src))
-    if (strEq(md.name, "") == false) { listPush(MODS, md.name) }
+  while (mp < mods.len()) {
+    val md: Mod = mods.get(mp)
+    rawmods.push(parseModuleRaw(md.name, md.src))
+    if (strEq(md.name, "") == false) { MODS.push(md.name) }
     mp = mp + 1
   }
-  val pfuns = listNew()
-  val structN = listNew() ; val structF = listNew() ; val structFT = listNew()
-  val classN = listNew()
-  val traitN = listNew() ; val traitDecls = listNew() ; val implTrait = listNew() ; val implType = listNew()
-  val constN = listNew() ; val constExprs = listNew()
-  val variantN = listNew() ; val variantTag = listNew() ; val variantTys = listNew()
-  val fN = listNew() ; val fR = listNew()
-  injectHelpers(pfuns, fN, fR)
+  val pfuns = list()
+  val structN = list() ; val structF = list() ; val structFT = list()
+  val classN = list()
+  val traitN = list() ; val traitDecls = list() ; val implTrait = list() ; val implType = list()
+  val constN = list() ; val constExprs = list()
+  val variantN = list() ; val variantTag = list() ; val variantTys = list()
+  val fN = list() ; val fR = list()
+  injectHelpers(pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys)
   var rj = 0
-  while (rj < listLen(rawmods)) {
-    val rm: RawMod = listGet(rawmods, rj)
+  while (rj < rawmods.len()) {
+    val rm: RawMod = rawmods.get(rj)
     val rc = buildRen(rm, rawmods, MODS)
     collectModuleDecls(rc, rm, pfuns, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, fN, fR)
     rj = rj + 1
@@ -1661,21 +1791,31 @@ fun parseLowerModules(mods: List): LR {
 // flat path — resolveImports expands any quoted `import "..."` as plain text (the compiler's own case),
 // then parseLower. A quoted-only input (like the compiler assembling itself) never touches the module
 // machinery, so its cross-file calls keep their global names.
+// Flatten quoted includes FIRST (they inline into whichever module contains them), then decide the
+// path: if namespace imports remain, engage the module system on the flattened source; otherwise it's
+// a pure quoted/flat program. A file may freely MIX quoted includes (its own files) with namespace
+// imports (the standard library). The compiler itself uses only quoted includes, so `flat` has no
+// namespace imports and this stays byte-identical to the old quoted-only path.
 fun lowerInput(raw: String): LR {
-  if (hasNamespaceImport(raw)) { return parseLowerModules(collectModules(raw)) }
-  return parseLower(lex(resolveImports(raw, listNew())))
+  val flat = resolveImports(raw, list())
+  if (hasNamespaceImport(flat)) { return parseLowerModules(collectModules(flat)) }
+  return parseLower(lex(flat))
 }
 // concatenate every module's source (namespace-import inputs) so the checker sees lib definitions too
 // and doesn't false-flag lib names as "unresolved".
 fun concatModuleSrcs(mods: List): String {
   var s = ""
   var i = 0
-  while (i < listLen(mods)) { val m: Mod = listGet(mods, i) ; s = concat(s, concat(m.src, "\n")) ; i = i + 1 }
+  while (i < mods.len()) { val m: Mod = mods.get(i) ; s = concat(s, concat(m.src, "\n")) ; i = i + 1 }
   return s
 }
 fun gateDiags(raw: String): List {
-  val nsImp = hasNamespaceImport(raw)
-  val checkSrc = if (nsImp) { concatModuleSrcs(collectModules(raw)) } else { resolveImports(raw, listNew()) }
+  // Mirror lowerInput: flatten quoted includes FIRST, then decide on namespace modules. A namespace
+  // import may be buried inside a quoted-included file (mixed imports), so it only becomes visible
+  // after flattening — checking `raw` directly would miss it and false-flag stdlib names as unresolved.
+  val flat = resolveImports(raw, list())
+  val nsImp = hasNamespaceImport(flat)
+  val checkSrc = if (nsImp) { concatModuleSrcs(collectModules(flat)) } else { flat }
   val skipDup = if (nsImp) { 1 } else { 0 }
   return checkDiags(lex(checkSrc), skipDup)
 }
@@ -1685,11 +1825,11 @@ fun compileFile(inPath: String, outPath: String, noGate: Int, opt: Int): Int {
   val raw = readFile(inPath)
   if (noGate == 0) {
     val cdiags = gateDiags(raw)
-    if (listLen(cdiags) > 0) {
+    if (cdiags.len() > 0) {
       var di = 0
-      while (di < listLen(cdiags)) { println(concat("error: ", listGet(cdiags, di))) ; di = di + 1 }
-      println(concat(intToStr(listLen(cdiags)), " error(s); no binary written"))
-      return listLen(cdiags)
+      while (di < cdiags.len()) { println(concat("error: ", cdiags.get(di))) ; di = di + 1 }
+      println(concat(intToStr(cdiags.len()), " error(s); no binary written"))
+      return cdiags.len()
     }
   }
   val lr = lowerInput(raw)
@@ -1705,11 +1845,11 @@ fun compileFile(inPath: String, outPath: String, noGate: Int, opt: Int): Int {
 // `kitec check <file>`: type-check only, print diagnostics (no binary).
 fun checkOnly(inPath: String): Int {
   val cdiags = gateDiags(readFile(inPath))
-  if (listLen(cdiags) == 0) { println("ok") ; return 0 }
+  if (cdiags.len() == 0) { println("ok") ; return 0 }
   var di = 0
-  while (di < listLen(cdiags)) { println(concat("error: ", listGet(cdiags, di))) ; di = di + 1 }
-  println(concat(intToStr(listLen(cdiags)), " error(s)"))
-  return listLen(cdiags)
+  while (di < cdiags.len()) { println(concat("error: ", cdiags.get(di))) ; di = di + 1 }
+  println(concat(intToStr(cdiags.len()), " error(s)"))
+  return cdiags.len()
 }
 // default output = input path with a trailing ".kite" stripped ("foo.kite" -> "foo", in the cwd).
 fun defaultOut(p: String): String {
