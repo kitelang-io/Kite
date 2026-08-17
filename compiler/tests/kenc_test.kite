@@ -1,0 +1,99 @@
+// stage1/kenc_test.kite — self-test driver for the Kite backend (kenc.kite).
+// Run: kitec run stage1/kenc.kite stage1/kenc_test.kite
+
+fun main(): Int {
+  var f = 0
+  // the six words of `fun main(): Int { return 42 }`
+  f = f + chk("stp", encode(IStpFp), "a9bf7bfd")
+  f = f + chk("movfpsp", encode(IMovFpSp), "910003fd")
+  f = f + chk("movz42", encode(IMovz(0, 42)), "d2800540")
+  f = f + chk("b+1", encode(IB(1)), "14000001")
+  f = f + chk("ldp", encode(ILdpFp), "a8c17bfd")
+  f = f + chk("ret", encode(IRet), "d65f03c0")
+  // enctest's known anchors
+  f = f + chk("movz2", encode(IMovz(0, 2)), "d2800040")
+  f = f + chk("add", encode(IAdd(0, 0, 1)), "8b010000")
+  // a broader spread (same formulas as Fledge's verified encoder)
+  f = f + chk("sub", encode(ISub(0, 0, 1)), "cb010000")
+  f = f + chk("orr", encode(IOrr(0, 0, 1)), "aa010000")
+  f = f + chk("eor", encode(IEor(0, 0, 1)), "ca010000")
+  f = f + chk("lslv", encode(ILslv(0, 0, 1)), "9ac12000")
+  f = f + chk("asrv", encode(IAsrv(0, 0, 1)), "9ac12800")
+  f = f + chk("cmp", encode(ICmp(0, 1)), "eb01001f")
+  f = f + chk("cset_eq", encode(ICset(0, "eq")), "9a9f17e0")
+  f = f + chk("push", encode(IPush(0)), "f81f0fe0")
+  f = f + chk("pop", encode(IPop(0)), "f84107e0")
+  // assemble the minimal function `fun main(): Int { return 42 }` from labeled instrs
+  val prog = listNew()
+  listPush(prog, IStpFp)
+  listPush(prog, IMovFpSp)
+  listPush(prog, IMovz(0, 42))
+  listPush(prog, IBL("Lepi_main"))
+  listPush(prog, ILabel("Lepi_main"))
+  listPush(prog, ILdpFp)
+  listPush(prog, IRet)
+  val words = assemble(prog)
+  val want = listNew()
+  listPush(want, "a9bf7bfd") ; listPush(want, "910003fd") ; listPush(want, "d2800540")
+  listPush(want, "14000001") ; listPush(want, "a8c17bfd") ; listPush(want, "d65f03c0")
+  var j = 0
+  while (j < listLen(words)) {
+    val w: Int = listGet(words, j)
+    val wnt: String = listGet(want, j)
+    f = f + chk(concat("asm[", concat(intToStr(j), "]")), w, wnt)
+    j = j + 1
+  }
+  // ---- codegen verification against Fledge's machine words -----------------
+  // P1: fun main(): Int { return 42 }
+  f = f + checkProg("P1 return42", oneFunc(Func("main", listNew(), listNew(), retBody(ei("42")))),
+    splitWords("a9bf7bfd 910003fd d2800540 14000001 a8c17bfd d65f03c0"))
+  // P2: fun main(): Int { return 2 + 3 * 4 }
+  f = f + checkProg("P2 arith", oneFunc(Func("main", listNew(), listNew(),
+      retBody(eb("+", ei("2"), eb("*", ei("3"), ei("4")))))),
+    splitWords("a9bf7bfd 910003fd d2800040 f81f0fe0 d2800060 f81f0fe0 d2800080 aa0003e1 f84107e0 9b017c00 aa0003e1 f84107e0 8b010000 14000001 a8c17bfd d65f03c0"))
+  // P3: fun main(): Int { val x = 5 val y = 7 return x + y }
+  val p3s = listNew()
+  listPush(p3s, SLet("x", ei("5"))) ; listPush(p3s, SLet("y", ei("7")))
+  listPush(p3s, SReturnV(eb("+", ev("x"), ev("y"))))
+  f = f + checkProg("P3 locals", oneFunc(Func("main", listNew(), listNew(), EBlock(p3s, ENoRes))),
+    splitWords("a9bf7bfd 910003fd d10043ff d28000a0 f81f83a0 d28000e0 f81f03a0 f85f83a0 f81f0fe0 f85f03a0 aa0003e1 f84107e0 8b010000 14000001 910043ff a8c17bfd d65f03c0"))
+  // P4: fun add(a,b): Int { return a+b }  fun main(): Int { return add(2,3) }
+  val p4params = listNew() ; listPush(p4params, "a") ; listPush(p4params, "b")
+  val p4 = listNew()
+  listPush(p4, Func("add", p4params, listNew(), retBody(eb("+", ev("a"), ev("b")))))
+  listPush(p4, Func("main", listNew(), listNew(), retBody(ECall("add", args2(ei("2"), ei("3"))))))
+  f = f + checkProg("P4 call", p4,
+    splitWords("a9bf7bfd 910003fd d10043ff f81f83a0 f81f03a1 f85f83a0 f81f0fe0 f85f03a0 aa0003e1 f84107e0 8b010000 14000001 910043ff a8c17bfd d65f03c0 a9bf7bfd 910003fd d2800040 f81f0fe0 d2800060 f81f0fe0 f84107e1 f84107e0 94000000 14000001 a8c17bfd d65f03c0"))
+  // P5: fun main(): Int { var i = 0 while (i < 3) { i = i + 1 } return i }
+  val p5body = listNew()
+  listPush(p5body, SLet("i", ei("0")))
+  val p5wbody = listNew()
+  listPush(p5wbody, SAssign("i", eb("+", ev("i"), ei("1"))))
+  listPush(p5body, SWhile(eb("<", ev("i"), ei("3")), EBlock(p5wbody, ENoRes)))
+  listPush(p5body, SReturnV(ev("i")))
+  f = f + checkProg("P5 while", oneFunc(Func("main", listNew(), listNew(), EBlock(p5body, ENoRes))),
+    splitWords("a9bf7bfd 910003fd d10043ff d2800000 f81f83a0 f85f83a0 f81f0fe0 d2800060 aa0003e1 f84107e0 eb01001f 9a9fa7e0 b4000120 f85f83a0 f81f0fe0 d2800020 aa0003e1 f84107e0 8b010000 f81f83a0 17fffff1 f85f83a0 14000001 910043ff a8c17bfd d65f03c0"))
+  // P6: fun main(): Int { val x = 5 if (x > 3) { return 1 } return 0 }
+  val p6body = listNew()
+  listPush(p6body, SLet("x", ei("5")))
+  val p6then = listNew() ; listPush(p6then, SReturnV(ei("1")))
+  listPush(p6body, SExprS(EIf(eb(">", ev("x"), ei("3")), EBlock(p6then, ENoRes), ENoRes)))
+  listPush(p6body, SReturnV(ei("0")))
+  f = f + checkProg("P6 if", oneFunc(Func("main", listNew(), listNew(), EBlock(p6body, ENoRes))),
+    splitWords("a9bf7bfd 910003fd d10043ff d28000a0 f81f83a0 f85f83a0 f81f0fe0 d2800060 aa0003e1 f84107e0 eb01001f 9a9fd7e0 b4000080 d2800020 14000005 14000002 aa1f03e0 d2800000 14000001 910043ff a8c17bfd d65f03c0"))
+  // P7: fun main(): Int { println("hi") return 0 }  (string literal + printf, boxed/reloc path)
+  val p7args = listNew() ; listPush(p7args, EStr("hi"))
+  val p7body = listNew()
+  listPush(p7body, SExprS(ECall("println", p7args)))
+  listPush(p7body, SReturnV(ei("0")))
+  f = f + checkProg("P7 println", oneFunc(Func("main", listNew(), listNew(), EBlock(p7body, ENoRes))),
+    splitWords("a9bf7bfd 910003fd d10043ff 90000000 91000000 f90003e0 90000000 91000000 94000000 910043ff aa1f03e0 d2800000 14000001 a8c17bfd d65f03c0"))
+  // ---- end-to-end: compile P4 (add + main) to a RUNNING executable ----
+  val p4instrs = genProgram(p4)
+  val p4words = assembleExe(p4instrs)
+  val p4entry = entryOffset(p4instrs, "_main")
+  writeBytes("/tmp/kp4", buildExe(p4words, p4entry, "_main", "kp4"))
+  println(concat("wrote /tmp/kp4  entry_off=", intToStr(p4entry)))
+  println(concat("failures: ", intToStr(f)))
+  return f
+}

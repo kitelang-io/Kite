@@ -1,0 +1,15 @@
+struct Inner(val v: Int)
+struct Outer(val a: Inner, val b: Inner)
+fun main(): Int {
+  val i1 = Inner(5)
+  val i2 = Inner(7)
+  val o = Outer(i1, i2)
+  __retain(i1)
+  __retain(i2)
+  val ri1a = __refcount(i1)
+  __release(o)
+  val ri1b = __refcount(i1)
+  val ri2b = __refcount(i2)
+  val vs = i1.v + i2.v
+  return ri1a * 100 + ri1b * 10 + ri2b
+}

@@ -1,0 +1,17 @@
+// Multi-segment namespace-path imports (`import kite::std::a` -> file kite/std/a.kite). Two modules
+// define the SAME top-level names (size/helper); this proves:
+//  (b) namespacing: a::size and b::size don't collide;
+//  (d) qualified `mod::name` resolves to the right module (module id = last path segment);
+//  (c) inside a module, an unqualified ref resolves to that module's own item first
+//      (a::helper calls a's size = 7 -> 700 ; b::helper calls b's size = 35 -> 40);
+//  (e) `use mod::name` aliases bare `name` in the importing scope.
+import kite::std::a
+import kite::std::b
+use b::size
+
+fun main(): Int {
+  if (size() != 35) { return 91 }        // `use b::size` -> bare size is b's
+  if (a::helper() != 700) { return 92 }  // a::helper resolves size to a's own (7*100)
+  if (b::helper() != 40) { return 93 }   // b::helper resolves size to b's own (35+5)
+  return a::size() + b::size()           // 7 + 35 = 42
+}

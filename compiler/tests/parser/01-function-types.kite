@@ -1,0 +1,6 @@
+fun a(f: () -> Int): Int { return f() }
+fun b(f: (Int, String) -> Bool): Int { return 0 }
+fun c(f: (Int) -> (Bool) -> Int): Int { return 0 }
+fun d(f: (Int) -> Int?): Int { return 0 }
+fun e(x: kite::collections::Map<K, V>?): Int { return 0 }
+fun g(x: List<Int?>): Int { return 0 }

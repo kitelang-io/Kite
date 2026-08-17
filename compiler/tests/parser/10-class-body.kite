@@ -1,0 +1,4 @@
+struct Point(pub val x: Int, pub var y: Int) { fun norm(self): Int = x }
+class Node(val v: Int, var next: Int) { deinit { println(v) } fun get(self): Int = v }
+struct Empty()
+struct Wrap2<T: Show>(val t: T) where T: Clone

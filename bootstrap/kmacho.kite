@@ -1,0 +1,288 @@
+// stage1/kmacho.kite — the self-linking Mach-O MH_EXECUTE writer in Kite (Phase C).
+// Ports lib/macho.ml write_executable for the no-import/no-cstring case: builds a
+// fully-linked, ad-hoc code-signed arm64 executable from a list of machine words,
+// signs it with the pure-Kite SHA-256, and writes the raw bytes (fopenW/fputByte).
+// The produced binary runs natively (exit code = the program's Int result).
+//
+// (UUID uses a SHA-256-derived deterministic value rather than macho.ml's MD5, so
+// the bytes match Fledge everywhere except the 16 UUID bytes; the binary still runs
+// and the output is deterministic — fine for self-hosting.)
+
+// ==================== SHA-256 (returns the 8 hash words) ====================
+fun splitWords(s: String): List {
+  val out = listNew()
+  val n = strLen(s)
+  var i = 0
+  var start = 0
+  while (i <= n) {
+    if (i == n) { if (i > start) { listPush(out, substr(s, start, i - start)) } }
+    else { if (charAt(s, i) == 32) { if (i > start) { listPush(out, substr(s, start, i - start)) } start = i + 1 } }
+    i = i + 1
+  }
+  return out
+}
+fun hexVal(c: Int): Int {
+  if (c >= 48 && c <= 57) { return c - 48 }
+  if (c >= 97 && c <= 102) { return c - 87 }
+  if (c >= 65 && c <= 70) { return c - 55 }
+  return 0
+}
+fun parseHex(s: String): Int {
+  var v = 0
+  var i = 0
+  while (i < strLen(s)) { v = (v << 4) | hexVal(charAt(s, i)) ; i = i + 1 }
+  return v
+}
+fun hexList(s: String): List {
+  val parts = splitWords(s)
+  val out = listNew()
+  var i = 0
+  while (i < listLen(parts)) { listPush(out, parseHex(listGet(parts, i))) ; i = i + 1 }
+  return out
+}
+fun rotr(x: Int, n: Int): Int { return ((x >> n) | (x << (32 - n))) & 0xffffffff }
+fun ch(x: Int, y: Int, z: Int): Int { return (x & y) ^ ((x ^ 0xffffffff) & z) }
+fun maj(x: Int, y: Int, z: Int): Int { return (x & y) ^ (x & z) ^ (y & z) }
+fun bsig0(x: Int): Int { return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22) }
+fun bsig1(x: Int): Int { return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25) }
+fun ssig0(x: Int): Int { return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3) }
+fun ssig1(x: Int): Int { return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10) }
+fun add32(a: Int, b: Int): Int { return (a + b) & 0xffffffff }
+
+// sha256 over a byte list -> the 8 hash words (Ints)
+fun sha256H(msg: List): List {
+  val K = hexList("428a2f98 71374491 b5c0fbcf e9b5dba5 3956c25b 59f111f1 923f82a4 ab1c5ed5 d807aa98 12835b01 243185be 550c7dc3 72be5d74 80deb1fe 9bdc06a7 c19bf174 e49b69c1 efbe4786 0fc19dc6 240ca1cc 2de92c6f 4a7484aa 5cb0a9dc 76f988da 983e5152 a831c66d b00327c8 bf597fc7 c6e00bf3 d5a79147 06ca6351 14292967 27b70a85 2e1b2138 4d2c6dfc 53380d13 650a7354 766a0abb 81c2c92e 92722c85 a2bfe8a1 a81a664b c24b8b70 c76c51a3 d192e819 d6990624 f40e3585 106aa070 19a4c116 1e376c08 2748774c 34b0bcb5 391c0cb3 4ed8aa4a 5b9cca4f 682e6ff3 748f82ee 78a5636f 84c87814 8cc70208 90befffa a4506ceb bef9a3f7 c67178f2")
+  val H = hexList("6a09e667 bb67ae85 3c6ef372 a54ff53a 510e527f 9b05688c 1f83d9ab 5be0cd19")
+  // pad
+  val data = listNew()
+  var i = 0
+  val len = listLen(msg)
+  while (i < len) { listPush(data, listGet(msg, i)) ; i = i + 1 }
+  listPush(data, 0x80)
+  while ((listLen(data) % 64) != 56) { listPush(data, 0) }
+  val bitLen = len * 8
+  var j = 7
+  while (j >= 0) { listPush(data, (bitLen >> (8 * j)) & 0xff) ; j = j - 1 }
+  val nblocks = listLen(data) / 64
+  var blk = 0
+  while (blk < nblocks) {
+    val base = blk * 64
+    val W = listNew()
+    var t = 0
+    while (t < 16) {
+      val o = base + t * 4
+      listPush(W, ((listGet(data, o) << 24) | (listGet(data, o + 1) << 16) | (listGet(data, o + 2) << 8) | listGet(data, o + 3)) & 0xffffffff)
+      t = t + 1
+    }
+    t = 16
+    while (t < 64) {
+      listPush(W, (ssig1(listGet(W, t - 2)) + listGet(W, t - 7) + ssig0(listGet(W, t - 15)) + listGet(W, t - 16)) & 0xffffffff)
+      t = t + 1
+    }
+    var a = listGet(H, 0)
+    var b = listGet(H, 1)
+    var c = listGet(H, 2)
+    var d = listGet(H, 3)
+    var e = listGet(H, 4)
+    var ff = listGet(H, 5)
+    var g = listGet(H, 6)
+    var h = listGet(H, 7)
+    t = 0
+    while (t < 64) {
+      val t1 = (h + bsig1(e) + ch(e, ff, g) + listGet(K, t) + listGet(W, t)) & 0xffffffff
+      val t2 = (bsig0(a) + maj(a, b, c)) & 0xffffffff
+      h = g ; g = ff ; ff = e ; e = add32(d, t1)
+      d = c ; c = b ; b = a ; a = add32(t1, t2)
+      t = t + 1
+    }
+    listSet(H, 0, add32(listGet(H, 0), a)) ; listSet(H, 1, add32(listGet(H, 1), b))
+    listSet(H, 2, add32(listGet(H, 2), c)) ; listSet(H, 3, add32(listGet(H, 3), d))
+    listSet(H, 4, add32(listGet(H, 4), e)) ; listSet(H, 5, add32(listGet(H, 5), ff))
+    listSet(H, 6, add32(listGet(H, 6), g)) ; listSet(H, 7, add32(listGet(H, 7), h))
+    blk = blk + 1
+  }
+  return H
+}
+
+// ==================== byte-buffer helpers (buffer = List<byte>) =============
+fun u8(b: List, v: Int): Int { listPush(b, v & 0xff) ; return 0 }
+fun u16(b: List, v: Int): Int { u8(b, v) ; u8(b, v >> 8) ; return 0 }
+fun u32(b: List, v: Int): Int { u8(b, v) ; u8(b, v >> 8) ; u8(b, v >> 16) ; u8(b, v >> 24) ; return 0 }
+fun u64(b: List, v: Int): Int { u32(b, v & 0xffffffff) ; u32(b, (v >> 32) & 0xffffffff) ; return 0 }
+fun be32(b: List, v: Int): Int { u8(b, v >> 24) ; u8(b, v >> 16) ; u8(b, v >> 8) ; u8(b, v) ; return 0 }
+fun be64(b: List, v: Int): Int { be32(b, (v >> 32) & 0xffffffff) ; be32(b, v & 0xffffffff) ; return 0 }
+fun writeStr(b: List, s: String): Int { var i = 0 ; while (i < strLen(s)) { u8(b, charAt(s, i)) ; i = i + 1 } ; return 0 }
+fun fixed(b: List, n: Int, s: String): Int {
+  writeStr(b, s)
+  var i = strLen(s)
+  while (i < n) { u8(b, 0) ; i = i + 1 }
+  return 0
+}
+fun padTo(b: List, target: Int): Int { while (listLen(b) < target) { u8(b, 0) } ; return 0 }
+fun alignUp(n: Int, a: Int): Int { return ((n + a - 1) / a) * a }
+fun subBytes(l: List, start: Int, len: Int): List {
+  val out = listNew()
+  var i = 0
+  while (i < len) { listPush(out, listGet(l, start + i)) ; i = i + 1 }
+  return out
+}
+
+// ==================== the executable writer ================================
+// words: List<Int> machine words; entryOff: byte offset of entry within text;
+// symName: the entry symbol (e.g. "_main"); ident: signing identifier.
+fun buildExe(words: List, entryOff: Int, symName: String, ident: String): List {
+  val vmpage = 0x4000
+  val textBase = 0x100000000
+  val nwords = listLen(words)
+  val userTextSize = 4 * nwords
+  val textSize = userTextSize
+  // fixed load-command sizes (no __DATA_CONST)
+  val sizeofcmds = 72 + 232 + 72 + 16 + 16 + 24 + 80 + 32 + 24 + 24 + 24 + 56 + 16
+  val ncmds = 13
+  val lcEnd = 32 + sizeofcmds
+  val textOff = alignUp(lcEnd, 16)
+  val cstringOff = textOff + textSize
+  val textSegFilesize = alignUp(cstringOff, vmpage)
+  val textVmaddr = textBase + textOff
+  val linkeditFileoff = textSegFilesize
+  val cfOff = linkeditFileoff
+  val cfSize = 56
+  val expOff = cfOff + cfSize
+  val symoff = expOff
+  val nsyms = 1
+  // string table: NUL + symName + NUL, padded to 8
+  var strlen0 = 1 + strLen(symName) + 1
+  val strsize = alignUp(strlen0, 8)
+  val stroff = symoff + 16
+  val sigStart = alignUp(stroff + strsize, 16)
+  val identLen = strLen(ident) + 1
+  val codeLimit = sigStart
+  val ncodeslots = (codeLimit + 4095) / 4096
+  val cdHashoffset = 88 + identLen
+  val cdLen = cdHashoffset + ncodeslots * 32
+  val superLen = 12 + 8 + cdLen
+  val entryoff = textOff + entryOff
+
+  val b = listNew()
+  // mach_header_64
+  u32(b, 0xFEEDFACF) ; u32(b, 0x0100000C) ; u32(b, 0) ; u32(b, 0x2)
+  u32(b, ncmds) ; u32(b, sizeofcmds) ; u32(b, 0x00200085) ; u32(b, 0)
+  // LC_SEGMENT_64 __PAGEZERO
+  u32(b, 0x19) ; u32(b, 72) ; fixed(b, 16, "__PAGEZERO")
+  u64(b, 0) ; u64(b, 0x100000000) ; u64(b, 0) ; u64(b, 0)
+  u32(b, 0) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0)
+  // LC_SEGMENT_64 __TEXT
+  u32(b, 0x19) ; u32(b, 232) ; fixed(b, 16, "__TEXT")
+  u64(b, textBase) ; u64(b, textSegFilesize) ; u64(b, 0) ; u64(b, textSegFilesize)
+  u32(b, 0x5) ; u32(b, 0x5) ; u32(b, 2) ; u32(b, 0)
+  fixed(b, 16, "__text") ; fixed(b, 16, "__TEXT")
+  u64(b, textVmaddr) ; u64(b, textSize) ; u32(b, textOff) ; u32(b, 2)
+  u32(b, 0) ; u32(b, 0) ; u32(b, 0x80000400) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0)
+  fixed(b, 16, "__cstring") ; fixed(b, 16, "__TEXT")
+  u64(b, textBase + cstringOff) ; u64(b, 0) ; u32(b, cstringOff) ; u32(b, 0)
+  u32(b, 0) ; u32(b, 0) ; u32(b, 0x00000002) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0)
+  // LC_SEGMENT_64 __LINKEDIT
+  val linkeditFilesize = (sigStart + superLen) - linkeditFileoff
+  val linkeditVmsize = alignUp(linkeditFilesize, vmpage)
+  u32(b, 0x19) ; u32(b, 72) ; fixed(b, 16, "__LINKEDIT")
+  u64(b, textBase + textSegFilesize) ; u64(b, linkeditVmsize)
+  u64(b, linkeditFileoff) ; u64(b, linkeditFilesize)
+  u32(b, 0x1) ; u32(b, 0x1) ; u32(b, 0) ; u32(b, 0)
+  // LC_DYLD_CHAINED_FIXUPS
+  u32(b, 0x80000034) ; u32(b, 16) ; u32(b, cfOff) ; u32(b, cfSize)
+  // LC_DYLD_EXPORTS_TRIE (empty)
+  u32(b, 0x80000033) ; u32(b, 16) ; u32(b, expOff) ; u32(b, 0)
+  // LC_SYMTAB
+  u32(b, 0x2) ; u32(b, 24) ; u32(b, symoff) ; u32(b, nsyms) ; u32(b, stroff) ; u32(b, strsize)
+  // LC_DYSYMTAB
+  u32(b, 0xB) ; u32(b, 80) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0) ; u32(b, nsyms)
+  u32(b, nsyms) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0)
+  u32(b, 0) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0)
+  // LC_LOAD_DYLINKER
+  u32(b, 0xe) ; u32(b, 32) ; u32(b, 12) ; fixed(b, 20, "/usr/lib/dyld")
+  // LC_UUID (deterministic SHA-256-derived 16 bytes)
+  u32(b, 0x1b) ; u32(b, 24)
+  val uh = sha256H(strBytesK(concat(ident, concat(":", intToStrK(textSize)))))
+  be32(b, listGet(uh, 0)) ; be32(b, listGet(uh, 1)) ; be32(b, listGet(uh, 2)) ; be32(b, listGet(uh, 3))
+  // LC_BUILD_VERSION
+  u32(b, 0x32) ; u32(b, 24) ; u32(b, 1) ; u32(b, 0x000B0000) ; u32(b, 0x000B0000) ; u32(b, 0)
+  // LC_MAIN
+  u32(b, 0x80000028) ; u32(b, 24) ; u64(b, entryoff) ; u64(b, 0)
+  // LC_LOAD_DYLIB (libSystem)
+  u32(b, 0xc) ; u32(b, 56) ; u32(b, 24) ; u32(b, 2) ; u32(b, 0x054C0000) ; u32(b, 0x00010000)
+  fixed(b, 32, "/usr/lib/libSystem.B.dylib")
+  // LC_CODE_SIGNATURE
+  u32(b, 0x1d) ; u32(b, 16) ; u32(b, sigStart) ; u32(b, superLen)
+  // pad to __text, then the code words
+  padTo(b, textOff)
+  var wi = 0
+  while (wi < nwords) { u32(b, listGet(words, wi)) ; wi = wi + 1 }
+  // pad to __LINKEDIT
+  padTo(b, linkeditFileoff)
+  // chained-fixups payload (binds nothing, seg_count = 3)
+  u32(b, 0) ; u32(b, 0x20) ; u32(b, 0x30) ; u32(b, 0x30)
+  u32(b, 0) ; u32(b, 1) ; u32(b, 0) ; u32(b, 0)
+  u32(b, 3) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0) ; u32(b, 0)
+  // symbol table: one nlist_64 for the entry symbol at text offset entryOff
+  u32(b, 1)            // strx = offset of symName in strtab (after the leading NUL)
+  u8(b, 0x0F) ; u8(b, 1) ; u16(b, 0) ; u64(b, textVmaddr + entryOff)
+  // string table
+  u8(b, 0) ; writeStr(b, symName) ; u8(b, 0)
+  padTo(b, stroff + strsize)
+  // pad to signature start (= code_limit)
+  padTo(b, sigStart)
+  // ---- code signature: hash the file in 4KB pages ----
+  val hashes = listNew()
+  var p = 0
+  while (p < ncodeslots) {
+    val start = p * 4096
+    var pl = 4096
+    if (codeLimit - start < 4096) { pl = codeLimit - start }
+    val hh = sha256H(subBytes(b, start, pl))
+    var k = 0
+    while (k < 8) { be32(hashes, listGet(hh, k)) ; k = k + 1 }
+    p = p + 1
+  }
+  // CodeDirectory (big-endian)
+  val cd = listNew()
+  be32(cd, 0xfade0c02) ; be32(cd, cdLen) ; be32(cd, 0x00020400) ; be32(cd, 0x00000002)
+  be32(cd, cdHashoffset) ; be32(cd, 88) ; be32(cd, 0) ; be32(cd, ncodeslots)
+  be32(cd, codeLimit) ; u8(cd, 32) ; u8(cd, 2) ; u8(cd, 0) ; u8(cd, 12)
+  be32(cd, 0) ; be32(cd, 0) ; be32(cd, 0) ; be32(cd, 0)
+  be64(cd, 0) ; be64(cd, 0) ; be64(cd, textSegFilesize) ; be64(cd, 1)
+  writeStr(cd, ident) ; u8(cd, 0)
+  var hi = 0
+  while (hi < listLen(hashes)) { listPush(cd, listGet(hashes, hi)) ; hi = hi + 1 }
+  // SuperBlob (big-endian) + the CodeDirectory
+  be32(b, 0xfade0cc0) ; be32(b, superLen) ; be32(b, 1) ; be32(b, 0) ; be32(b, 20)
+  var ci = 0
+  while (ci < listLen(cd)) { listPush(b, listGet(cd, ci)) ; ci = ci + 1 }
+  return b
+}
+
+fun strBytesK(s: String): List {
+  val out = listNew()
+  var i = 0
+  while (i < strLen(s)) { listPush(out, charAt(s, i)) ; i = i + 1 }
+  return out
+}
+fun intToStrK(n: Int): String { return intToStr(n) }
+
+fun writeBytes(path: String, bytes: List): Int {
+  val fp = fopenW(path)
+  var i = 0
+  while (i < listLen(bytes)) { fputByte(listGet(bytes, i), fp) ; i = i + 1 }
+  fcloseF(fp)
+  return listLen(bytes)
+}
+
+fun main(): Int {
+  // the six machine words of `fun main(): Int { return 42 }`
+  val words = listNew()
+  listPush(words, 0xa9bf7bfd) ; listPush(words, 0x910003fd) ; listPush(words, 0xd2800540)
+  listPush(words, 0x14000001) ; listPush(words, 0xa8c17bfd) ; listPush(words, 0xd65f03c0)
+  val bytes = buildExe(words, 0, "_main", "kmin")
+  val n = writeBytes("/tmp/kmin", bytes)
+  println(intToStr(n))
+  return n & 0xff
+}

@@ -1,0 +1,731 @@
+// compiler/arm64.kite — the AArch64 + Mach-O BACKEND: realizes codegen.kite's IR (`Instr`) as
+// AArch64 machine code (encoder + two-pass assembler) and writes a signed Mach-O executable
+// (object writer + linker + ad-hoc SHA-256 code signer). The only target-specific file.
+
+
+fun w32(x: Int): Int { return x & 0xffffffff }
+
+fun condCode(c: String): Int {
+  if (strEq(c, "eq")) { return 0 }
+  if (strEq(c, "ne")) { return 1 }
+  if (strEq(c, "cs")) { return 2 }
+  if (strEq(c, "hs")) { return 2 }
+  if (strEq(c, "cc")) { return 3 }
+  if (strEq(c, "lo")) { return 3 }
+  if (strEq(c, "mi")) { return 4 }
+  if (strEq(c, "pl")) { return 5 }
+  if (strEq(c, "vs")) { return 6 }
+  if (strEq(c, "vc")) { return 7 }
+  if (strEq(c, "hi")) { return 8 }
+  if (strEq(c, "ls")) { return 9 }
+  if (strEq(c, "ge")) { return 10 }
+  if (strEq(c, "lt")) { return 11 }
+  if (strEq(c, "gt")) { return 12 }
+  if (strEq(c, "le")) { return 13 }
+  if (strEq(c, "al")) { return 14 }
+  return 0
+}
+
+fun encode(i: Instr): Int {
+  return when (i) {
+    IReturn -> 0xD65F03C0
+    IEnter -> 0xA9BF7BFD
+    ILeave -> 0xA8C17BFD
+    ISetFrame -> 0x910003FD
+    IMovImm(d, im) -> w32(0xD2800000 | ((im & 0xffff) << 5) | d)
+    IMovImmK(d, im, sh) -> w32(0xF2800000 | ((sh / 16) << 21) | ((im & 0xffff) << 5) | d)
+    IAdd(d, n, m) -> w32(0x8B000000 | (m << 16) | (n << 5) | d)
+    ISub(d, n, m) -> w32(0xCB000000 | (m << 16) | (n << 5) | d)
+    IMul(d, n, m) -> w32(0x9B000000 | (m << 16) | (31 << 10) | (n << 5) | d)
+    IDiv(d, n, m) -> w32(0x9AC00C00 | (m << 16) | (n << 5) | d)
+    IMulSub(d, n, m, a) -> w32(0x9B008000 | (m << 16) | (a << 10) | (n << 5) | d)
+    IAnd(d, n, m) -> w32(0x8A000000 | (m << 16) | (n << 5) | d)
+    IOr(d, n, m) -> w32(0xAA000000 | (m << 16) | (n << 5) | d)
+    IXor(d, n, m) -> w32(0xCA000000 | (m << 16) | (n << 5) | d)
+    IShl(d, n, m) -> w32(0x9AC02000 | (m << 16) | (n << 5) | d)
+    IShr(d, n, m) -> w32(0x9AC02800 | (m << 16) | (n << 5) | d)
+    INeg(d, m) -> w32(0xCB0003E0 | (m << 16) | d)
+    IMov(d, m) -> w32(0xAA0003E0 | (m << 16) | d)
+    IZero(d) -> w32(0xAA1F03E0 | d)
+    IAddImm(d, n, im) -> w32(0x91000000 | ((im & 0xfff) << 10) | (n << 5) | d)
+    ISubImm(d, n, im) -> w32(0xD1000000 | ((im & 0xfff) << 10) | (n << 5) | d)
+    IStackFree(im) -> w32(0x91000000 | ((im & 0xfff) << 10) | (31 << 5) | 31)
+    IStackAlloc(im) -> w32(0xD1000000 | ((im & 0xfff) << 10) | (31 << 5) | 31)
+    ILoadLocal(t, off) -> w32(0xF8400000 | (((0 - off) & 0x1ff) << 12) | (29 << 5) | t)
+    IStoreLocal(t, off) -> w32(0xF8000000 | (((0 - off) & 0x1ff) << 12) | (29 << 5) | t)
+    ILoadOff(t, n, off) -> w32(0xF9400000 | (((off / 8) & 0xfff) << 10) | (n << 5) | t)
+    IStoreOff(t, n, off) -> w32(0xF9000000 | (((off / 8) & 0xfff) << 10) | (n << 5) | t)
+    ILoadByte(t, n, off) -> w32(0x39400000 | ((off & 0xfff) << 10) | (n << 5) | t)
+    IStoreByte(t, n, off) -> w32(0x39000000 | ((off & 0xfff) << 10) | (n << 5) | t)
+    ILoadTop(t) -> w32(0xF9400000 | (31 << 5) | t)
+    IStoreTop(t) -> w32(0xF9000000 | (31 << 5) | t)
+    IPush(t) -> w32(0xF8000C00 | (((0 - 16) & 0x1ff) << 12) | (31 << 5) | t)
+    IPop(t) -> w32(0xF8400400 | ((16 & 0x1ff) << 12) | (31 << 5) | t)
+    ICmp(n, m) -> w32(0xEB000000 | (m << 16) | (n << 5) | 31)
+    ICset(d, c) -> w32(0x9A9F07E0 | ((condCode(c) ^ 1) << 12) | d)
+    IJmp(rel) -> w32(0x14000000 | (rel & 0x3ffffff))
+    IJmpCond(c, rel) -> w32(0x54000000 | ((rel & 0x7ffff) << 5) | condCode(c))
+    IJmpZero(t, rel) -> w32(0xB4000000 | ((rel & 0x7ffff) << 5) | t)
+    ICallSym(sym) -> 0x94000000
+    ISymHi(d, sym) -> w32(0x90000000 | d)
+    ISymLo(d, n, sym) -> w32(0x91000000 | (n << 5) | d)
+    ICallReg(n) -> w32(0xD63F0000 | (n << 5))
+    IFuncAddr(d, sym) -> w32(0x10000000 | d)            // placeholder; resolved from label offset
+    IFAdd(d, n, m) -> w32(0x1E602800 | (m << 16) | (n << 5) | d)     // fadd Dd, Dn, Dm
+    IFSub(d, n, m) -> w32(0x1E603800 | (m << 16) | (n << 5) | d)     // fsub
+    IFMul(d, n, m) -> w32(0x1E600800 | (m << 16) | (n << 5) | d)     // fmul
+    IFDiv(d, n, m) -> w32(0x1E601800 | (m << 16) | (n << 5) | d)     // fdiv
+    IFLoadD(t, n, off) -> w32(0xFD400000 | (((off / 8) & 0xfff) << 10) | (n << 5) | t)   // ldr Dt,[Xn,#off]
+    IFStoreD(t, n, off) -> w32(0xFD000000 | (((off / 8) & 0xfff) << 10) | (n << 5) | t)  // str Dt,[Xn,#off]
+    IFCmp(n, m) -> w32(0x1E602000 | (m << 16) | (n << 5))            // fcmp Dn, Dm
+    IFToInt(d, n) -> w32(0x9E780000 | (n << 5) | d)                  // fcvtzs Xd, Dn (trunc)
+    else -> 0
+  }
+}
+// adr Rd, #rel  (rel = byte offset from this instr to the local label, |rel| < 1MB)
+fun adrWord(d: Int, rel: Int): Int { return w32(0x10000000 | ((rel & 3) << 29) | (((rel >> 2) & 0x7ffff) << 5) | d) }
+
+// ---- two-pass assembler: a labeled Instr list -> machine words -------------
+struct LabelMap(val names: List, val offs: List)
+
+fun isWordI(i: Instr): Bool { return when (i) { ILabel(nm) -> false ; else -> true } }
+
+// pass 1: byte offset of each label
+fun buildLabels(instrs: List): LabelMap {
+  val names = listNew()
+  val offs = listNew()
+  var off = 0
+  var i = 0
+  while (i < listLen(instrs)) {
+    val ins: Instr = listGet(instrs, i)
+    if (isWordI(ins)) { off = off + 4 }
+    else { when (ins) { ILabel(nm) -> { listPush(names, nm) ; listPush(offs, off) ; 0 } else -> 0 } }
+    i = i + 1
+  }
+  return LabelMap(names, offs)
+}
+
+fun findLabel(lm: LabelMap, name: String): Int {
+  var i = 0
+  while (i < listLen(lm.names)) {
+    val nm: String = listGet(lm.names, i)
+    if (strEq(nm, name)) { return listGet(lm.offs, i) }
+    i = i + 1
+  }
+  return 0
+}
+
+// resolve a label-relative branch to a word offset, then encode
+fun encodeAt(i: Instr, here: Int, lm: LabelMap): Int {
+  return when (i) {
+    ICallL(lab) -> encode(IJmp((findLabel(lm, lab) - here) / 4))
+    IJmpCondL(c, lab) -> encode(IJmpCond(c, (findLabel(lm, lab) - here) / 4))
+    IJmpZeroL(t, lab) -> encode(IJmpZero(t, (findLabel(lm, lab) - here) / 4))
+    IFuncAddr(d, lab) -> adrWord(d, findLabel(lm, lab) - here)
+    else -> encode(i)
+  }
+}
+
+// pass 2: encode every word-producing instruction (labels resolved)
+fun assemble(instrs: List): List {
+  val lm = buildLabels(instrs)
+  val words = listNew()
+  var here = 0
+  var i = 0
+  while (i < listLen(instrs)) {
+    val ins: Instr = listGet(instrs, i)
+    if (isWordI(ins)) { listPush(words, encodeAt(ins, here, lm)) ; here = here + 4 }
+    i = i + 1
+  }
+  return words
+}
+
+fun hasLabel(lm: LabelMap, name: String): Bool {
+  var i = 0
+  while (i < listLen(lm.names)) { val nm: String = listGet(lm.names, i) ; if (strEq(nm, name)) { return true } ; i = i + 1 }
+  return false
+}
+// executable assembly: like assemble, but a bl to a DEFINED symbol (a local
+// function label) is resolved to a relative bl instead of a placeholder.
+fun encodeAtExe(i: Instr, here: Int, lm: LabelMap): Int {
+  return when (i) {
+    ICallSym(sym) -> if (hasLabel(lm, sym)) { w32(0x94000000 | (((findLabel(lm, sym) - here) / 4) & 0x3ffffff)) } else { 0x94000000 }
+    else -> encodeAt(i, here, lm)
+  }
+}
+fun assembleExe(instrs: List): List {
+  val lm = buildLabels(instrs)
+  val words = listNew()
+  var here = 0
+  var i = 0
+  while (i < listLen(instrs)) {
+    val ins: Instr = listGet(instrs, i)
+    if (isWordI(ins)) { listPush(words, encodeAtExe(ins, here, lm)) ; here = here + 4 }
+    i = i + 1
+  }
+  return words
+}
+fun entryOffset(instrs: List, sym: String): Int { return findLabel(buildLabels(instrs), sym) }
+
+// ---- relocation-tracking assembly: words + relocs (for the boxed/import path) --
+struct Reloc(val off: Int, val sym: String, val kind: Int)   // kind 0=BR26 1=PAGE21 2=PAGEOFF12
+struct AsmR(val words: List, val relocs: List)
+fun assembleReloc(instrs: List): AsmR {
+  val lm = buildLabels(instrs)
+  val words = listNew()
+  val relocs = listNew()
+  var here = 0
+  var i = 0
+  while (i < listLen(instrs)) {
+    val ins: Instr = listGet(instrs, i)
+    if (isWordI(ins)) {
+      when (ins) {
+        ISymHi(d, sym) -> { listPush(words, encode(ins)) ; listPush(relocs, Reloc(here, sym, 1)) ; 0 }
+        ISymLo(d, n, sym) -> { listPush(words, encode(ins)) ; listPush(relocs, Reloc(here, sym, 2)) ; 0 }
+        IFuncAddr(d, sym) -> { listPush(words, adrWord(d, findLabel(lm, sym) - here)) ; 0 }   // internal fn address
+        ICallSym(sym) -> {
+          if (hasLabel(lm, sym)) { listPush(words, w32(0x94000000 | (((findLabel(lm, sym) - here) / 4) & 0x3ffffff))) }
+          else { listPush(words, 0x94000000) ; listPush(relocs, Reloc(here, sym, 0)) }
+          0
+        }
+        else -> { listPush(words, encodeAt(ins, here, lm)) ; 0 }
+      }
+      here = here + 4
+    }
+    i = i + 1
+  }
+  return AsmR(words, relocs)
+}
+fun idxOfStr(l: List, s: String): Int {
+  var i = 0
+  while (i < listLen(l)) { val e: String = listGet(l, i) ; if (strEq(e, s)) { return i } ; i = i + 1 }
+  return 0
+}
+// unique external (undefined) BR26 symbols, in first-appearance order
+fun externalsOf(relocs: List): List {
+  val out = listNew()
+  var i = 0
+  while (i < listLen(relocs)) {
+    val r: Reloc = listGet(relocs, i)
+    if (r.kind == 0) { if (idxOfStr2(out, r.sym) < 0) { listPush(out, r.sym) } }
+    i = i + 1
+  }
+  return out
+}
+fun idxOfStr2(l: List, s: String): Int {
+  var i = 0
+  while (i < listLen(l)) { val e: String = listGet(l, i) ; if (strEq(e, s)) { return i } ; i = i + 1 }
+  return 0 - 1
+}
+
+// ---- __cstring section: fixed printf formats + interned user strings --------
+struct CstrSec(val bytes: List, val labN: List, val labOff: List)
+fun addC(bytes: List, labN: List, labOff: List, label: String, sb: List): Int {
+  listPush(labN, label) ; listPush(labOff, listLen(bytes))
+  var i = 0
+  while (i < listLen(sb)) { listPush(bytes, listGet(sb, i)) ; i = i + 1 }
+  listPush(bytes, 0)
+  return 0
+}
+fun buildCstr(cstrN: List, cstrV: List): CstrSec {
+  val bytes = listNew() ; val labN = listNew() ; val labOff = listNew()
+  addC(bytes, labN, labOff, "Lfmt_println", strBytesK("%ld\n"))
+  addC(bytes, labN, labOff, "Lfmt_print", strBytesK("%ld"))
+  addC(bytes, labN, labOff, "Lfmt_println_s", strBytesK("%s\n"))
+  addC(bytes, labN, labOff, "Lfmt_print_s", strBytesK("%s"))
+  addC(bytes, labN, labOff, "Lfmt_println_f", strBytesK("%g\n"))
+  addC(bytes, labN, labOff, "Lfmt_print_f", strBytesK("%g"))
+  addC(bytes, labN, labOff, "Lfmt_ld", strBytesK("%ld"))
+  var i = 0
+  while (i < listLen(cstrN)) { addC(bytes, labN, labOff, listGet(cstrN, i), strBytesK(listGet(cstrV, i))) ; i = i + 1 }
+  return CstrSec(bytes, labN, labOff)
+}
+fun cstrOffOf(cs: CstrSec, sym: String): Int { return listGet(cs.labOff, idxOfStr(cs.labN, sym)) }
+
+fun hexDigit(d: Int): String { return substr("0123456789abcdef", d, 1) }
+fun toHex8(n: Int): String {
+  var s = ""
+  var i = 7
+  while (i >= 0) { s = concat(s, hexDigit((n >> (i * 4)) & 15)) ; i = i - 1 }
+  return s
+}
+
+// check one encoding against an expected 8-hex-digit string; return 0 ok / 1 fail
+fun chk(name: String, got: Int, want: String): Int {
+  val g = toHex8(got)
+  if (strEq(g, want)) { println(concat("ok   ", concat(name, concat("  ", g)))) ; return 0 }
+  println(concat("FAIL ", concat(name, concat("  got ", concat(g, concat(" want ", want))))))
+  return 1
+}
+
+// compile a program (list of Func) to words, and diff against an expected hex list
+fun checkProg(name: String, funcs: List, want: List): Int {
+  val words = assemble(genProgram(funcs))
+  var fails = 0
+  if (listLen(words) != listLen(want)) {
+    println(concat("FAIL ", concat(name, concat(" length ", concat(intToStr(listLen(words)), concat(" want ", intToStr(listLen(want))))))))
+    return 1
+  }
+  var i = 0
+  while (i < listLen(words)) {
+    val g: Int = listGet(words, i)
+    val w: String = listGet(want, i)
+    if (strEq(toHex8(g), w) == false) {
+      println(concat("FAIL ", concat(name, concat(" [", concat(intToStr(i), concat("] got ", concat(toHex8(g), concat(" want ", w))))))))
+      fails = fails + 1
+    }
+    i = i + 1
+  }
+  if (fails == 0) { println(concat("ok   ", concat(name, concat("  ", concat(intToStr(listLen(words)), " words"))))) }
+  return fails
+}
+
+fun splitWords(s: String): List {
+  val out = listNew()
+  val n = strLen(s)
+  var i = 0
+  var start = 0
+  while (i <= n) {
+    if (i == n) { if (i > start) { listPush(out, substr(s, start, i - start)) } }
+    else { if (charAt(s, i) == 32) { if (i > start) { listPush(out, substr(s, start, i - start)) } start = i + 1 } }
+    i = i + 1
+  }
+  return out
+}
+
+// ==================== Mach-O executable writer (from kmacho) ================
+fun hexVal(c: Int): Int {
+  if (c >= 48 && c <= 57) { return c - 48 }
+  if (c >= 97 && c <= 102) { return c - 87 }
+  if (c >= 65 && c <= 70) { return c - 55 }
+  return 0
+}
+fun parseHexK(s: String): Int {
+  var v = 0
+  var i = 0
+  while (i < strLen(s)) { v = (v << 4) | hexVal(charAt(s, i)) ; i = i + 1 }
+  return v
+}
+fun hexListK(s: String): List {
+  val parts = splitWords(s)
+  val out = listNew()
+  var i = 0
+  while (i < listLen(parts)) { listPush(out, parseHexK(listGet(parts, i))) ; i = i + 1 }
+  return out
+}
+fun rotr(x: Int, n: Int): Int { return ((x >> n) | (x << (32 - n))) & 0xffffffff }
+fun shCh(x: Int, y: Int, z: Int): Int { return (x & y) ^ ((x ^ 0xffffffff) & z) }
+fun shMaj(x: Int, y: Int, z: Int): Int { return (x & y) ^ (x & z) ^ (y & z) }
+fun bsig0(x: Int): Int { return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22) }
+fun bsig1(x: Int): Int { return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25) }
+fun ssig0(x: Int): Int { return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3) }
+fun ssig1(x: Int): Int { return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10) }
+fun add32(a: Int, b: Int): Int { return (a + b) & 0xffffffff }
+fun sha256H(msg: List): List {
+  val K = hexListK("428a2f98 71374491 b5c0fbcf e9b5dba5 3956c25b 59f111f1 923f82a4 ab1c5ed5 d807aa98 12835b01 243185be 550c7dc3 72be5d74 80deb1fe 9bdc06a7 c19bf174 e49b69c1 efbe4786 0fc19dc6 240ca1cc 2de92c6f 4a7484aa 5cb0a9dc 76f988da 983e5152 a831c66d b00327c8 bf597fc7 c6e00bf3 d5a79147 06ca6351 14292967 27b70a85 2e1b2138 4d2c6dfc 53380d13 650a7354 766a0abb 81c2c92e 92722c85 a2bfe8a1 a81a664b c24b8b70 c76c51a3 d192e819 d6990624 f40e3585 106aa070 19a4c116 1e376c08 2748774c 34b0bcb5 391c0cb3 4ed8aa4a 5b9cca4f 682e6ff3 748f82ee 78a5636f 84c87814 8cc70208 90befffa a4506ceb bef9a3f7 c67178f2")
+  val H = hexListK("6a09e667 bb67ae85 3c6ef372 a54ff53a 510e527f 9b05688c 1f83d9ab 5be0cd19")
+  val data = listNew()
+  var i = 0
+  val len = listLen(msg)
+  while (i < len) { listPush(data, listGet(msg, i)) ; i = i + 1 }
+  listPush(data, 0x80)
+  while ((listLen(data) % 64) != 56) { listPush(data, 0) }
+  val bitLen = len * 8
+  var j = 7
+  while (j >= 0) { listPush(data, (bitLen >> (8 * j)) & 0xff) ; j = j - 1 }
+  val nblocks = listLen(data) / 64
+  var blk = 0
+  while (blk < nblocks) {
+    val base = blk * 64
+    val W = listNew()
+    var t = 0
+    while (t < 16) {
+      val o = base + t * 4
+      listPush(W, ((listGet(data, o) << 24) | (listGet(data, o + 1) << 16) | (listGet(data, o + 2) << 8) | listGet(data, o + 3)) & 0xffffffff)
+      t = t + 1
+    }
+    t = 16
+    while (t < 64) {
+      listPush(W, (ssig1(listGet(W, t - 2)) + listGet(W, t - 7) + ssig0(listGet(W, t - 15)) + listGet(W, t - 16)) & 0xffffffff)
+      t = t + 1
+    }
+    var a = listGet(H, 0)
+    var bb = listGet(H, 1)
+    var c = listGet(H, 2)
+    var d = listGet(H, 3)
+    var e = listGet(H, 4)
+    var fff = listGet(H, 5)
+    var g = listGet(H, 6)
+    var hh = listGet(H, 7)
+    t = 0
+    while (t < 64) {
+      val t1 = (hh + bsig1(e) + shCh(e, fff, g) + listGet(K, t) + listGet(W, t)) & 0xffffffff
+      val t2 = (bsig0(a) + shMaj(a, bb, c)) & 0xffffffff
+      hh = g ; g = fff ; fff = e ; e = add32(d, t1)
+      d = c ; c = bb ; bb = a ; a = add32(t1, t2)
+      t = t + 1
+    }
+    listSet(H, 0, add32(listGet(H, 0), a)) ; listSet(H, 1, add32(listGet(H, 1), bb))
+    listSet(H, 2, add32(listGet(H, 2), c)) ; listSet(H, 3, add32(listGet(H, 3), d))
+    listSet(H, 4, add32(listGet(H, 4), e)) ; listSet(H, 5, add32(listGet(H, 5), fff))
+    listSet(H, 6, add32(listGet(H, 6), g)) ; listSet(H, 7, add32(listGet(H, 7), hh))
+    blk = blk + 1
+  }
+  return H
+}
+fun u8(b: List, v: Int): Int { listPush(b, v & 0xff) ; return 0 }
+fun u16(b: List, v: Int): Int { u8(b, v) ; u8(b, v >> 8) ; return 0 }
+fun u32b(b: List, v: Int): Int { u8(b, v) ; u8(b, v >> 8) ; u8(b, v >> 16) ; u8(b, v >> 24) ; return 0 }
+fun u64b(b: List, v: Int): Int { u32b(b, v & 0xffffffff) ; u32b(b, (v >> 32) & 0xffffffff) ; return 0 }
+fun be32(b: List, v: Int): Int { u8(b, v >> 24) ; u8(b, v >> 16) ; u8(b, v >> 8) ; u8(b, v) ; return 0 }
+fun be64(b: List, v: Int): Int { be32(b, (v >> 32) & 0xffffffff) ; be32(b, v & 0xffffffff) ; return 0 }
+fun writeStrB(b: List, s: String): Int { var i = 0 ; while (i < strLen(s)) { u8(b, charAt(s, i)) ; i = i + 1 } ; return 0 }
+fun fixedB(b: List, n: Int, s: String): Int {
+  writeStrB(b, s)
+  var i = strLen(s)
+  while (i < n) { u8(b, 0) ; i = i + 1 }
+  return 0
+}
+fun padToB(b: List, target: Int): Int { while (listLen(b) < target) { u8(b, 0) } ; return 0 }
+fun alignUp(n: Int, a: Int): Int { return ((n + a - 1) / a) * a }
+fun subBytes(l: List, start: Int, len: Int): List {
+  val out = listNew()
+  var i = 0
+  while (i < len) { listPush(out, listGet(l, start + i)) ; i = i + 1 }
+  return out
+}
+fun strBytesK(s: String): List {
+  // Unescape backslash sequences to raw bytes, matching Fledge's lexer exactly
+  // (\n \t \r \\ \" \$ \0). A string value carrying a real byte (Fledge already
+  // unescaped) has no backslash, so it passes through — both stages converge.
+  val out = listNew()
+  var i = 0
+  val n = strLen(s)
+  while (i < n) {
+    val c = charAt(s, i)
+    if (c == 92 && i + 1 < n) {
+      val d = charAt(s, i + 1)
+      if (d == 110) { listPush(out, 10) ; i = i + 2 }
+      else { if (d == 116) { listPush(out, 9) ; i = i + 2 }
+      else { if (d == 114) { listPush(out, 13) ; i = i + 2 }
+      else { if (d == 92) { listPush(out, 92) ; i = i + 2 }
+      else { if (d == 34) { listPush(out, 34) ; i = i + 2 }
+      else { if (d == 36) { listPush(out, 36) ; i = i + 2 }
+      else { if (d == 48) { listPush(out, 0) ; i = i + 2 }
+      else { listPush(out, 92) ; i = i + 1 } } } } } } }
+    }
+    else { listPush(out, c) ; i = i + 1 }
+  }
+  return out
+}
+fun buildExe(words: List, entryOff: Int, symName: String, ident: String): List {
+  val vmpage = 0x4000
+  val textBase = 0x100000000
+  val nwords = listLen(words)
+  val textSize = 4 * nwords
+  val sizeofcmds = 72 + 232 + 72 + 16 + 16 + 24 + 80 + 32 + 24 + 24 + 24 + 56 + 16
+  val ncmds = 13
+  val lcEnd = 32 + sizeofcmds
+  val textOff = alignUp(lcEnd, 16)
+  val cstringOff = textOff + textSize
+  val textSegFilesize = alignUp(cstringOff, vmpage)
+  val textVmaddr = textBase + textOff
+  val linkeditFileoff = textSegFilesize
+  val cfOff = linkeditFileoff
+  val cfSize = 56
+  val expOff = cfOff + cfSize
+  val symoff = expOff
+  val nsyms = 1
+  val strsize = alignUp(1 + strLen(symName) + 1, 8)
+  val stroff = symoff + 16
+  val sigStart = alignUp(stroff + strsize, 16)
+  val identLen = strLen(ident) + 1
+  val codeLimit = sigStart
+  val ncodeslots = (codeLimit + 4095) / 4096
+  val cdHashoffset = 88 + identLen
+  val cdLen = cdHashoffset + ncodeslots * 32
+  val superLen = 12 + 8 + cdLen
+  val entryoff = textOff + entryOff
+  val linkeditFilesize = (sigStart + superLen) - linkeditFileoff
+  val linkeditVmsize = alignUp(linkeditFilesize, vmpage)
+  val b = listNew()
+  u32b(b, 0xFEEDFACF) ; u32b(b, 0x0100000C) ; u32b(b, 0) ; u32b(b, 0x2)
+  u32b(b, ncmds) ; u32b(b, sizeofcmds) ; u32b(b, 0x00200085) ; u32b(b, 0)
+  u32b(b, 0x19) ; u32b(b, 72) ; fixedB(b, 16, "__PAGEZERO")
+  u64b(b, 0) ; u64b(b, 0x100000000) ; u64b(b, 0) ; u64b(b, 0)
+  u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  u32b(b, 0x19) ; u32b(b, 232) ; fixedB(b, 16, "__TEXT")
+  u64b(b, textBase) ; u64b(b, textSegFilesize) ; u64b(b, 0) ; u64b(b, textSegFilesize)
+  u32b(b, 0x5) ; u32b(b, 0x5) ; u32b(b, 2) ; u32b(b, 0)
+  fixedB(b, 16, "__text") ; fixedB(b, 16, "__TEXT")
+  u64b(b, textVmaddr) ; u64b(b, textSize) ; u32b(b, textOff) ; u32b(b, 2)
+  u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0x80000400) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  fixedB(b, 16, "__cstring") ; fixedB(b, 16, "__TEXT")
+  u64b(b, textBase + cstringOff) ; u64b(b, 0) ; u32b(b, cstringOff) ; u32b(b, 0)
+  u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0x00000002) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  u32b(b, 0x19) ; u32b(b, 72) ; fixedB(b, 16, "__LINKEDIT")
+  u64b(b, textBase + textSegFilesize) ; u64b(b, linkeditVmsize)
+  u64b(b, linkeditFileoff) ; u64b(b, linkeditFilesize)
+  u32b(b, 0x1) ; u32b(b, 0x1) ; u32b(b, 0) ; u32b(b, 0)
+  u32b(b, 0x80000034) ; u32b(b, 16) ; u32b(b, cfOff) ; u32b(b, cfSize)
+  u32b(b, 0x80000033) ; u32b(b, 16) ; u32b(b, expOff) ; u32b(b, 0)
+  u32b(b, 0x2) ; u32b(b, 24) ; u32b(b, symoff) ; u32b(b, nsyms) ; u32b(b, stroff) ; u32b(b, strsize)
+  u32b(b, 0xB) ; u32b(b, 80) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, nsyms)
+  u32b(b, nsyms) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  u32b(b, 0xe) ; u32b(b, 32) ; u32b(b, 12) ; fixedB(b, 20, "/usr/lib/dyld")
+  u32b(b, 0x1b) ; u32b(b, 24)
+  val uh = sha256H(strBytesK(concat(ident, concat(":", intToStr(textSize)))))
+  be32(b, listGet(uh, 0)) ; be32(b, listGet(uh, 1)) ; be32(b, listGet(uh, 2)) ; be32(b, listGet(uh, 3))
+  u32b(b, 0x32) ; u32b(b, 24) ; u32b(b, 1) ; u32b(b, 0x000B0000) ; u32b(b, 0x000B0000) ; u32b(b, 0)
+  u32b(b, 0x80000028) ; u32b(b, 24) ; u64b(b, entryoff) ; u64b(b, 0)
+  u32b(b, 0xc) ; u32b(b, 56) ; u32b(b, 24) ; u32b(b, 2) ; u32b(b, 0x054C0000) ; u32b(b, 0x00010000)
+  fixedB(b, 32, "/usr/lib/libSystem.B.dylib")
+  u32b(b, 0x1d) ; u32b(b, 16) ; u32b(b, sigStart) ; u32b(b, superLen)
+  padToB(b, textOff)
+  var wi = 0
+  while (wi < nwords) { u32b(b, listGet(words, wi)) ; wi = wi + 1 }
+  padToB(b, linkeditFileoff)
+  u32b(b, 0) ; u32b(b, 0x20) ; u32b(b, 0x30) ; u32b(b, 0x30)
+  u32b(b, 0) ; u32b(b, 1) ; u32b(b, 0) ; u32b(b, 0)
+  u32b(b, 3) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  u32b(b, 1)
+  u8(b, 0x0F) ; u8(b, 1) ; u16(b, 0) ; u64b(b, textVmaddr + entryOff)
+  u8(b, 0) ; writeStrB(b, symName) ; u8(b, 0)
+  padToB(b, stroff + strsize)
+  padToB(b, sigStart)
+  val hashes = listNew()
+  var p = 0
+  while (p < ncodeslots) {
+    val start = p * 4096
+    var pl = 4096
+    if (codeLimit - start < 4096) { pl = codeLimit - start }
+    val hval = sha256H(subBytes(b, start, pl))
+    var k = 0
+    while (k < 8) { be32(hashes, listGet(hval, k)) ; k = k + 1 }
+    p = p + 1
+  }
+  val cd = listNew()
+  be32(cd, 0xfade0c02) ; be32(cd, cdLen) ; be32(cd, 0x00020400) ; be32(cd, 0x00000002)
+  be32(cd, cdHashoffset) ; be32(cd, 88) ; be32(cd, 0) ; be32(cd, ncodeslots)
+  be32(cd, codeLimit) ; u8(cd, 32) ; u8(cd, 2) ; u8(cd, 0) ; u8(cd, 12)
+  be32(cd, 0) ; be32(cd, 0) ; be32(cd, 0) ; be32(cd, 0)
+  be64(cd, 0) ; be64(cd, 0) ; be64(cd, textSegFilesize) ; be64(cd, 1)
+  writeStrB(cd, ident) ; u8(cd, 0)
+  var hi = 0
+  while (hi < listLen(hashes)) { listPush(cd, listGet(hashes, hi)) ; hi = hi + 1 }
+  be32(b, 0xfade0cc0) ; be32(b, superLen) ; be32(b, 1) ; be32(b, 0) ; be32(b, 20)
+  var ci = 0
+  while (ci < listLen(cd)) { listPush(b, listGet(cd, ci)) ; ci = ci + 1 }
+  return b
+}
+fun writeBytes(path: String, bytes: List): Int {
+  val fp = fopenW(path)
+  var i = 0
+  while (i < listLen(bytes)) { fputByte(listGet(bytes, i), fp) ; i = i + 1 }
+  fcloseF(fp)
+  return listLen(bytes)
+}
+
+// full Mach-O writer: handles cstring relocations (PAGE21/PAGEOFF12) and libc
+// imports (BR26 -> __stubs -> __got, dyld chained-fixup binds). nimp=0 collapses
+// to the no-import layout. `words` = user code words (patched + stubs appended).
+fun buildExeFull(words: List, relocs: List, cs: CstrSec, externals: List, entryOff: Int, symName: String, ident: String): List {
+  val vmpage = 0x4000
+  val textBase = 0x100000000
+  val nimp = listLen(externals)
+  val hasData = nimp > 0
+  val nwords = listLen(words)
+  val userTextSize = 4 * nwords
+  val textSize = userTextSize + nimp * 12
+  var dc = 0
+  if (hasData) { dc = 152 }
+  val sizeofcmds = 72 + 232 + dc + 72 + 16 + 16 + 24 + 80 + 32 + 24 + 24 + 24 + 56 + 16
+  var ncmds = 13
+  if (hasData) { ncmds = 14 }
+  val lcEnd = 32 + sizeofcmds
+  val textOff = alignUp(lcEnd, 16)
+  val cstringOff = textOff + textSize
+  val cstringSize = listLen(cs.bytes)
+  val textSegFilesize = alignUp(cstringOff + cstringSize, vmpage)
+  val textVmaddr = textBase + textOff
+  val cstringVmaddr = textBase + cstringOff
+  val dataconstFileoff = textSegFilesize
+  val gotSize = nimp * 8
+  var dataconstFilesize = 0
+  if (hasData) { dataconstFilesize = alignUp(gotSize, vmpage) }
+  val dataconstVmaddr = textBase + textSegFilesize
+  // resolve relocations into the user words
+  var ri = 0
+  while (ri < listLen(relocs)) {
+    val r: Reloc = listGet(relocs, ri)
+    val idx = r.off / 4
+    if (r.kind == 0) {
+      val ei = idxOfStr(externals, r.sym)
+      val target = userTextSize + ei * 12
+      val disp = (target - r.off) / 4
+      listSet(words, idx, (listGet(words, idx) & 0xFC000000) | (disp & 0x3ffffff))
+    } else {
+      val coff = cstrOffOf(cs, r.sym)
+      val target = cstringVmaddr + coff
+      if (r.kind == 1) {
+        val pc = textVmaddr + r.off
+        val imm = (target >> 12) - (pc >> 12)
+        listSet(words, idx, listGet(words, idx) | ((imm & 3) << 29) | (((imm >> 2) & 0x7ffff) << 5))
+      } else {
+        listSet(words, idx, listGet(words, idx) | ((target & 0xfff) << 10))
+      }
+    }
+    ri = ri + 1
+  }
+  // synthesize stubs (adrp x16,got@PAGE ; ldr x16,[x16,got@PAGEOFF] ; br x16)
+  var si = 0
+  while (si < nimp) {
+    val gotVa = dataconstVmaddr + si * 8
+    val stubVa = textVmaddr + userTextSize + si * 12
+    val pd = (gotVa >> 12) - (stubVa >> 12)
+    listPush(words, w32(0x90000000 | ((pd & 3) << 29) | (((pd >> 2) & 0x7ffff) << 5) | 16))
+    val off12 = gotVa & 0xfff
+    listPush(words, w32(0xF9400000 | ((off12 / 8) << 10) | (16 << 5) | 16))
+    listPush(words, 0xD61F0200)
+    si = si + 1
+  }
+  // string table
+  val strsize = alignUp(1 + strLen(symName) + 1, 8)
+  val nsyms = 1
+  // chained fixups payload
+  val cf = listNew()
+  if (hasData == false) {
+    u32b(cf, 0) ; u32b(cf, 0x20) ; u32b(cf, 0x30) ; u32b(cf, 0x30)
+    u32b(cf, 0) ; u32b(cf, 1) ; u32b(cf, 0) ; u32b(cf, 0)
+    u32b(cf, 3) ; u32b(cf, 0) ; u32b(cf, 0) ; u32b(cf, 0) ; u32b(cf, 0) ; u32b(cf, 0)
+  } else {
+    val pool = listNew() ; listPush(pool, 0)
+    val poolOff = listNew()
+    var pi = 0
+    while (pi < nimp) {
+      listPush(poolOff, listLen(pool))
+      val nb = strBytesK(listGet(externals, pi))
+      var k = 0 ; while (k < listLen(nb)) { listPush(pool, listGet(nb, k)) ; k = k + 1 }
+      listPush(pool, 0)
+      pi = pi + 1
+    }
+    val importsOffset = 0x50
+    val symbolsOffset = importsOffset + nimp * 4
+    u32b(cf, 0) ; u32b(cf, 0x20) ; u32b(cf, importsOffset) ; u32b(cf, symbolsOffset)
+    u32b(cf, nimp) ; u32b(cf, 1) ; u32b(cf, 0) ; u32b(cf, 0)
+    u32b(cf, 4) ; u32b(cf, 0) ; u32b(cf, 0) ; u32b(cf, 0x18) ; u32b(cf, 0) ; u32b(cf, 0)
+    u32b(cf, 24) ; u16(cf, vmpage) ; u16(cf, 6) ; u64b(cf, dataconstVmaddr - textBase) ; u32b(cf, 0) ; u16(cf, 1) ; u16(cf, 0)
+    var ii = 0
+    while (ii < nimp) { u32b(cf, 1 | (listGet(poolOff, ii) << 9)) ; ii = ii + 1 }
+    var pj = 0 ; while (pj < listLen(pool)) { listPush(cf, listGet(pool, pj)) ; pj = pj + 1 }
+    while ((listLen(cf) % 8) != 0) { listPush(cf, 0) }
+  }
+  val cfSize = listLen(cf)
+  var linkeditFileoff = textSegFilesize
+  if (hasData) { linkeditFileoff = dataconstFileoff + dataconstFilesize }
+  val cfOff = linkeditFileoff
+  val expOff = cfOff + cfSize
+  val symoff = expOff
+  val stroff = symoff + nsyms * 16
+  val sigStart = alignUp(stroff + strsize, 16)
+  val identLen = strLen(ident) + 1
+  val codeLimit = sigStart
+  val ncodeslots = (codeLimit + 4095) / 4096
+  val cdLen = 88 + identLen + ncodeslots * 32
+  val superLen = 12 + 8 + cdLen
+  val linkeditFilesize = (sigStart + superLen) - linkeditFileoff
+  val linkeditVmsize = alignUp(linkeditFilesize, vmpage)
+  var dataconstVmsize = 0
+  if (hasData) { dataconstVmsize = dataconstFilesize }
+  var linkeditVmaddr = textBase + textSegFilesize
+  if (hasData) { linkeditVmaddr = dataconstVmaddr + dataconstVmsize }
+  val entryoff = textOff + entryOff
+
+  val b = listNew()
+  u32b(b, 0xFEEDFACF) ; u32b(b, 0x0100000C) ; u32b(b, 0) ; u32b(b, 0x2)
+  u32b(b, ncmds) ; u32b(b, sizeofcmds) ; u32b(b, 0x00200085) ; u32b(b, 0)
+  u32b(b, 0x19) ; u32b(b, 72) ; fixedB(b, 16, "__PAGEZERO")
+  u64b(b, 0) ; u64b(b, 0x100000000) ; u64b(b, 0) ; u64b(b, 0)
+  u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  u32b(b, 0x19) ; u32b(b, 232) ; fixedB(b, 16, "__TEXT")
+  u64b(b, textBase) ; u64b(b, textSegFilesize) ; u64b(b, 0) ; u64b(b, textSegFilesize)
+  u32b(b, 0x5) ; u32b(b, 0x5) ; u32b(b, 2) ; u32b(b, 0)
+  fixedB(b, 16, "__text") ; fixedB(b, 16, "__TEXT")
+  u64b(b, textVmaddr) ; u64b(b, textSize) ; u32b(b, textOff) ; u32b(b, 2)
+  u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0x80000400) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  fixedB(b, 16, "__cstring") ; fixedB(b, 16, "__TEXT")
+  u64b(b, cstringVmaddr) ; u64b(b, cstringSize) ; u32b(b, cstringOff) ; u32b(b, 0)
+  u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0x00000002) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  if (hasData) {
+    u32b(b, 0x19) ; u32b(b, 152) ; fixedB(b, 16, "__DATA_CONST")
+    u64b(b, dataconstVmaddr) ; u64b(b, dataconstVmsize) ; u64b(b, dataconstFileoff) ; u64b(b, dataconstFilesize)
+    u32b(b, 0x3) ; u32b(b, 0x3) ; u32b(b, 1) ; u32b(b, 0x10)
+    fixedB(b, 16, "__got") ; fixedB(b, 16, "__DATA_CONST")
+    u64b(b, dataconstVmaddr) ; u64b(b, gotSize) ; u32b(b, dataconstFileoff) ; u32b(b, 3)
+    u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0x00000006) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  }
+  u32b(b, 0x19) ; u32b(b, 72) ; fixedB(b, 16, "__LINKEDIT")
+  u64b(b, linkeditVmaddr) ; u64b(b, linkeditVmsize) ; u64b(b, linkeditFileoff) ; u64b(b, linkeditFilesize)
+  u32b(b, 0x1) ; u32b(b, 0x1) ; u32b(b, 0) ; u32b(b, 0)
+  u32b(b, 0x80000034) ; u32b(b, 16) ; u32b(b, cfOff) ; u32b(b, cfSize)
+  u32b(b, 0x80000033) ; u32b(b, 16) ; u32b(b, expOff) ; u32b(b, 0)
+  u32b(b, 0x2) ; u32b(b, 24) ; u32b(b, symoff) ; u32b(b, nsyms) ; u32b(b, stroff) ; u32b(b, strsize)
+  u32b(b, 0xB) ; u32b(b, 80) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, nsyms)
+  u32b(b, nsyms) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0) ; u32b(b, 0)
+  u32b(b, 0xe) ; u32b(b, 32) ; u32b(b, 12) ; fixedB(b, 20, "/usr/lib/dyld")
+  u32b(b, 0x1b) ; u32b(b, 24)
+  val uh = sha256H(strBytesK(concat(ident, concat(":", intToStr(textSize)))))
+  be32(b, listGet(uh, 0)) ; be32(b, listGet(uh, 1)) ; be32(b, listGet(uh, 2)) ; be32(b, listGet(uh, 3))
+  u32b(b, 0x32) ; u32b(b, 24) ; u32b(b, 1) ; u32b(b, 0x000B0000) ; u32b(b, 0x000B0000) ; u32b(b, 0)
+  u32b(b, 0x80000028) ; u32b(b, 24) ; u64b(b, entryoff) ; u64b(b, 0)
+  u32b(b, 0xc) ; u32b(b, 56) ; u32b(b, 24) ; u32b(b, 2) ; u32b(b, 0x054C0000) ; u32b(b, 0x00010000)
+  fixedB(b, 32, "/usr/lib/libSystem.B.dylib")
+  u32b(b, 0x1d) ; u32b(b, 16) ; u32b(b, sigStart) ; u32b(b, superLen)
+  padToB(b, textOff)
+  var wi = 0
+  while (wi < listLen(words)) { u32b(b, listGet(words, wi)) ; wi = wi + 1 }
+  var ci = 0
+  while (ci < listLen(cs.bytes)) { u8(b, listGet(cs.bytes, ci)) ; ci = ci + 1 }
+  if (hasData) {
+    padToB(b, dataconstFileoff)
+    var gi = 0
+    while (gi < nimp) {
+      var next = 0
+      if (gi < nimp - 1) { next = 2 }
+      u32b(b, gi) ; u32b(b, 0x80000000 | (next << 19))
+      gi = gi + 1
+    }
+  }
+  padToB(b, linkeditFileoff)
+  var cfi = 0
+  while (cfi < listLen(cf)) { listPush(b, listGet(cf, cfi)) ; cfi = cfi + 1 }
+  u32b(b, 1) ; u8(b, 0x0F) ; u8(b, 1) ; u16(b, 0) ; u64b(b, textVmaddr + entryOff)
+  u8(b, 0) ; writeStrB(b, symName) ; u8(b, 0)
+  padToB(b, stroff + strsize)
+  padToB(b, sigStart)
+  val hashes = listNew()
+  var p = 0
+  while (p < ncodeslots) {
+    val start = p * 4096
+    var pl = 4096
+    if (codeLimit - start < 4096) { pl = codeLimit - start }
+    val hval = sha256H(subBytes(b, start, pl))
+    var k = 0 ; while (k < 8) { be32(hashes, listGet(hval, k)) ; k = k + 1 }
+    p = p + 1
+  }
+  val cd = listNew()
+  be32(cd, 0xfade0c02) ; be32(cd, cdLen) ; be32(cd, 0x00020400) ; be32(cd, 0x00000002)
+  be32(cd, 88 + identLen) ; be32(cd, 88) ; be32(cd, 0) ; be32(cd, ncodeslots)
+  be32(cd, codeLimit) ; u8(cd, 32) ; u8(cd, 2) ; u8(cd, 0) ; u8(cd, 12)
+  be32(cd, 0) ; be32(cd, 0) ; be32(cd, 0) ; be32(cd, 0)
+  be64(cd, 0) ; be64(cd, 0) ; be64(cd, textSegFilesize) ; be64(cd, 1)
+  writeStrB(cd, ident) ; u8(cd, 0)
+  var hi = 0
+  while (hi < listLen(hashes)) { listPush(cd, listGet(hashes, hi)) ; hi = hi + 1 }
+  be32(b, 0xfade0cc0) ; be32(b, superLen) ; be32(b, 1) ; be32(b, 0) ; be32(b, 20)
+  var cdi = 0
+  while (cdi < listLen(cd)) { listPush(b, listGet(cd, cdi)) ; cdi = cdi + 1 }
+  return b
+}

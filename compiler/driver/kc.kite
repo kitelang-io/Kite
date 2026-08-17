@@ -1,0 +1,366 @@
+// stage1/kc.kite — a scalar Kite compiler DRIVER (Phase C integration).
+// Run: kitec run stage1/kenc.kite stage1/kc.kite
+// Reads /tmp/kc_input.kite, lexes + parses the scalar subset into the backend's
+// AST (Expr/Stmt/Func from kenc.kite), then codegen -> assembleExe -> Mach-O ->
+// signed native binary at /tmp/kc_out. This is the whole pipeline in Kite for the
+// pure-Int subset (fun/val/var/return/while/if/assign/arith/compare/bitwise/calls).
+
+// --- scalar lexer ---
+struct TokS(val kind: Int, val text: String)
+struct LxS(val src: String, val n: Int, var pos: Int)
+fun cS(l: LxS): Int { if (l.pos < l.n) { return charAt(l.src, l.pos) } return 0 }
+fun nS(l: LxS): Int { if (l.pos + 1 < l.n) { return charAt(l.src, l.pos + 1) } return 0 }
+fun aS(l: LxS): Int { l.pos = l.pos + 1 ; return 0 }
+fun isDig(c: Int): Bool { return c >= 48 && c <= 57 }
+fun isAlp(c: Int): Bool { return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c == 95 }
+fun isAln(c: Int): Bool { return isAlp(c) || isDig(c) }
+fun isHexD(c: Int): Bool { return isDig(c) || (c >= 97 && c <= 102) || (c >= 65 && c <= 70) }
+
+fun trivS(l: LxS): Int {
+  var go = 1
+  while (go == 1) {
+    val c = cS(l)
+    if (c == 32 || c == 9 || c == 13 || c == 10 || c == 59) { aS(l) }
+    else {
+      if (c == 47 && nS(l) == 47) { while (cS(l) != 10 && cS(l) != 0) { aS(l) } }
+      else { if (c == 47 && nS(l) == 42) {
+        aS(l) ; aS(l)
+        var d = 1
+        while (d > 0) { val a = cS(l) ; val b = nS(l)
+          if (a == 0) { d = 0 } else { if (a == 47 && b == 42) { aS(l) ; aS(l) ; d = d + 1 }
+          else { if (a == 42 && b == 47) { aS(l) ; aS(l) ; d = d - 1 } else { aS(l) } } } }
+      } else { go = 0 } }
+    }
+  }
+  return 0
+}
+fun kwS(w: String): Int {
+  if (strEq(w, "fun")) { return 10 }
+  if (strEq(w, "val")) { return 11 }
+  if (strEq(w, "var")) { return 12 }
+  if (strEq(w, "return")) { return 13 }
+  if (strEq(w, "while")) { return 14 }
+  if (strEq(w, "if")) { return 15 }
+  if (strEq(w, "else")) { return 16 }
+  if (strEq(w, "struct")) { return 17 }
+  if (strEq(w, "enum")) { return 18 }
+  if (strEq(w, "when")) { return 19 }
+  return 1
+}
+fun pushT(t: List, k: Int, s: String): Int { listPush(t, TokS(k, s)) ; return 0 }
+fun lexS(src: String): List {
+  val t = listNew()
+  val l = LxS(src, strLen(src), 0)
+  var go = 1
+  while (go == 1) {
+    trivS(l)
+    val c = cS(l)
+    if (c == 0) { go = 0 }
+    else {
+      if (isDig(c)) {
+        val s = l.pos
+        if (c == 48 && (nS(l) == 120 || nS(l) == 88)) { aS(l) ; aS(l) ; while (isHexD(cS(l))) { aS(l) } }
+        else { while (isDig(cS(l))) { aS(l) } }
+        pushT(t, 2, substr(l.src, s, l.pos - s))
+      }
+      else { if (isAlp(c)) {
+        val s = l.pos ; while (isAln(cS(l))) { aS(l) }
+        val w = substr(l.src, s, l.pos - s) ; val k = kwS(w)
+        if (k == 1) { pushT(t, 1, w) } else { pushT(t, k, "") }
+      } else { if (c == 34) {
+        aS(l) ; val s = l.pos
+        while (cS(l) != 34 && cS(l) != 0) { if (cS(l) == 92) { aS(l) } aS(l) }
+        val content = substr(l.src, s, l.pos - s) ; aS(l)
+        pushT(t, 3, content)
+      } else { lexOpS(l, t) } } }
+    }
+  }
+  listPush(t, TokS(0, ""))
+  return t
+}
+fun lexOpS(l: LxS, t: List): Int {
+  val c = cS(l) ; aS(l) ; val d = cS(l)
+  if (c == 40) { return pushT(t, 20, "") }
+  if (c == 41) { return pushT(t, 21, "") }
+  if (c == 123) { return pushT(t, 22, "") }
+  if (c == 125) { return pushT(t, 23, "") }
+  if (c == 44) { return pushT(t, 24, "") }
+  if (c == 58) { return pushT(t, 25, "") }
+  if (c == 46) { return pushT(t, 27, "") }
+  if (c == 43) { return pushT(t, 30, "") }
+  if (c == 45) { if (d == 62) { aS(l) ; return pushT(t, 50, "") } return pushT(t, 31, "") }  // -> or -
+  if (c == 42) { return pushT(t, 32, "") }
+  if (c == 47) { return pushT(t, 33, "") }
+  if (c == 37) { return pushT(t, 34, "") }
+  if (c == 61) { if (d == 61) { aS(l) ; return pushT(t, 35, "") } return pushT(t, 43, "") }
+  if (c == 33) { if (d == 61) { aS(l) ; return pushT(t, 36, "") } return pushT(t, 44, "") }
+  if (c == 60) { if (d == 61) { aS(l) ; return pushT(t, 39, "") } if (d == 60) { aS(l) ; return pushT(t, 48, "") } return pushT(t, 37, "") }
+  if (c == 62) { if (d == 61) { aS(l) ; return pushT(t, 40, "") } if (d == 62) { aS(l) ; return pushT(t, 49, "") } return pushT(t, 38, "") }
+  if (c == 38) { if (d == 38) { aS(l) ; return pushT(t, 41, "") } return pushT(t, 45, "") }
+  if (c == 124) { if (d == 124) { aS(l) ; return pushT(t, 42, "") } return pushT(t, 46, "") }
+  if (c == 94) { return pushT(t, 47, "") }
+  return 0
+}
+
+// --- scalar parser (produces kenc.kite's Expr/Stmt/Func) ---
+struct PC(val toks: List, var pos: Int)
+fun pkS(p: PC): Int { val t: TokS = listGet(p.toks, p.pos) ; return t.kind }
+fun pkS2(p: PC): Int { if (p.pos + 1 >= listLen(p.toks)) { return 0 } val t: TokS = listGet(p.toks, p.pos + 1) ; return t.kind }
+fun ptS(p: PC): String { val t: TokS = listGet(p.toks, p.pos) ; return t.text }
+fun eS(p: PC): Int { p.pos = p.pos + 1 ; return 0 }
+fun opS(k: Int): String {
+  if (k == 30) { return "+" }
+  if (k == 31) { return "-" }
+  if (k == 32) { return "*" }
+  if (k == 33) { return "/" }
+  if (k == 34) { return "%" }
+  if (k == 35) { return "==" }
+  if (k == 36) { return "!=" }
+  if (k == 37) { return "<" }
+  if (k == 38) { return ">" }
+  if (k == 39) { return "<=" }
+  if (k == 40) { return ">=" }
+  if (k == 41) { return "&&" }
+  if (k == 42) { return "||" }
+  if (k == 45) { return "&" }
+  if (k == 46) { return "|" }
+  if (k == 47) { return "^" }
+  if (k == 48) { return "<<" }
+  if (k == 49) { return ">>" }
+  return "?"
+}
+fun pArgsS(p: PC): List {
+  val a = listNew()
+  if (pkS(p) != 21) {
+    var more = 1
+    while (more == 1) { listPush(a, pExprS(p)) ; if (pkS(p) == 24) { eS(p) } else { more = 0 } }
+  }
+  eS(p)
+  return a
+}
+fun isRetStopK(k: Int): Bool { return k == 23 || k == 21 || k == 24 || k == 0 || k == 16 || k == 50 }
+fun pPrimS(p: PC): Expr {
+  val k = pkS(p)
+  if (k == 15) { return pIfS(p) }
+  if (k == 19) { return pWhenS(p) }
+  if (k == 13) { eS(p) ; if (isRetStopK(pkS(p))) { return ERet(ENoRes) } return ERet(pExprS(p)) }
+  if (k == 22) { return pBlockS(p) }                        // { block } as an expression
+  if (k == 20) { eS(p) ; val e = pExprS(p) ; eS(p) ; return e }
+  if (k == 2) { val t = ptS(p) ; eS(p) ; return EInt(t) }
+  if (k == 3) { val t = ptS(p) ; eS(p) ; return EStr(t) }
+  val nm = ptS(p) ; eS(p)
+  if (pkS(p) == 20) { eS(p) ; return ECall(nm, pArgsS(p)) }
+  if (strEq(nm, "true")) { return EInt("1") }     // bool literals are ints in the boxed model
+  if (strEq(nm, "false")) { return EInt("0") }
+  return EIdent(nm)
+}
+fun pPostfixS(p: PC): Expr {
+  var e = pPrimS(p)
+  while (pkS(p) == 27) { eS(p) ; val f = ptS(p) ; eS(p) ; e = EField(e, f) }
+  return e
+}
+fun pUnaryS(p: PC): Expr {
+  if (pkS(p) == 31) { eS(p) ; return EUnary("neg -", pUnaryS(p)) }
+  if (pkS(p) == 44) { eS(p) ; return EUnary("not !", pUnaryS(p)) }
+  return pPostfixS(p)
+}
+fun mkAssignS(e: Expr, rhs: Expr): Stmt {
+  return when (e) {
+    EIdent(nm) -> SAssign(nm, rhs)
+    EField(b, f) -> SAssignF(b, f, rhs)
+    else -> SExprS(rhs)
+  }
+}
+fun isUpperS(s: String): Bool { if (strLen(s) == 0) { return false } val c = charAt(s, 0) ; return c >= 65 && c <= 90 }
+fun pPatS(p: PC): Pat {
+  if (pkS(p) == 2) { val t = ptS(p) ; eS(p) ; return PIntP(t) }
+  val nm = ptS(p) ; eS(p)
+  if (strEq(nm, "_")) { return PWild }
+  if (isUpperS(nm)) {
+    if (pkS(p) == 20) {
+      eS(p)
+      val subs = listNew()
+      if (pkS(p) != 21) {
+        var more = 1
+        while (more == 1) { listPush(subs, pPatS(p)) ; if (pkS(p) == 24) { eS(p) } else { more = 0 } }
+      }
+      eS(p)
+      return PCtorP(nm, subs)
+    }
+    return PVarP(nm)
+  }
+  return PBindP(nm)
+}
+fun pWhenS(p: PC): Expr {
+  eS(p) ; eS(p)                         // 'when' '('
+  val subj = pExprS(p) ; eS(p)          // ')'
+  eS(p)                                 // '{'
+  val arms = listNew()
+  while (pkS(p) != 23 && pkS(p) != 0) {
+    if (pkS(p) == 16) { eS(p) ; eS(p) ; listPush(arms, Arm(1, PWild, pExprS(p))) }  // else ->
+    else { val pat = pPatS(p) ; eS(p) ; listPush(arms, Arm(0, pat, pExprS(p))) }     // pat ->
+  }
+  eS(p)                                 // '}'
+  return EWhen(subj, arms)
+}
+fun isMulK(k: Int): Bool { return k == 32 || k == 33 || k == 34 }
+fun isAddK(k: Int): Bool { return k == 30 || k == 31 }
+fun isShK(k: Int): Bool { return k == 48 || k == 49 }
+fun isRelK(k: Int): Bool { return k == 37 || k == 38 || k == 39 || k == 40 }
+fun pMulS(p: PC): Expr { var e = pUnaryS(p) ; while (isMulK(pkS(p))) { val o = opS(pkS(p)) ; eS(p) ; e = EBin(o, e, pUnaryS(p)) } return e }
+fun pAddS(p: PC): Expr { var e = pMulS(p) ; while (isAddK(pkS(p))) { val o = opS(pkS(p)) ; eS(p) ; e = EBin(o, e, pMulS(p)) } return e }
+fun pShS(p: PC): Expr { var e = pAddS(p) ; while (isShK(pkS(p))) { val o = opS(pkS(p)) ; eS(p) ; e = EBin(o, e, pAddS(p)) } return e }
+fun pRelS(p: PC): Expr { var e = pShS(p) ; while (isRelK(pkS(p))) { val o = opS(pkS(p)) ; eS(p) ; e = EBin(o, e, pShS(p)) } return e }
+fun pEqS(p: PC): Expr { var e = pRelS(p) ; while (pkS(p) == 35 || pkS(p) == 36) { val o = opS(pkS(p)) ; eS(p) ; e = EBin(o, e, pRelS(p)) } return e }
+fun pBandS(p: PC): Expr { var e = pEqS(p) ; while (pkS(p) == 45) { eS(p) ; e = EBin("&", e, pEqS(p)) } return e }
+fun pXorS(p: PC): Expr { var e = pBandS(p) ; while (pkS(p) == 47) { eS(p) ; e = EBin("^", e, pBandS(p)) } return e }
+fun pBorS(p: PC): Expr { var e = pXorS(p) ; while (pkS(p) == 46) { eS(p) ; e = EBin("|", e, pXorS(p)) } return e }
+fun pAndS(p: PC): Expr { var e = pBorS(p) ; while (pkS(p) == 41) { eS(p) ; e = EBin("&&", e, pBorS(p)) } return e }
+fun pExprS(p: PC): Expr { var e = pAndS(p) ; while (pkS(p) == 42) { eS(p) ; e = EBin("||", e, pAndS(p)) } return e }
+
+fun pIfS(p: PC): Expr {
+  eS(p) ; eS(p)                          // 'if' '('
+  val c = pExprS(p) ; eS(p)              // ')'
+  val th = pBlockS(p)
+  if (pkS(p) == 16) { eS(p) ; if (pkS(p) == 15) { return EIf(c, th, pIfS(p)) } return EIf(c, th, pBlockS(p)) }
+  return EIf(c, th, ENoRes)
+}
+fun skipTypeS(p: PC): Int {          // consume a type annotation: idents, ::, <...>, ?
+  var depth = 0
+  var go = 1
+  while (go == 1) {
+    val k = pkS(p)
+    if (k == 37) { depth = depth + 1 ; eS(p) }
+    else { if (k == 38) { if (depth > 0) { depth = depth - 1 ; eS(p) } else { go = 0 } }
+    else { if (k == 1 || k == 25 || k == 24 && depth > 0) { eS(p) }
+    else { go = 0 } } }
+  }
+  return 0
+}
+fun pStmtS(p: PC): Stmt {
+  val k = pkS(p)
+  if (k == 11 || k == 12) {
+    eS(p) ; val nm = ptS(p) ; eS(p)
+    if (pkS(p) == 25) { eS(p) ; val ty = ptS(p) ; eS(p) ; skipTypeS(p) ; eS(p) ; return SLetT(nm, ty, pExprS(p)) }
+    eS(p)                               // '='
+    return SLet(nm, pExprS(p))
+  }
+  if (k == 13) { eS(p) ; if (pkS(p) == 23) { return SReturnU } return SReturnV(pExprS(p)) }
+  if (k == 14) { eS(p) ; eS(p) ; val c = pExprS(p) ; eS(p) ; return SWhile(c, pBlockS(p)) }
+  val e = pExprS(p)
+  if (pkS(p) == 43) { eS(p) ; return mkAssignS(e, pExprS(p)) }
+  return SExprS(e)
+}
+fun pBlockS(p: PC): Expr {
+  eS(p)                                 // '{'
+  val stmts = listNew()
+  var res = ENoRes
+  var go = 1
+  while (go == 1) {
+    val k = pkS(p)
+    if (k == 23 || k == 0) { go = 0 }
+    else {
+      if (k == 11 || k == 12 || k == 13 || k == 14) { listPush(stmts, pStmtS(p)) }
+      else {
+        val e = pExprS(p)
+        if (pkS(p) == 43) { eS(p) ; listPush(stmts, mkAssignS(e, pExprS(p))) }
+        else { if (pkS(p) == 23) { res = e } else { listPush(stmts, SExprS(e)) } }
+      }
+    }
+  }
+  eS(p)                                 // '}'
+  return EBlock(stmts, res)
+}
+fun pFnS(p: PC, funN: List, funRet: List): Func {
+  eS(p) ; val nm = ptS(p) ; eS(p) ; eS(p)   // 'fun' name '('
+  val params = listNew()
+  val paramTys = listNew()
+  if (pkS(p) != 21) {
+    var more = 1
+    while (more == 1) {
+      val pn = ptS(p) ; eS(p)
+      var pt = ""
+      if (pkS(p) == 25) { eS(p) ; pt = ptS(p) ; eS(p) ; skipTypeS(p) }
+      listPush(params, pn) ; listPush(paramTys, pt)
+      if (pkS(p) == 24) { eS(p) } else { more = 0 }
+    }
+  }
+  eS(p)                                 // ')'
+  var rt = ""
+  if (pkS(p) == 25) { eS(p) ; rt = ptS(p) ; eS(p) ; skipTypeS(p) }
+  listPush(funN, nm) ; listPush(funRet, rt)
+  if (pkS(p) == 43) { eS(p) ; return Func(nm, params, paramTys, pExprS(p)) }  // = expr body
+  return Func(nm, params, paramTys, pBlockS(p))
+}
+struct PR(val funcs: List, val structN: List, val structF: List, val structFT: List, val variantN: List, val variantTag: List, val funN: List, val funRet: List)
+fun pEnumS(p: PC, variantN: List, variantTag: List): Int {
+  eS(p)                                 // 'enum'
+  eS(p)                                 // enum name
+  eS(p)                                 // '{'
+  var tag = 0
+  while (pkS(p) != 23 && pkS(p) != 0) {
+    val vn = ptS(p) ; eS(p)
+    if (pkS(p) == 20) {                 // '(' payload types ')'
+      eS(p)
+      if (pkS(p) != 21) {
+        var more = 1
+        while (more == 1) { skipTypeS(p) ; if (pkS(p) == 24) { eS(p) } else { more = 0 } }
+      }
+      eS(p)
+    }
+    listPush(variantN, vn) ; listPush(variantTag, tag)
+    tag = tag + 1
+  }
+  eS(p)                                 // '}'
+  return 0
+}
+fun pStructS(p: PC, structN: List, structF: List, structFT: List): Int {
+  eS(p)                                 // 'struct'
+  val name = ptS(p) ; eS(p)
+  eS(p)                                 // '('
+  val fields = listNew()
+  val ftys = listNew()
+  if (pkS(p) != 21) {
+    var more = 1
+    while (more == 1) {
+      if (pkS(p) == 11 || pkS(p) == 12) { eS(p) }   // skip val/var
+      val fn = ptS(p) ; eS(p)
+      var ft = ""
+      if (pkS(p) == 25) { eS(p) ; ft = ptS(p) ; eS(p) ; skipTypeS(p) }
+      listPush(fields, fn) ; listPush(ftys, ft)
+      if (pkS(p) == 24) { eS(p) } else { more = 0 }
+    }
+  }
+  eS(p)                                 // ')'
+  listPush(structN, name) ; listPush(structF, fields) ; listPush(structFT, ftys)
+  return 0
+}
+fun parseAll(toks: List): PR {
+  val p = PC(toks, 0)
+  val funcs = listNew() ; val structN = listNew() ; val structF = listNew() ; val structFT = listNew()
+  val variantN = listNew() ; val variantTag = listNew()
+  val funN = listNew() ; val funRet = listNew()
+  var go = 1
+  while (go == 1) {
+    val k = pkS(p)
+    if (k == 10) { listPush(funcs, pFnS(p, funN, funRet)) }
+    else { if (k == 17) { pStructS(p, structN, structF, structFT) }
+    else { if (k == 18) { pEnumS(p, variantN, variantTag) }
+    else { go = 0 } } }
+  }
+  return PR(funcs, structN, structF, structFT, variantN, variantTag, funN, funRet)
+}
+
+fun main(): Int {
+  val src = readFile("/tmp/kc_input.kite")
+  val pr = parseAll(lexS(src))
+  val gen = genProgramG(pr.funcs, pr.structN, pr.structF, pr.structFT, pr.variantN, pr.variantTag, pr.funN, pr.funRet)
+  val code = optimize(gen.code)
+  val asmR = assembleReloc(code)
+  val cs = buildCstr(gen.cstrN, gen.cstrV)
+  val externals = externalsOf(asmR.relocs)
+  val entry = entryOffset(code, "_main")
+  val n = writeBytes("/tmp/kc_out", buildExeFull(asmR.words, asmR.relocs, cs, externals, entry, "_main", "kcout"))
+  println(concat("compiled ", concat(intToStr(listLen(pr.funcs)), concat(" funcs, ", concat(intToStr(listLen(pr.structN)), " structs")))))
+  return listLen(pr.funcs)
+}

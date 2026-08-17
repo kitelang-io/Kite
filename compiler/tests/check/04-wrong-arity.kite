@@ -1,0 +1,2 @@
+fun g(a: Int): Int = a
+fun m(): Int { return g(1, 2) }

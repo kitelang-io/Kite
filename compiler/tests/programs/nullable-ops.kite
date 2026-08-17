@@ -1,0 +1,18 @@
+struct Box(val v: Int)
+fun getBox(flag: Int): Box {
+  if (flag == 1) { return Box(42) }
+  return null
+}
+fun main(): Int {
+  val b = getBox(1)
+  val n = getBox(0)
+  val x = b?.v
+  val y = n?.v
+  val z = n ?: b
+  val zv = z?.v
+  val w = b!!
+  val wv = w.v
+  var ynull = 0
+  if (y == 0) { ynull = 1 }
+  return x + zv + wv + ynull
+}

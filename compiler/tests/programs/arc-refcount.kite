@@ -1,0 +1,9 @@
+fun main(): Int {
+  val obj = __allocRC(16)
+  __retain(obj)
+  __retain(obj)
+  val c1 = __refcount(obj)
+  __release(obj)
+  val c2 = __refcount(obj)
+  return c1 * 10 + c2
+}

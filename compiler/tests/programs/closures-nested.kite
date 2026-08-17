@@ -1,0 +1,6 @@
+fun main(): Int {
+  val a = 1
+  val f = { x -> { y -> x + y + a } }
+  val g = f(2)
+  return g(3)
+}

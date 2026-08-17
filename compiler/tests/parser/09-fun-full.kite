@@ -1,0 +1,4 @@
+fun add(a: Int, b: Int): Int = a + b
+fun consume(consuming self): Int = 0
+fun mix(a: Int, b: inout Foo, c: consuming Bar): Bool = true
+fun swap(a: inout Int, b: inout Int) { }

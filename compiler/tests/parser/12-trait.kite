@@ -1,0 +1,2 @@
+trait Show { fun show(self): String }
+trait Ord<T>: Eq + PartialOrd where T: Clone { type Item: Show ; type Raw ; fun cmp(self, other: T): Int ; fun max(self, other: T): T = self }

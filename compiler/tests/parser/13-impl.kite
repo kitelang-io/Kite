@@ -1,0 +1,3 @@
+impl Show for Point { fun show(self): String = "p" }
+impl<T> Container<T> for Box<T> where T: Clone { type Item = T ; fun get(self): T = self.v }
+impl Point { fun origin(): Point = Point(0, 0) }

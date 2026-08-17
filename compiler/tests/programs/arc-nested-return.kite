@@ -1,0 +1,15 @@
+class Res(val id: Int, val log: List) {
+  deinit { listSet(self.log, 0, listGet(self.log, 0) + 1) }
+}
+fun f(flag: Int, log: List): Int {
+  val r = Res(5, log)
+  if (flag == 1) { return r.id }
+  return 0
+}
+fun main(): Int {
+  val log = listNew()
+  listPush(log, 0)
+  val a = f(1, log)
+  val b = f(0, log)
+  return a + b + listGet(log, 0)
+}

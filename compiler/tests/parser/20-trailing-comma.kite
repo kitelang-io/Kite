@@ -1,0 +1,2 @@
+fun a(): Int { val r = f(a,) return 0 }
+fun b(): Int { return g(1, 2, 3,) }

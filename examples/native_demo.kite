@@ -1,0 +1,14 @@
+// A program in the current native-codegen subset.
+// Build & run:  kitec run examples/native_demo.kite   (process exit code = result)
+
+fun square(n: Int): Int = n * n
+
+fun triangular(n: Int): Int {
+    return n * (n + 1) / 2
+}
+
+fun main(): Int {
+    val a = square(6)        // 36
+    val b = triangular(10)   // 55
+    return b - a + 5         // 24
+}

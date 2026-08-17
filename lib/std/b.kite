@@ -1,0 +1,4 @@
+// std/b.kite — module fixture for the module-system test. Same top-level names as std/a.kite;
+// each module's `helper` must resolve `size` to ITS OWN module's `size` (own-item-first).
+fun size(): Int { return 35 }
+fun helper(): Int { return size() + 5 }

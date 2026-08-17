@@ -1,0 +1,6 @@
+fun main(): Int {
+  val a = comptime(6 * 7)
+  val b = comptime((100 - 58) + (2 << 2))
+  val c = comptime(1 << 5)
+  return a + b - c - 22
+}

@@ -1,0 +1,1 @@
+fun main(): Int { val pi = 3.14  val r = 2.0  return toInt(pi * r * r) }

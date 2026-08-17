@@ -1,0 +1,9 @@
+fun m(): Int {
+  val a = "hello $x world"
+  val b = "sum ${a + b}!"
+  val c = "plain"
+  val d = "n=${xs[i]}"
+  val e = "$x$y"
+  val f = "pre ${g(1)} post"
+  return 0
+}

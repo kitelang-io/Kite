@@ -1,0 +1,4 @@
+fun main(): Int {
+  val ages = ["alice": 30, "bob": 25, "carol": 42]
+  return ages["bob"] + ages["carol"]
+}

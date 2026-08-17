@@ -1,0 +1,7 @@
+fun main(): Int {
+  val a = __allocRC(24)
+  __release(a)
+  val b = __allocRC(24)
+  __release(b)
+  return 7
+}
