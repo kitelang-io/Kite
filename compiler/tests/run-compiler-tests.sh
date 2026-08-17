@@ -15,7 +15,7 @@ echo "building integrated compiler via the committed SEED (bootstrap/kite-seed �
 TMPD=$(mktemp -d)
 KCC="$TMPD/kcc"
 "$ROOT/bootstrap/kite-seed" compiler/kitec.kite "$KCC" >"$TMPD/build.log" 2>&1
-[ -f "$KCC" ] || { echo "BUILD FAILED (seed could not compile current source — re-seed via stage0/reseed.sh)"; cat "$TMPD/build.log"; exit 1; }
+[ -f "$KCC" ] || { echo "BUILD FAILED (seed could not compile current source — reseed from the archived Fledge bootstrapper: kitelang-io/fledge)"; cat "$TMPD/build.log"; exit 1; }
 chmod +x "$KCC"
 
 check() {

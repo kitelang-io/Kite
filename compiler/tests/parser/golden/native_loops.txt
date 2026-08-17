@@ -1,0 +1,69 @@
+fun gcd(a: Int, b: Int) : Int
+  block
+    var x
+      ident a
+    var y
+      ident b
+    while
+      binary !=
+        ident y
+        int 0
+      block
+        val t
+          ident y
+        assign =
+          ident y
+          binary %
+            ident x
+            ident y
+        assign =
+          ident x
+          ident t
+    return
+      ident x
+
+fun fib(n: Int) : Int
+  block
+    var a
+      int 0
+    var b
+      int 1
+    var i
+      int 0
+    while
+      binary <
+        ident i
+        ident n
+      block
+        val t
+          binary +
+            ident a
+            ident b
+        assign =
+          ident a
+          ident b
+        assign =
+          ident b
+          ident t
+        assign =
+          ident i
+          binary +
+            ident i
+            int 1
+    return
+      ident a
+
+fun main() : Int
+  block
+    return
+      binary +
+        call
+          ident gcd
+          args
+            int 48
+            int 36
+        call
+          ident fib
+          args
+            int 10
+

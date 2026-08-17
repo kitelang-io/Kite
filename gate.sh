@@ -2,14 +2,15 @@
 # Portable verification gate — NO OCaml, NO shared /tmp. Bootstraps from the committed seed
 # (bootstrap/kite-seed) via the compiler's real CLI into a private temp dir, so it is safe to run in
 # parallel git worktrees. Verifies the integrated self-hosting fixpoint (kcc2==kcc3) + the compiler suite.
-# Re-seed via stage0/reseed.sh only when a PARSER change makes the seed unable to compile the source.
+# Reseed from the archived Fledge bootstrapper (kitelang-io/fledge) only when a PARSER change makes the
+# seed unable to compile the source.
 export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 ROOT=${0:A:h}
 cd "$ROOT" || exit 1
 SEED="$ROOT/bootstrap/kite-seed"
 T=$(mktemp -d)
 fail() { echo "❌ GATE FAILED: $1"; rm -rf "$T"; exit 1; }
-[ -x "$SEED" ] || fail "seed missing ($SEED) — run stage0/reseed.sh"
+[ -x "$SEED" ] || fail "seed missing ($SEED) — reseed from the archived Fledge bootstrapper (kitelang-io/fledge)"
 
 echo "=== [1/2] compiler suite (correctness, built via seed CLI) ==="
 zsh compiler/tests/run-compiler-tests.sh >"$T/suite.log" 2>&1
@@ -28,6 +29,12 @@ BAD=compiler/tests/bugs/malformed-input-must-not-segfault.kite
 [ "$rc" -eq 139 ] && fail "compiler SEGFAULTED (139) on malformed input — parser bounds-check regressed"
 [ "$rc" -eq 0 ] && fail "compiler ACCEPTED malformed input (should error)"
 echo "  malformed input -> exit $rc (non-zero, not signal-killed) ✓"
+
+echo "=== [robustness] missing-module import never segfaults ==="
+MISS=compiler/tests/bugs/missing-module-import-must-not-segfault.kite
+"$T/k2" check "$MISS" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 139 ] && fail "compiler SEGFAULTED (139) on a dangling namespace import — readFile NULL-guard regressed"
+echo "  missing-module import -> exit $rc (deterministic, not signal-killed) ✓"
 
 echo "✅ GATE PASSED (no OCaml, no shared /tmp) — suite green, kcc2==kcc3, robust to malformed input"
 rm -rf "$T"

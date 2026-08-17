@@ -1,0 +1,21 @@
+fun m() : Int
+  block
+    val a
+      char 65
+    val z
+      char 48
+    val nl
+      char 10
+    val f1
+      float 1
+    val f2
+      float 3
+    val f3
+      float 0.5
+    val f4
+      float 10.25
+    val f5
+      float 100
+    return
+      ident a
+

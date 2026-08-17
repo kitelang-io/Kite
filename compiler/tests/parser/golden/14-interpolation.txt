@@ -1,0 +1,43 @@
+fun m() : Int
+  block
+    val a
+      interp
+        lit "hello "
+        expr
+          ident x
+        lit " world"
+    val b
+      interp
+        lit "sum "
+        expr
+          binary +
+            ident a
+            ident b
+        lit "!"
+    val c
+      string "plain"
+    val d
+      interp
+        lit "n="
+        expr
+          index
+            ident xs
+            ident i
+    val e
+      interp
+        expr
+          ident x
+        expr
+          ident y
+    val f
+      interp
+        lit "pre "
+        expr
+          call
+            ident g
+            args
+              int 1
+        lit " post"
+    return
+      int 0
+

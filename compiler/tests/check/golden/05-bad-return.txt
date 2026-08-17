@@ -1,0 +1,2 @@
+error: return type String is not compatible with Int
+1 error(s)

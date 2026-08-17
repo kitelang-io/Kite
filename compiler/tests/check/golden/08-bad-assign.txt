@@ -1,0 +1,2 @@
+error: cannot assign String to Int x
+1 error(s)

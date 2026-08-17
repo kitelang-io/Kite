@@ -1,0 +1,2 @@
+error: type P has no field y
+1 error(s)

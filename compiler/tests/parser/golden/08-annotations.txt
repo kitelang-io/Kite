@@ -1,0 +1,17 @@
+@inline
+fun a() : Int
+  int 0
+
+@derive(...)
+  ident Eq
+  ident Ord
+struct P
+  val x : Int
+
+@repr(...)
+  ident transparent
+enum Color
+  Red
+  Green
+  Blue
+

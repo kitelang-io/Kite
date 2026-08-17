@@ -1,0 +1,2 @@
+error: if condition must be Bool, found Int
+1 error(s)

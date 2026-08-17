@@ -1,0 +1,18 @@
+impl Show for Point
+  fun show(self) : String
+    string "p"
+
+impl<T> Container<T> for Box<T> where T: Clone
+  type Item = T
+  fun get(self) : T
+    field .v
+      this
+
+impl Point
+  fun origin() : Point
+    call
+      ident Point
+      args
+        int 0
+        int 0
+

@@ -1,0 +1,35 @@
+fun square(n: Int) : Int
+  binary *
+    ident n
+    ident n
+
+fun triangular(n: Int) : Int
+  block
+    return
+      binary /
+        binary *
+          ident n
+          binary +
+            ident n
+            int 1
+        int 2
+
+fun main() : Int
+  block
+    val a
+      call
+        ident square
+        args
+          int 6
+    val b
+      call
+        ident triangular
+        args
+          int 10
+    return
+      binary +
+        binary -
+          ident b
+          ident a
+        int 5
+

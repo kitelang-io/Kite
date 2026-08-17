@@ -1,0 +1,12 @@
+trait Show
+  fun show(self) : String
+    (signature)
+
+trait Ord<T> : Eq + PartialOrd where T: Clone
+  type Item : Show
+  type Raw
+  fun cmp(self, other: T) : Int
+    (signature)
+  fun max(self, other: T) : T
+    this
+

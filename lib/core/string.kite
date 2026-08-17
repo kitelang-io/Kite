@@ -14,6 +14,7 @@
 
 // Pure-Kite string ops on the null-terminated byte representation (were libc-backed codegen builtins).
 // charAt is just a byte load; strLen scans to the terminating 0. (`&&`/`!=` avoided — `&&` is bitwise.)
+@lang("str.get")
 fun charAt(s: String, i: Int): Int { return __rawLoadByte(s, i) }
 fun strLen(s: String): Int { var i = 0 var go = 1 while (go == 1) { if (__rawLoadByte(s, i) == 0) { go = 0 } else { i = i + 1 } } return i }
 // byte-by-byte compare to the terminating 0 (returns Bool to match the intrinsic's registered type).
@@ -29,6 +30,7 @@ fun strEq(a: String, b: String): Bool {
   return false
 }
 // concat allocates la+lb+1 bytes and copies both, NUL-terminated (leaks like the old libc version).
+@lang("str.concat")
 fun concat(a: String, b: String): String {
   val la = strLen(a)
   val lb = strLen(b)
@@ -50,6 +52,7 @@ fun substr(s: String, st: Int, len: Int): String {
 }
 // intToStr: base-10, handles 0 and negatives, into a fresh NUL-terminated buffer. `%` avoided via
 // d = mm - (mm/10)*10. (ASCII '0'=48, '-'=45.) Was libc snprintf("%ld").
+@lang("str.show")
 fun intToStr(n: Int): String {
   if (n == 0) { val z = __rawAlloc(2) __rawStoreByte(z, 0, 48) __rawStoreByte(z, 1, 0) return z }
   var neg = 0
@@ -78,4 +81,8 @@ fun String_substr(s: String, a: Int, b: Int): String { return substr(s, a, b) }
 fun String_repeat(s: String, n: Int): String { var out = "" var i = 0 while (i < n) { out = concat(out, s) i = i + 1 } return out }
 // String overloads `+` as concatenation via the Add operator trait (see kite::core::ops): klower's
 // lowerBin desugars `a + b` where a: String to String_add(a, b). Registered as the mangled method String_add.
+// @arc(manual): String is a primitive C-string word — never ref-counted, exempt from automatic ARC. It
+// has no class/struct decl, so the exemption tag rides its canonical `impl Add for String` (the collector
+// records the impl's for-type). This is what registers "String" as a builtin nominal (String_charAt, ...).
+@arc(manual)
 impl Add for String { fun add(self, rhs: String): String { return concat(self, rhs) } }

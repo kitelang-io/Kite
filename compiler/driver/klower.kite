@@ -9,7 +9,7 @@
 // then lower) so forward references resolve. Constructs outside kenc's codegen (lambdas, floats,
 // map literals, traits/impl, nullable ops) are still reported via lowFail.
 
-struct Lo(val ctr: List, val locN: List, val locT: List, val fN: List, val fR: List, val sN: List, val sFN: List, val sFT: List, val lifted: List, val gctr: List, val classN: List, val arcOwned: List, val traitN: List, val constN: List, val constV: List, val cfuncs: List, val traitMethN: List, val traitMethT: List, val pmN: List, val pmM: List, val variantN: List, val variantTys: List)
+struct Lo(val ctr: List, val locN: List, val locT: List, val fN: List, val fR: List, val sN: List, val sFN: List, val sFT: List, val lifted: List, val gctr: List, val classN: List, val arcOwned: List, val traitN: List, val constN: List, val constV: List, val cfuncs: List, val traitMethN: List, val traitMethT: List, val pmN: List, val pmM: List, val variantN: List, val variantTys: List, val roleK: List, val roleV: List, val arcE: List)
 struct PFun(val owner: String, val fd: FFunc)   // owner "" = free function; else the struct type
 
 fun lastSeg(path: String): String {
@@ -60,6 +60,30 @@ fun builtinRetTag(nm: String): String {
   if (strEq(nm,"strEq")) { return "Bool" }
   return ""
 }
+// The INTRINSIC FLOOR: names with NO Kite definition anywhere. The compiler emits them directly (the
+// per-name dispatch in codegen's genCall) or folds them at lower time (comptime). This is the single
+// source of truth for "builtin with no body" — the M2 checker's isBuiltin (kcheck.kite) defers to it,
+// so the lowerer and the checker can never disagree about what the floor is. Everything else a program
+// can call is a real Kite function: a prelude module (preludeConfPaths) or the user's own source.
+fun isIntrinsic(nm: String): Bool {
+  return
+    // formatted print
+    strEq(nm,"print") || strEq(nm,"println") || strEq(nm,"printF") || strEq(nm,"printlnF") ||
+    // raw memory
+    strEq(nm,"__rawAlloc") || strEq(nm,"__rawFree") || strEq(nm,"__rawRealloc") ||
+    strEq(nm,"__rawLoad") || strEq(nm,"__rawStore") || strEq(nm,"__rawLoadByte") || strEq(nm,"__rawStoreByte") ||
+    // ARC / object header
+    strEq(nm,"__allocRC") || strEq(nm,"__retain") || strEq(nm,"__release") || strEq(nm,"__refcount") ||
+    strEq(nm,"__decRefcount") || strEq(nm,"__freeObj") || strEq(nm,"__typeId") ||
+    // first-class functions / closures
+    strEq(nm,"__funcAddr") || strEq(nm,"__closNew") || strEq(nm,"__closGet") || strEq(nm,"__closCall") ||
+    // file I/O
+    strEq(nm,"readFile") || strEq(nm,"writeFile") || strEq(nm,"fopenW") || strEq(nm,"fputByte") || strEq(nm,"fcloseF") ||
+    // process / argv / abort
+    strEq(nm,"__abort") || strEq(nm,"__argv") ||
+    // float truncation + compile-time fold
+    strEq(nm,"toInt") || strEq(nm,"comptime")
+}
 fun funRetTag(lo: Lo, nm: String): String {
   val b = builtinRetTag(nm)
   if (strEq(b, "") == false) { return b }
@@ -109,18 +133,59 @@ fun tagBin(lo: Lo, op: String, a: FExpr, b: FExpr): String {
 fun isArithOrCmp(op: String): Bool {
   return strEq(op,"+") || strEq(op,"-") || strEq(op,"*") || strEq(op,"/") || strEq(op,"<") || strEq(op,">") || strEq(op,"<=") || strEq(op,">=") || strEq(op,"==") || strEq(op,"!=")
 }
+// ---------- the desugar role table: the compiler's SINGLE SOURCE OF TRUTH for stdlib symbols ----------
+// The ~6 desugaring sites (list/map literals, index get/set, for-in, string interpolation, operator
+// overloading) do NOT bake in stdlib symbol names anymore — they ask this table for a symbol BY ROLE.
+// Binding is by NAME CONVENTION: a role maps to the exact free-function / method / operator-method name
+// the lowerer emits today. The table is now SOURCED FROM lib/: each prelude decl carries a user-facing
+// `@lang("<role>")` attribute, collected during injectHelpers (the pre-lowering prelude pass) into the
+// lo.roleK/lo.roleV parallel lists. roleSym looks the role up there; the hardcoded roleSymFallback below
+// is kept ONLY as a never-hit safety net for an un-annotated role. Each role MUST resolve to the exact
+// symbol emitted before this refactor, so IR/emission for every program is unchanged (self-reproduction
+// kcc2==kcc3 holds byte-for-byte).
+fun roleLookup(roleK: List, roleV: List, role: String): String {
+  var i = 0
+  while (i < roleK.len()) { if (strEq(roleK.get(i), role)) { return roleV.get(i) } ; i = i + 1 }
+  return ""
+}
+fun roleSym(lo: Lo, role: String): String {
+  val s = roleLookup(lo.roleK, lo.roleV, role)
+  if (strEq(s, "") == false) { return s }
+  return roleSymFallback(role)
+}
+fun roleSymFallback(role: String): String {
+  // list literals `[..]` / for-in / a[i] on a List
+  if (strEq(role, "list.new"))   { return "list" }        // [..] constructor
+  if (strEq(role, "list.push"))  { return "List_push" }   // [..] element append
+  if (strEq(role, "list.get"))   { return "listGet" }     // a[i] load / for-in element
+  if (strEq(role, "list.set"))   { return "listSet" }     // a[i] = v store
+  if (strEq(role, "list.len"))   { return "listLen" }     // for-in bound
+  // string index / interpolation
+  if (strEq(role, "str.get"))    { return "charAt" }      // s[i] on a String
+  if (strEq(role, "str.show"))   { return "intToStr" }    // $expr -> intToStr(expr)
+  if (strEq(role, "str.concat")) { return "concat" }      // interpolation join
+  // map literals `{..}` / m[k] / m[k]=v — the map.put role (append) is realized by mapPutInto below
+  if (strEq(role, "map.new"))    { return "mapNewM" }     // {..} constructor
+  if (strEq(role, "map.putList")){ return "listPush" }    // append into a parallel word-list (map.put)
+  if (strEq(role, "map.getS"))   { return "__mapGetS" }   // m[k] load, String key
+  if (strEq(role, "map.getI"))   { return "__mapGetI" }   // m[k] load, Int key
+  if (strEq(role, "map.setS"))   { return "__mapSetS" }   // m[k] = v store, String key
+  if (strEq(role, "map.setI"))   { return "__mapSetI" }   // m[k] = v store, Int key
+  // operator overloading: `a op b` -> mangled `<T>_<method>` (method name only; owner mangled by caller)
+  if (strEq(role, "op.+"))       { return "add" }
+  if (strEq(role, "op.-"))       { return "sub" }
+  if (strEq(role, "op.*"))       { return "mul" }
+  if (strEq(role, "op./"))       { return "div" }
+  if (strEq(role, "op.%"))       { return "rem" }
+  return ""
+}
 // operator overloading: the arithmetic operators map to trait methods (+ -> add, - -> sub, * -> mul,
-// / -> div, % -> rem). isOverloadableOp gates the desugar; opMethodName is the method name for `op`.
+// / -> div, % -> rem). isOverloadableOp gates the desugar; opMethodName is the method name for `op`,
+// resolved through the role table (roles op.+ .. op.%).
 fun isOverloadableOp(op: String): Bool {
   return strEq(op,"+") || strEq(op,"-") || strEq(op,"*") || strEq(op,"/") || strEq(op,"%")
 }
-fun opMethodName(op: String): String {
-  if (strEq(op, "+")) { return "add" }
-  if (strEq(op, "-")) { return "sub" }
-  if (strEq(op, "*")) { return "mul" }
-  if (strEq(op, "/")) { return "div" }
-  return "rem"
-}
+fun opMethodName(lo: Lo, op: String): String { return roleSym(lo, concat("op.", op)) }
 // float arithmetic/comparison (either operand Float) -> EFBin; otherwise the integer EBin.
 // OPERATOR OVERLOADING: `a op b` desugars to the operator method when the LEFT operand's type has a
 // CONCRETE impl of it (String_add, V2_add, ...). We resolve DIRECTLY to the mangled static method with
@@ -131,7 +196,7 @@ fun opMethodName(op: String): String {
 // because the compiler's own sources only ever `+` integers, whose type tag is "Int", never a defined op method).
 fun lowerBin(lo: Lo, op: String, l: FExpr, r: FExpr): Expr {
   if (isOverloadableOp(op)) {
-    val om = mangleMethod(tagOf(lo, l), opMethodName(op))
+    val om = mangleMethod(tagOf(lo, l), opMethodName(lo, op))
     if (funDefined(lo, om)) {
       val ca = list() ; ca.push(lowerExpr(lo, l)) ; ca.push(lowerExpr(lo, r))
       return ECall(om, ca)
@@ -150,8 +215,10 @@ fun mangleMethod(owner: String, name: String): String {
   return concat(owner, concat("_", name))
 }
 // List/String/Map are nominal builtins: method calls on them mangle to type-scoped wrappers
-// (List_push, String_charAt, ...) that are injected as thin wrappers over the builtins.
-fun isBuiltinNominal(t: String): Bool { return strEq(t, "List") || strEq(t, "String") || strEq(t, "Map") }
+// (List_push, String_charAt, ...) that are injected as thin wrappers over the builtins. This set is
+// exactly the ARC-EXEMPT set, so isBuiltinNominal defers to the shared isArcExempt predicate (defined
+// once, in codegen.kite) — the exempt types live in exactly one place, consulted by both ARC sites.
+fun isBuiltinNominal(lo: Lo, t: String): Bool { return isArcExemptIn(lo.arcE, t) }
 // return-type tag of a call, resolving `recv.method(..)` to the mangled method when recv's static
 // type is a known struct/class; otherwise the bare callee name (free fn / builtin).
 fun funDefined(lo: Lo, nm: String): Bool { return memListL(lo.fN, nm) }
@@ -163,7 +230,7 @@ fun methodCallee(lo: Lo, recv: FExpr, m: String): String {
   if (memListL(lo.traitN, rt)) { return concat("__dyn_", concat(rt, concat("_", m))) }
   val mangled = mangleMethod(rt, m)
   if (memListL(lo.sN, rt) && funDefined(lo, mangled)) { return mangled }
-  if (isBuiltinNominal(rt) && funDefined(lo, mangled)) { return mangled }
+  if (isBuiltinNominal(lo, rt) && funDefined(lo, mangled)) { return mangled }
   // erased / unknown-typed receiver (e.g. an element pulled from a List<Shape>): if `m` is a trait method,
   // still dynamic-dispatch on the object's type-id header. Concrete + free-fn cases were handled above.
   val ti = indexOfL(lo.traitMethN, m)
@@ -180,7 +247,7 @@ fun hasGetterMethod(lo: Lo, recv: FExpr, m: String): Bool {
   if (memListL(lo.traitN, rt)) { return true }
   val mangled = mangleMethod(rt, m)
   if (memListL(lo.sN, rt) && funDefined(lo, mangled)) { return true }
-  if (isBuiltinNominal(rt) && funDefined(lo, mangled)) { return true }
+  if (isBuiltinNominal(lo, rt) && funDefined(lo, mangled)) { return true }
   if (indexOfL(lo.traitMethN, m) >= 0) { return true }
   return false
 }
@@ -193,7 +260,7 @@ fun setterCallee(lo: Lo, recv: FExpr, m: String): String {
   if (memListL(lo.traitN, rt)) { val mgd = concat("__dyn_", concat(rt, concat("_", sm))) ; if (funDefined(lo, mgd)) { return mgd } ; return "" }
   val mangled = mangleMethod(rt, sm)
   if (memListL(lo.sN, rt) && funDefined(lo, mangled)) { return mangled }
-  if (isBuiltinNominal(rt) && funDefined(lo, mangled)) { return mangled }
+  if (isBuiltinNominal(lo, rt) && funDefined(lo, mangled)) { return mangled }
   return ""
 }
 fun hasSetter(lo: Lo, recv: FExpr, m: String): Bool { return strEq(setterCallee(lo, recv, m), "") == false }
@@ -365,7 +432,7 @@ fun lowerLambda(lo: Lo, params: String, body: FExpr): Expr {
   val ltys = list() ; ltys.push("?")
   var qi = 0 ; while (qi < pnames.len()) { lnames.push(pnames.get(qi)) ; ltys.push("?") ; qi = qi + 1 }
   val lctr = list() ; lctr.push(0)
-  val llo = Lo(lctr, list(), list(), lo.fN, lo.fR, lo.sN, lo.sFN, lo.sFT, lo.lifted, lo.gctr, lo.classN, list(), lo.traitN, lo.constN, lo.constV, lo.cfuncs, lo.traitMethN, lo.traitMethT, lo.pmN, lo.pmM, lo.variantN, lo.variantTys)
+  val llo = Lo(lctr, list(), list(), lo.fN, lo.fR, lo.sN, lo.sFN, lo.sFT, lo.lifted, lo.gctr, lo.classN, list(), lo.traitN, lo.constN, lo.constV, lo.cfuncs, lo.traitMethN, lo.traitMethT, lo.pmN, lo.pmM, lo.variantN, lo.variantTys, lo.roleK, lo.roleV, lo.arcE)
   bindLoc(llo, "env", "?")
   var ri = 0 ; while (ri < pnames.len()) { bindLoc(llo, pnames.get(ri), "?") ; ri = ri + 1 }
   val lstmts = list()
@@ -629,31 +696,40 @@ fun lowerCall(lo: Lo, callee: FExpr, args: List): Expr {
 fun lowerList(lo: Lo, es: List): Expr {
   val nm = freshName(lo, "__lst")
   val stmts = list()
-  stmts.push(SLet(nm, ECall("list", list())))
+  stmts.push(SLet(nm, ECall(roleSym(lo, "list.new"), list())))
   var i = 0
   while (i < es.len()) {
     val a2 = list() ; a2.push(EIdent(nm)) ; a2.push(lowerExpr(lo, es.get(i)))
-    stmts.push(SExprS(ECall("List_push", a2)))
+    stmts.push(SExprS(ECall(roleSym(lo, "list.push"), a2)))
     i = i + 1
   }
   return EBlock(stmts, EIdent(nm))
 }
-// {..} builds a REAL Map (class Map(keys, vals), lib/alloc/collections/list.kite). Construction is a
-// pure append into the two parallel word-lists — NO key comparison — so it is correct for both Int and
-// String keys (comparison only happens later at m[k]/m[k]=v via __mapGet/Set S|I). The `.keys`/`.vals`
-// field offsets resolve because `_m`'s codegen local-type is inferred as Map from mapNewM()'s return.
+// map.put role — the ONE place that knows Map's internal storage layout. Appends a (k, v) pair into the
+// map bound to `nm`: a pure append into the two parallel word-lists (NO key comparison), correct for both
+// Int and String keys (comparison only happens later at m[k]/m[k]=v via the map.get/set roles). This is
+// the sole reference to Map's `.keys`/`.vals` internals in the lowerer — if Map's layout changes, only
+// this helper changes, not lowerMap. `nm`'s codegen local-type is inferred as Map from mapNewM()'s return,
+// so the field offsets resolve. Emits, per entry: listPush(_m.keys, k); listPush(_m.vals, v).
+fun mapPutInto(lo: Lo, out: List, nm: String, k: FExpr, v: FExpr): Int {
+  val ka = list() ; ka.push(EField(EIdent(nm), "keys")) ; ka.push(lowerExpr(lo, k))
+  out.push(SExprS(ECall(roleSym(lo, "map.putList"), ka)))
+  val va = list() ; va.push(EField(EIdent(nm), "vals")) ; va.push(lowerExpr(lo, v))
+  out.push(SExprS(ECall(roleSym(lo, "map.putList"), va)))
+  return 0
+}
+// {..} builds a REAL Map (class Map(keys, vals), lib/alloc/collections/list.kite). lowerMap only emits the
+// map.new + map.put roles — it does NOT touch Map's internal fields directly (mapPutInto owns that), so
+// Map's internals can change later without editing this desugar site.
 // [k0: v0, k1: v1] -> { val _m = mapNewM(); listPush(_m.keys,k0); listPush(_m.vals,v0); ...; _m }
 fun lowerMap(lo: Lo, ents: List): Expr {
   val nm = freshName(lo, "__map")
   val stmts = list()
-  stmts.push(SLet(nm, ECall("mapNewM", list())))
+  stmts.push(SLet(nm, ECall(roleSym(lo, "map.new"), list())))
   var i = 0
   while (i < ents.len()) {
     val en: FMapEnt = ents.get(i)
-    val ka = list() ; ka.push(EField(EIdent(nm), "keys")) ; ka.push(lowerExpr(lo, en.k))
-    stmts.push(SExprS(ECall("listPush", ka)))
-    val va = list() ; va.push(EField(EIdent(nm), "vals")) ; va.push(lowerExpr(lo, en.v))
-    stmts.push(SExprS(ECall("listPush", va)))
+    mapPutInto(lo, stmts, nm, en.k, en.v)
     i = i + 1
   }
   return EBlock(stmts, EIdent(nm))
@@ -662,18 +738,18 @@ fun lowerMap(lo: Lo, ents: List): Expr {
 fun lowerIndex(lo: Lo, a: FExpr, ix: FExpr): Expr {
   val at = tagOf(lo, a)
   val args = list() ; args.push(lowerExpr(lo, a)) ; args.push(lowerExpr(lo, ix))
-  if (strEq(at, "String")) { return ECall("charAt", args) }
+  if (strEq(at, "String")) { return ECall(roleSym(lo, "str.get"), args) }
   if (strEq(at, "Map")) {
-    if (strEq(tagOf(lo, ix), "String")) { return ECall("__mapGetS", args) }
-    return ECall("__mapGetI", args)
+    if (strEq(tagOf(lo, ix), "String")) { return ECall(roleSym(lo, "map.getS"), args) }
+    return ECall(roleSym(lo, "map.getI"), args)
   }
-  return ECall("listGet", args)
+  return ECall(roleSym(lo, "list.get"), args)
 }
 // string interpolation -> concat chain; each $expr becomes intToStr(expr) unless it is a String
 fun interpPiece(lo: Lo, e: FExpr): Expr {
   if (strEq(tagOf(lo, e), "String")) { return lowerExpr(lo, e) }
   val a = list() ; a.push(lowerExpr(lo, e))
-  return ECall("intToStr", a)
+  return ECall(roleSym(lo, "str.show"), a)
 }
 fun lowerInterp(lo: Lo, parts: List): Expr {
   var acc = EStr("")
@@ -683,7 +759,7 @@ fun lowerInterp(lo: Lo, parts: List): Expr {
     val pt: FIPart = parts.get(i)
     val piece = when (pt) { FILit(s) -> EStr(s) ; FIExpr(e) -> interpPiece(lo, e) ; else -> EStr("") }
     if (started == 0) { acc = piece ; started = 1 }
-    else { val ca = list() ; ca.push(acc) ; ca.push(piece) ; acc = ECall("concat", ca) }
+    else { val ca = list() ; ca.push(acc) ; ca.push(piece) ; acc = ECall(roleSym(lo, "str.concat"), ca) }
     i = i + 1
   }
   return acc
@@ -844,11 +920,11 @@ fun lowerForEach(lo: Lo, out: List, v: String, it: FExpr, body: FExpr): Int {
   out.push(SLet(idx, EInt("0")))
   val ga = list() ; ga.push(EIdent(lst)) ; ga.push(EIdent(idx))
   val stmts = list()
-  stmts.push(SLet(v, ECall("listGet", ga)))
+  stmts.push(SLet(v, ECall(roleSym(lo, "list.get"), ga)))
   lowerBodyInto(lo, stmts, body)
   val la = list() ; la.push(EIdent(lst))
   val step = SAssign(idx, EBin("+", EIdent(idx), EInt("1")))
-  out.push(SLoop(EBin("<", EIdent(idx), ECall("listLen", la)), EBlock(stmts, ENoRes), step))
+  out.push(SLoop(EBin("<", EIdent(idx), ECall(roleSym(lo, "list.len"), la)), EBlock(stmts, ENoRes), step))
   return 0
 }
 // index STORE `a[i] = v`, mirroring lowerIndex's load dispatch: List -> listSet, Map -> __mapSet(S/I),
@@ -859,10 +935,10 @@ fun lowerIndexStore(lo: Lo, a: FExpr, ix: FExpr, rhs: FExpr): Stmt {
   args.push(lowerExpr(lo, a)) ; args.push(lowerExpr(lo, ix)) ; args.push(lowerExpr(lo, rhs))
   if (strEq(at, "String")) { lowFail("cannot store into an immutable String index") ; return SExprS(EInt("0")) }
   if (strEq(at, "Map")) {
-    if (strEq(tagOf(lo, ix), "String")) { return SExprS(ECall("__mapSetS", args)) }
-    return SExprS(ECall("__mapSetI", args))
+    if (strEq(tagOf(lo, ix), "String")) { return SExprS(ECall(roleSym(lo, "map.setS"), args)) }
+    return SExprS(ECall(roleSym(lo, "map.setI"), args))
   }
-  return SExprS(ECall("listSet", args))
+  return SExprS(ECall(roleSym(lo, "list.set"), args))
 }
 fun pairE(a: Expr, b: Expr): List { val l = list() ; l.push(a) ; l.push(b) ; return l }
 fun lowerAssign(lo: Lo, lhs: FExpr, rhs: FExpr): Stmt {
@@ -1034,7 +1110,7 @@ fun collectEnum(ed: FEDecl, variantN: List, variantTag: List, variantTys: List):
 // naive release would free while the outer still holds the raw pointer (UAF). So List/Map stay
 // leak-managed exactly as when they were opaque builtins — declaring `class List` only gives them a
 // visible layout + methods, never ARC. Real user classes are unaffected.
-fun isClassTag(lo: Lo, t: String): Bool { return memListL(lo.classN, t) && (isBuiltinNominal(t) == false) }
+fun isClassTag(lo: Lo, t: String): Bool { return memListL(lo.classN, t) && (isArcExemptIn(lo.arcE, t) == false) }
 fun isCtorCallee(lo: Lo, callee: FExpr): Bool {
   return when (callee) { FEIdent(nm) -> memListL(lo.sN, nm) ; else -> false }
 }
@@ -1191,10 +1267,10 @@ fun genDispatchers(traitDecls: List, implTrait: List, implType: List, structN: L
   }
   return out
 }
-fun lowerFuncFull(pf: PFun, fN: List, fR: List, sN: List, sFN: List, sFT: List, lifted: List, gctr: List, classN: List, traitN: List, constN: List, constV: List, cfuncs: List, traitMethN: List, traitMethT: List, pmN: List, pmM: List, variantN: List, variantTys: List): Func {
+fun lowerFuncFull(pf: PFun, fN: List, fR: List, sN: List, sFN: List, sFT: List, lifted: List, gctr: List, classN: List, traitN: List, constN: List, constV: List, cfuncs: List, traitMethN: List, traitMethT: List, pmN: List, pmM: List, variantN: List, variantTys: List, roleK: List, roleV: List, arcE: List): Func {
   val fd = pf.fd
   val ctr = list() ; ctr.push(0)
-  val lo = Lo(ctr, list(), list(), fN, fR, sN, sFN, sFT, lifted, gctr, classN, list(), traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys)
+  val lo = Lo(ctr, list(), list(), fN, fR, sN, sFN, sFT, lifted, gctr, classN, list(), traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys, roleK, roleV, arcE)
   val names = list()
   val tys = list()
   if (strEq(pf.owner, "") == false && strEq(fd.recv, "") == false) { names.push("this") ; tys.push(pf.owner) ; bindLoc(lo, "this", pf.owner) }
@@ -1242,25 +1318,71 @@ fun preludeConfPaths(): List {
   }
   return out
 }
+// ---------- @lang collection: source the desugar role table from lib/ annotations ----------
+// A prelude decl may carry `@lang("<role>")`; we record role -> the symbol the compiler EMITS for that
+// decl, so the desugar sites (roleSym) resolve exactly the symbol they baked in before. Symbol rule:
+// a free function emits its bare name; a class/struct method emits its owner-mangled name (List_push);
+// a trait method emits its bare method name (the operand's type is mangled in at the use site). These
+// three rules mirror how the rest of the lowerer names those callees, so the map equals the old table.
+fun annoStr(e: FExpr): String { return when (e) { FEStr(t, r) -> t ; else -> "" } }
+fun recordLang(annos: List, sym: String, roleK: List, roleV: List): Int {
+  var i = 0
+  while (i < annos.len()) {
+    val a: Anno = annos.get(i)
+    if (strEq(a.name, "lang") && a.args.len() > 0) { roleK.push(annoStr(a.args.get(0))) ; roleV.push(sym) }
+    i = i + 1
+  }
+  return 0
+}
+// scan a method list; symbol = owner-mangled (mangle==1, class/struct) or bare method name (mangle==0, trait).
+fun recordLangMethods(methods: List, owner: String, mangle: Int, roleK: List, roleV: List): Int {
+  var i = 0
+  while (i < methods.len()) {
+    val m: FFunc = methods.get(i)
+    val sym = if (mangle == 1) { mangleMethod(owner, m.name) } else { m.name }
+    recordLang(m.annos, sym, roleK, roleV)
+    i = i + 1
+  }
+  return 0
+}
+// @arc(manual): does this decl's annotation list mark it as manually ARC-managed (exempt from auto-ARC)?
+fun hasArcManual(annos: List): Bool {
+  var i = 0
+  while (i < annos.len()) {
+    val a: Anno = annos.get(i)
+    if (strEq(a.name, "arc") && a.args.len() > 0) {
+      val e0: FExpr = a.args.get(0)
+      val m = when (e0) { FEIdent(s) -> s ; else -> "" }
+      if (strEq(m, "manual")) { return true }
+    }
+    i = i + 1
+  }
+  return false
+}
+fun recordArc(annos: List, name: String, arcE: List): Int {
+  if (hasArcManual(annos)) { arcE.push(name) }
+  return 0
+}
 // Collect ONE top-level declaration at the cursor into the sig/type tables, returning 1 if it consumed
 // a known decl or 0 if the token isn't a decl-start (caller stops). Shared by parseLower's main loop AND
 // injectHelpers, so the prelude can carry ANY declaration (class/struct/enum/trait/impl/const), not just
-// functions — this is what lets `class List` live in lib/ as a real stdlib type.
-fun collectDecl(p: P, annos: List, pfuns: List, fN: List, fR: List, structN: List, structF: List, structFT: List, classN: List, traitN: List, traitDecls: List, implTrait: List, implType: List, constN: List, constExprs: List, variantN: List, variantTag: List, variantTys: List): Int {
+// functions — this is what lets `class List` live in lib/ as a real stdlib type. roleK/roleV accumulate
+// the @lang role table from every decl (only prelude decls carry @lang today; user code carries none).
+fun collectDecl(p: P, annos: List, pfuns: List, fN: List, fR: List, structN: List, structF: List, structFT: List, classN: List, traitN: List, traitDecls: List, implTrait: List, implType: List, constN: List, constExprs: List, variantN: List, variantTag: List, variantTys: List, roleK: List, roleV: List, arcE: List): Int {
   val k = pk(p)
-  if (k == 10) { val fd = parseFunc(p, annos) ; pfuns.push(PFun("", fd)) ; fN.push(fd.name) ; fR.push(fd.ret) ; return 1 }
-  if (k == 54) { val td0 = parseTypeDecl(p, annos, 0) ; collectStruct(td0, structN, structF, structFT) ; collectMethodSigs(td0, pfuns, fN, fR) ; return 1 }
-  if (k == 65) { val td1 = parseTypeDecl(p, annos, 1) ; collectStruct(td1, structN, structF, structFT) ; classN.push(td1.name) ; collectMethodSigs(td1, pfuns, fN, fR) ; collectDeinit(td1, pfuns, fN, fR) ; return 1 }
+  if (k == 10) { val fd = parseFunc(p, annos) ; pfuns.push(PFun("", fd)) ; fN.push(fd.name) ; fR.push(fd.ret) ; recordLang(fd.annos, fd.name, roleK, roleV) ; return 1 }
+  if (k == 54) { val td0 = parseTypeDecl(p, annos, 0) ; collectStruct(td0, structN, structF, structFT) ; collectMethodSigs(td0, pfuns, fN, fR) ; recordLangMethods(td0.methods, td0.name, 1, roleK, roleV) ; recordArc(annos, td0.name, arcE) ; return 1 }
+  if (k == 65) { val td1 = parseTypeDecl(p, annos, 1) ; collectStruct(td1, structN, structF, structFT) ; classN.push(td1.name) ; collectMethodSigs(td1, pfuns, fN, fR) ; collectDeinit(td1, pfuns, fN, fR) ; recordLangMethods(td1.methods, td1.name, 1, roleK, roleV) ; recordArc(annos, td1.name, arcE) ; return 1 }
   if (k == 55) { collectEnum(parseEnum(p, annos), variantN, variantTag, variantTys) ; return 1 }
-  if (k == 66) { val tr = parseTrait(p, annos) ; traitN.push(tr.name) ; traitDecls.push(tr) ; return 1 }
-  if (k == 67) { val im = parseImpl(p, annos) ; collectImplMethods(im, pfuns, fN, fR) ; if (strEq(im.traitName, "") == false) { implTrait.push(im.traitName) ; implType.push(im.forTy) } ; return 1 }
+  if (k == 66) { val tr = parseTrait(p, annos) ; traitN.push(tr.name) ; traitDecls.push(tr) ; recordLangMethods(tr.methods, "", 0, roleK, roleV) ; return 1 }
+  if (k == 67) { val im = parseImpl(p, annos) ; collectImplMethods(im, pfuns, fN, fR) ; if (strEq(im.traitName, "") == false) { implTrait.push(im.traitName) ; implType.push(im.forTy) } ; recordArc(annos, im.forTy, arcE) ; return 1 }
   if (k == 58) { parseImport(p) ; return 1 }
   if (k == 80) { val cd = parseConst(p) ; constN.push(cd.name) ; constExprs.push(cd.expr) ; return 1 }
   return 0
 }
 // parse the injected library helpers (prelude modules) into the sig/type tables. A module may declare
 // types (e.g. `class List`) as well as functions; collectDecl handles every decl kind.
-fun injectHelpers(pfuns: List, fN: List, fR: List, structN: List, structF: List, structFT: List, classN: List, traitN: List, traitDecls: List, implTrait: List, implType: List, constN: List, constExprs: List, variantN: List, variantTag: List, variantTys: List): Int {
+fun injectHelpers(pfuns: List, fN: List, fR: List, structN: List, structF: List, structFT: List, classN: List, traitN: List, traitDecls: List, implTrait: List, implType: List, constN: List, constExprs: List, variantN: List, variantTag: List, variantTys: List, roleK: List, roleV: List, arcE: List): Int {
   val paths = preludeConfPaths()
   var pi = 0
   while (pi < paths.len()) {
@@ -1268,13 +1390,13 @@ fun injectHelpers(pfuns: List, fN: List, fR: List, structN: List, structF: List,
     var go = 1
     while (go == 1) {
       if (pk(hp) == 0) { go = 0 }
-      else { val annos = parseAnnos(hp) ; if (collectDecl(hp, annos, pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys) == 0) { go = 0 } }
+      else { val annos = parseAnnos(hp) ; if (collectDecl(hp, annos, pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, roleK, roleV, arcE) == 0) { go = 0 } }
     }
     pi = pi + 1
   }
   return 0
 }
-struct LR(val funcs: List, val structN: List, val structF: List, val structFT: List, val variantN: List, val variantTag: List, val variantTys: List, val funN: List, val funRet: List)
+struct LR(val funcs: List, val structN: List, val structF: List, val structFT: List, val variantN: List, val variantTag: List, val variantTys: List, val funN: List, val funRet: List, val arcE: List)
 fun parseLower(toks: List): LR {
   val p = P(toks, 0)
   val pfuns = list()
@@ -1284,21 +1406,23 @@ fun parseLower(toks: List): LR {
   val constN = list() ; val constExprs = list()
   val variantN = list() ; val variantTag = list() ; val variantTys = list()
   val fN = list() ; val fR = list()
-  injectHelpers(pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys)
+  val roleK = list() ; val roleV = list()
+  val arcE = list()
+  injectHelpers(pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, roleK, roleV, arcE)
   // phase 1: parse, collect signatures, keep functions unlowered
   var go = 1
   while (go == 1) {
     if (pk(p) == 0) { go = 0 }
     else {
       val annos = parseAnnos(p)
-      if (collectDecl(p, annos, pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys) == 0) { go = 0 }
+      if (collectDecl(p, annos, pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, roleK, roleV, arcE) == 0) { go = 0 }
     }
   }
-  return finishLower(pfuns, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, fN, fR)
+  return finishLower(pfuns, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, fN, fR, roleK, roleV, arcE)
 }
 // phase 2 (shared by parseLower and parseLowerModules): synthesize trait defaults, evaluate consts,
 // register trait-method + dispatcher names, then lower every collected function.
-fun finishLower(pfuns: List, structN: List, structF: List, structFT: List, classN: List, traitN: List, traitDecls: List, implTrait: List, implType: List, constN: List, constExprs: List, variantN: List, variantTag: List, variantTys: List, fN: List, fR: List): LR {
+fun finishLower(pfuns: List, structN: List, structF: List, structFT: List, classN: List, traitN: List, traitDecls: List, implTrait: List, implType: List, constN: List, constExprs: List, variantN: List, variantTag: List, variantTys: List, fN: List, fR: List, roleK: List, roleV: List, arcE: List): LR {
   val constV = list()
   // trait DEFAULT methods: for each `impl Trait for Type` that doesn't override a trait method carrying a
   // body, synthesize `<Type>_<method>` from that default body (bound to `this: Type`). Must run after all
@@ -1366,12 +1490,12 @@ fun finishLower(pfuns: List, structN: List, structF: List, structFT: List, class
   val lifted = list()
   val gctr = list() ; gctr.push(0)
   var i = 0
-  while (i < pfuns.len()) { val pf: PFun = pfuns.get(i) ; funcs.push(lowerFuncFull(pf, fN, fR, structN, structF, structFT, lifted, gctr, classN, traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys)) ; i = i + 1 }
+  while (i < pfuns.len()) { val pf: PFun = pfuns.get(i) ; funcs.push(lowerFuncFull(pf, fN, fR, structN, structF, structFT, lifted, gctr, classN, traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys, roleK, roleV, arcE)) ; i = i + 1 }
   var j = 0
   while (j < lifted.len()) { funcs.push(lifted.get(j)) ; j = j + 1 }
   var d = 0
   while (d < dispatchers.len()) { funcs.push(dispatchers.get(d)) ; d = d + 1 }
-  return LR(funcs, structN, structF, structFT, variantN, variantTag, variantTys, fN, fR)
+  return LR(funcs, structN, structF, structFT, variantN, variantTag, variantTys, fN, fR, arcE)
 }
 // ---------- module system: `import "path"` resolved by inlining files, with transitive dedup ----------
 // A line whose first non-space token is `import` (followed by a space or quote) is an import; its
@@ -1776,7 +1900,9 @@ fun parseLowerModules(mods: List): LR {
   val constN = list() ; val constExprs = list()
   val variantN = list() ; val variantTag = list() ; val variantTys = list()
   val fN = list() ; val fR = list()
-  injectHelpers(pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys)
+  val roleK = list() ; val roleV = list()
+  val arcE = list()
+  injectHelpers(pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, roleK, roleV, arcE)
   var rj = 0
   while (rj < rawmods.len()) {
     val rm: RawMod = rawmods.get(rj)
@@ -1784,7 +1910,7 @@ fun parseLowerModules(mods: List): LR {
     collectModuleDecls(rc, rm, pfuns, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, fN, fR)
     rj = rj + 1
   }
-  return finishLower(pfuns, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, fN, fR)
+  return finishLower(pfuns, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, fN, fR, roleK, roleV, arcE)
 }
 
 // Route the input: the module pipeline (mangling + visibility) when it has a NAMESPACE import; else the
@@ -1833,7 +1959,7 @@ fun compileFile(inPath: String, outPath: String, noGate: Int, opt: Int): Int {
     }
   }
   val lr = lowerInput(raw)
-  val gen = genProgramG(lr.funcs, lr.structN, lr.structF, lr.structFT, lr.variantN, lr.variantTag, lr.variantTys, lr.funN, lr.funRet)
+  val gen = genProgramG(lr.funcs, lr.structN, lr.structF, lr.structFT, lr.variantN, lr.variantTag, lr.variantTys, lr.funN, lr.funRet, lr.arcE)
   val code = if (opt == 1) { optimize(gen.code) } else { gen.code }
   val asmR = assembleReloc(code)
   val cs = buildCstr(gen.cstrN, gen.cstrV)

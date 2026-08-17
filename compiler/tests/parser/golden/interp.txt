@@ -1,0 +1,58 @@
+fun greet(name: String, n: Int) : String
+  block
+    return
+      interp
+        lit "Hello, "
+        expr
+          ident name
+        lit "! You have "
+        expr
+          binary +
+            ident n
+            int 1
+        lit " new "
+        expr
+          call
+            ident label
+            args
+              ident n
+        lit "."
+
+fun classify(n: Int) : String
+  block
+    val label
+      if
+        binary >
+          ident n
+          int 0
+        then
+          string "positive"
+        else
+          string "non-positive"
+    return
+      ident label
+
+fun longExpr(a: Int, b: Int) : Int
+  block
+    return
+      binary +
+        binary *
+          ident a
+          ident a
+        binary *
+          ident b
+          ident b
+
+fun pipeline(xs: List) : List
+  block
+    return
+      call
+        field .map
+          call
+            field .filter
+              ident xs
+            args
+              ident positive
+        args
+          ident square
+

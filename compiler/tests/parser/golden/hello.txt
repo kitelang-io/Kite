@@ -1,0 +1,91 @@
+import kite::std::io
+
+struct Point
+  val x : Int
+  val y : Int
+
+fun distanceSquared(a: Point, b: Point) : Int
+  block
+    val dx
+      binary -
+        field .x
+          ident a
+        field .x
+          ident b
+    val dy
+      binary -
+        field .y
+          ident a
+        field .y
+          ident b
+    return
+      binary +
+        binary *
+          ident dx
+          ident dx
+        binary *
+          ident dy
+          ident dy
+
+fun describe(n: Int?) : String
+  block
+    return
+      when
+        cond
+          binary ==
+            ident n
+            null
+        ->
+          string "nothing"
+        cond
+          binary <
+            ident n
+            int 0
+        ->
+          string "negative"
+        cond
+          binary ==
+            ident n
+            int 0
+        ->
+          string "zero"
+        else
+        ->
+          string "positive"
+
+fun main()
+  block
+    val origin
+      call
+        ident Point
+        args
+          int 0
+          int 0
+    val p
+      call
+        ident Point
+        args
+          int 3
+          int 4
+    val d
+      call
+        ident distanceSquared
+        args
+          ident origin
+          ident p
+    expr-stmt
+      call
+        ident println
+        args
+          binary +
+            string "distance^2 = "
+            ident d
+    result
+      call
+        ident println
+        args
+          call
+            ident describe
+            args
+              ident d
+

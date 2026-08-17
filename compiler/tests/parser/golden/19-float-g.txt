@@ -1,0 +1,25 @@
+fun a() : Float
+  block
+    return
+      float 1e+06
+
+fun b() : Float
+  block
+    return
+      float 1.23457e+08
+
+fun c() : Float
+  block
+    return
+      float 1.23457
+
+fun d() : Float
+  block
+    return
+      float 1e-05
+
+fun e() : Float
+  block
+    return
+      float 1e+06
+

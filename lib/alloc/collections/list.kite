@@ -14,7 +14,12 @@
 // Methods live IN the class body (self-style, like Vec) — these ARE the real implementation, mangled to
 // List_push / List_get / List_len / List_length by the method system. `push`/`get`/`set`/`len`, plus a
 // `length` getter alias (so `xs.length` no-parens resolves here).
+// @arc(manual): List is exempt from automatic ARC — its elements are type-erased words listPush can't
+// retain, and the compiler nests lists-in-lists, so a naive deep-release would UAF. Leak-managed.
+@arc(manual)
 class List(var n: Int, var cap: Int, var data: Int) {
+  // @lang("list.push"): the [..] literal desugar appends elements via this method (emitted List_push).
+  @lang("list.push")
   fun push(self, x: consuming Int): Int {
     // grow-if-full. Guard cap==0 explicitly: 0*2 is still 0, so a lazily-allocated (cap 0) List would
     // realloc 0 bytes and write OOB at offset 0, then never grow (n==cap forever). Today list() starts
@@ -35,10 +40,16 @@ class List(var n: Int, var cap: Int, var data: Int) {
 fun listNew(): List { return list() }
 // free-function API — thin delegates to the methods, kept because the compiler's own 2000+ call sites
 // and the [..] literal lowering (klower) emit these names.
+@lang("list.len")
 fun listLen(l: List): Int { return l.len() }
+@lang("list.get")
 fun listGet(l: List, i: Int): Int { return l.get(i) }
+@lang("list.set")
 fun listSet(l: List, i: Int, x: consuming Int): Int { return l.set(i, x) }
+// @lang("map.putList"): the {..} map desugar appends into a parallel word-list via listPush.
+@lang("map.putList")
 fun listPush(l: List, x: consuming Int): Int { return l.push(x) }
+@lang("list.new")
 fun list(): List { return List(0, 4, __rawAlloc(4 * 8)) }
 
 // --- Map: a REAL nominal class (no longer a List-as-[k,v] alias) --------------------------------------
@@ -49,7 +60,10 @@ fun list(): List { return List(0, 4, __rawAlloc(4 * 8)) }
 // nests containers, so a naive deep-release would double-free. So Map stays leak-managed, consistent
 // with List; the class only gives it a visible layout + methods. isRelField (codegen) already excludes
 // both Map and its List fields from deep-release.
+// @arc(manual): Map, like List, is leak-managed (keys/vals are type-erased word Lists, containers nest).
+@arc(manual)
 class Map(var keys: List, var vals: List)
+@lang("map.new")
 fun mapNewM(): Map { return Map(listNew(), listNew()) }
 fun map(): Map { return mapNewM() }
 fun Map_size(m: Map): Int { return listLen(m.keys) }
@@ -64,7 +78,11 @@ fun Map_getI(m: Map, k: Int): Int { var i = 0 while (i < listLen(m.keys)) { if (
 fun Map_setI(m: Map, k: Int, v: Int): Int { var i = 0 while (i < listLen(m.keys)) { if (listGet(m.keys, i) == k) { listSet(m.vals, i, v) return 0 } i = i + 1 } listPush(m.keys, k) listPush(m.vals, v) return 0 }
 // index-dispatch entry points (unchanged names, now over the real Map): klower lowerIndex/lowerIndexStore
 // route m[k]/m[k]=v here, and these forward to the Map methods above.
+@lang("map.getS")
 fun __mapGetS(m: Map, k: String): Int { return Map_get(m, k) }
+@lang("map.getI")
 fun __mapGetI(m: Map, k: Int): Int { return Map_getI(m, k) }
+@lang("map.setS")
 fun __mapSetS(m: Map, k: String, v: Int): Int { return Map_set(m, k, v) }
+@lang("map.setI")
 fun __mapSetI(m: Map, k: Int, v: Int): Int { return Map_setI(m, k, v) }

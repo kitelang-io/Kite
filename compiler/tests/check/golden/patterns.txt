@@ -1,0 +1,7 @@
+error: unresolved name: combine
+error: unresolved name: Kind
+error: unresolved name: 
+error: unresolved name: 
+error: unresolved name: Kind
+error: unresolved name: Kind
+6 error(s)

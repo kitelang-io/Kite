@@ -1,0 +1,24 @@
+struct Point
+  pub val x : Int
+  pub var y : Int
+  fun norm(self) : Int
+    ident x
+
+class Node
+  val v : Int
+  var next : Int
+  deinit
+    block
+      result
+        call
+          ident println
+          args
+            ident v
+  fun get(self) : Int
+    ident v
+
+struct Empty
+
+struct Wrap2<T: Show> where T: Clone
+  val t : T
+

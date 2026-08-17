@@ -1,0 +1,29 @@
+fun m() : Int
+  block
+    expr-stmt
+      call
+        ident f
+        args
+          x =
+            int 1
+          ident y
+    expr-stmt
+      call
+        ident g
+        args
+          ident a
+          b =
+            int 1
+          c =
+            int 2
+    val p
+      call
+        ident Point
+        args
+          x =
+            int 0
+          y =
+            int 1
+    return
+      int 0
+

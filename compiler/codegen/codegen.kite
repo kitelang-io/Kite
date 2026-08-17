@@ -78,7 +78,7 @@ fun containsStr(l: List, s: String): Bool {
   return false
 }
 
-struct Gen(val code: List, var ctr: Int, val cstrN: List, val cstrV: List, var cctr: Int, val structN: List, val structF: List, val structFT: List, val variantN: List, val variantTag: List, val variantTys: List, val funN: List, val funRet: List)
+struct Gen(val code: List, var ctr: Int, val cstrN: List, val cstrV: List, var cctr: Int, val structN: List, val structF: List, val structFT: List, val variantN: List, val variantTag: List, val variantTys: List, val funN: List, val funRet: List, val arcE: List)
 struct Ctx(val gen: Gen, val names: List, val offs: List, val epi: String, val strLocals: List, val ltyN: List, val ltyV: List, val brkL: List, val contL: List, var loopDepth: Int)
 
 // intern a string literal into the cstring table -> its label (Lstr_N)
@@ -430,6 +430,15 @@ fun genReadFile(ctx: Ctx, path: Expr): Int {
   genExpr(ctx, path)
   val lr = internStr(ctx, "r") ; emit(ctx, ISymHi(1, lr)) ; emit(ctx, ISymLo(1, 1, lr))
   emit(ctx, ICallSym("_fopen")) ; emit(ctx, IPush(0))
+  // ROBUSTNESS: fopen returns NULL for a missing/unreadable file; feeding NULL into fseek/ftell/fread
+  // faults inside libc (flockfile(NULL)). Guard it: on NULL, free the fp slot and return an empty string
+  // (malloc(1) + terminator) so a missing module/import path yields a graceful "unresolved name"
+  // diagnostic instead of a segfault. The compiler's own source only reads files that exist, so this
+  // branch is never taken while self-hosting (fixpoint-safe).
+  val g = fresh(ctx)
+  val lnull = concat("Lrdnull_", intToStr(g))
+  val lend = concat("Lrdend_", intToStr(g))
+  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, IJmpZeroL(0, lnull))
   emit(ctx, ILoadOff(0, 31, 0)) ; loadImm(ctx, 1, 0) ; loadImm(ctx, 2, 2) ; emit(ctx, ICallSym("_fseek"))
   emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, ICallSym("_ftell")) ; emit(ctx, IPush(0))
   emit(ctx, ILoadOff(0, 31, 16)) ; loadImm(ctx, 1, 0) ; loadImm(ctx, 2, 0) ; emit(ctx, ICallSym("_fseek"))
@@ -437,7 +446,10 @@ fun genReadFile(ctx: Ctx, path: Expr): Int {
   emit(ctx, ILoadOff(0, 31, 0)) ; loadImm(ctx, 1, 1) ; emit(ctx, ILoadOff(2, 31, 16)) ; emit(ctx, ILoadOff(3, 31, 32)) ; emit(ctx, ICallSym("_fread"))
   emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, ILoadOff(1, 31, 16)) ; emit(ctx, IAdd(0, 0, 1)) ; emit(ctx, IStoreByte(31, 0, 0))
   emit(ctx, ILoadOff(0, 31, 32)) ; emit(ctx, ICallSym("_fclose"))
-  emit(ctx, ILoadOff(0, 31, 0)) ; return emit(ctx, IStackFree(48))
+  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, IStackFree(48)) ; emit(ctx, ICallL(lend))
+  emit(ctx, ILabel(lnull))
+  emit(ctx, IStackFree(16)) ; loadImm(ctx, 0, 1) ; emit(ctx, ICallSym("_malloc")) ; emit(ctx, IStoreByte(31, 0, 0))
+  return emit(ctx, ILabel(lend))
 }
 fun genWriteFile(ctx: Ctx, path: Expr, contents: Expr): Int {
   genExpr(ctx, path) ; emit(ctx, IPush(0)) ; genExpr(ctx, contents) ; emit(ctx, IPush(0))
@@ -677,13 +689,33 @@ fun genDecRefcount(ctx: Ctx, p: Expr): Int {
 fun genFreeObj(ctx: Ctx, p: Expr): Int {
   genExpr(ctx, p) ; emit(ctx, ISubImm(0, 0, 16)) ; return emit(ctx, ICallSym("_free"))
 }
+// ARC-EXEMPTION — the SINGLE SOURCE OF TRUTH for which nominal types are excluded from automatic ARC.
+// The built-in container/string nominals (List, Map, String) are leak-managed: List/Map are type-erased
+// word-lists whose elements can't be retained (and the compiler nests containers, so a naive deep-release
+// would double-free), and String is an immutable literal-or-heap word we never ref-count. BOTH ARC sites
+// consult this ONE predicate — klower's isClassTag (auto retain/release) via isBuiltinNominal, and codegen's
+// isRelField (deep-release) — so the exempt set is defined in exactly one place. Listing String here is a
+// no-op for isRelField (String is never a registered struct, so isStructName is already false); it just
+// keeps the two former copies from diverging. The exempt set is now SOURCED FROM lib/: types tagged
+// `@arc(manual)` in the prelude are collected during injectHelpers into the arcE list, threaded to both
+// ARC sites (klower's isBuiltinNominal/isClassTag via lo.arcE, codegen's isRelField via gen.arcE). The
+// hardcoded isArcExemptLit below survives ONLY as a never-hit fallback for an EMPTY arcE (e.g. the
+// standalone genProgram entry that builds a Gen with no tables) — the populated set is byte-identical
+// to {List, Map, String}, so emission is unchanged (kcc2==kcc3 holds).
+fun isArcExemptLit(t: String): Bool { return strEq(t, "List") || strEq(t, "Map") || strEq(t, "String") }
+fun isArcExemptIn(arcE: List, t: String): Bool {
+  if (arcE.len() == 0) { return isArcExemptLit(t) }
+  var i = 0
+  while (i < arcE.len()) { if (strEq(arcE.get(i), t)) { return true } ; i = i + 1 }
+  return false
+}
 // a struct is "deep" (needs a generated recursive-release routine) iff any field is itself
 // a struct type — those fields hold ref-counted objects that must be released with the parent.
 // A field is a RELEASABLE reference iff its type is a struct/class we generate rel routines for, EXCLUDING
-// the built-in container nominals List/Map: those are leak-managed (type-erased word lists — see the
-// isBuiltinNominal ARC exemption in klower.kite), so a struct field of type List must NOT be deep-released
-// (it is typically shared/aliased; releasing it would double-free). Keeps List-as-a-class leak-consistent.
-fun isRelField(gen: Gen, ft: String): Bool { return isStructName(gen, ft) && (strEq(ft, "List") == false) && (strEq(ft, "Map") == false) }
+// the ARC-exempt container nominals (@arc(manual): List/Map): those are leak-managed (type-erased word
+// lists), so a struct field of type List must NOT be deep-released (it is typically shared/aliased;
+// releasing it would double-free). Keeps List-as-a-class leak-consistent.
+fun isRelField(gen: Gen, ft: String): Bool { return isStructName(gen, ft) && (isArcExemptIn(gen.arcE, ft) == false) }
 fun structHasRefField(gen: Gen, name: String): Bool {
   val idx = structIdx(gen, name)
   if (idx < 0) { return false }
@@ -707,6 +739,8 @@ fun genReleaseDisp(ctx: Ctx, p: Expr): Int {
   }
   return genRelease(ctx, p)
 }
+// The names dispatched specially below are the INTRINSIC FLOOR — they have no Kite body. isIntrinsic()
+// (klower.kite) enumerates exactly this set (+ comptime, folded at lower time); keep the two in sync.
 fun genCall(ctx: Ctx, name: String, args: List): Int {
   if (strEq(name, "toInt") && args.len() == 1) { return genFToInt(ctx, aAt(args, 0)) }
   if (strEq(name, "__abort") && args.len() == 0) { return emit(ctx, ICallSym("_abort")) }
@@ -981,14 +1015,14 @@ fun genRelRoutines(gen: Gen): Int {
   }
   return 0
 }
-fun genProgramG(funcs: List, structN: List, structF: List, structFT: List, variantN: List, variantTag: List, variantTys: List, funN: List, funRet: List): Gen {
-  val gen = Gen(list(), 0, list(), list(), 0, structN, structF, structFT, variantN, variantTag, variantTys, funN, funRet)
+fun genProgramG(funcs: List, structN: List, structF: List, structFT: List, variantN: List, variantTag: List, variantTys: List, funN: List, funRet: List, arcE: List): Gen {
+  val gen = Gen(list(), 0, list(), list(), 0, structN, structF, structFT, variantN, variantTag, variantTys, funN, funRet, arcE)
   var i = 0
   while (i < funcs.len()) { val f: Func = funcs.get(i) ; genFun(gen, f) ; i = i + 1 }
   genRelRoutines(gen)
   return gen
 }
-fun genProgram(funcs: List): List { return genProgramG(funcs, list(), list(), list(), list(), list(), list(), list(), list()).code }
+fun genProgram(funcs: List): List { return genProgramG(funcs, list(), list(), list(), list(), list(), list(), list(), list(), list()).code }
 
 // ============================================================================
 // IR PEEPHOLE OPTIMIZER  (target-independent; operates on the virtual-register IR)

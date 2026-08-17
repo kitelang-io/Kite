@@ -1,0 +1,31 @@
+fun m() : Int
+  block
+    val a
+      binary |
+        binary &
+          int 255
+          int 15
+        binary ^
+          binary <<
+            int 1
+            int 4
+          binary >>
+            ident n
+            int 2
+    val b
+      int 3531605312
+    val c
+      binary &
+        binary ==
+          ident a
+          ident b
+        ident c
+    return
+      binary |
+        binary &
+          ident a
+          ident b
+        binary ^
+          ident c
+          int 3
+

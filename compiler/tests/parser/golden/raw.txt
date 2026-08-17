@@ -1,0 +1,16 @@
+import kite::text::StringBuilder
+
+fun banner(name: String) : String
+  block
+    return
+      interp
+        lit "\n    ================\n     hello, "
+        expr
+          ident name
+        lit "\n     path: C:\\Users\\kite\\bin   (backslashes are literal here)\n     sum:  "
+        expr
+          binary +
+            int 1
+            int 2
+        lit "\n    ================\n    "
+
