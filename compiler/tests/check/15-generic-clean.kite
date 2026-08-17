@@ -1,0 +1,6 @@
+trait Show { fun show(self): Int }
+struct A(val x: Int)
+impl Show for A { fun show(self): Int = self.x }
+fun describe<T: Show>(x: T): Int = x.show()
+fun pick<T>(a: T, b: T): T = a
+fun m(): Int { return describe(A(1)) + pick(2, 3) }

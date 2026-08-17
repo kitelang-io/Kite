@@ -1,0 +1,96 @@
+// jq.kite — the jq query language (a subset): lexing + parsing to a filter list, then evaluation.
+// jq's real engine (src/lexer.l + src/parser.y compile to bytecode run by src/execute.c) is a stack VM;
+// this port keeps the same surface language but evaluates by tree-walking a list of filters, where each
+// filter maps one input value to a STREAM of outputs (a List<Json>) and `|` flat-maps the pipeline.
+//
+// Supported: `.` (identity), `.field`, `.a.b`, `.[N]` (index, negatives from the end), `.[]`/`[]`
+// (iterate), `|` (pipe), and the builtins `length`, `keys`, `add`.
+import kite::core::option
+import "examples/jq/jv.kite"
+import "examples/jq/builtin.kite"
+
+enum Filter { FIdentity; FField(String); FIndex(Int); FIterate; FLength; FKeys; FAdd }
+
+// ---------------- lex + parse: query text -> List<Filter> ----------------
+struct QParser(val src: String, var pos: Int)
+fun qpeek(p: QParser): Int { if (p.pos >= strLen(p.src)) { return 0 - 1 } return charAt(p.src, p.pos) }
+fun qbump(p: QParser) { p.pos += 1 }
+fun isIdentCh(c: Int): Bool { return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c == 95 }
+
+fun readIdent(p: QParser): String {
+  var s = ""
+  while (isIdentCh(qpeek(p))) { s += chr(qpeek(p)) qbump(p) }
+  return s
+}
+fun readInt(p: QParser): Int {
+  var neg = false
+  if (qpeek(p) == 45) { neg = true qbump(p) }                    // '-'
+  var n = 0
+  while (qpeek(p) >= 48 && qpeek(p) <= 57) { n = n * 10 + (qpeek(p) - 48) qbump(p) }
+  return if (neg) { 0 - n } else { n }
+}
+fun parseBracket(p: QParser, out: List): Int {
+  qbump(p)                                          // '['
+  if (qpeek(p) == 93) { qbump(p) out.push(FIterate) return 0 }    // '[]'
+  val n = readInt(p)
+  if (qpeek(p) == 93) { qbump(p) }                                // ']'
+  out.push(FIndex(n))
+  return 0
+}
+fun pushWord(out: List, w: String): Int {
+  if (strEq(w, "length")) { out.push(FLength) }
+  else { if (strEq(w, "keys")) { out.push(FKeys) }
+  else { if (strEq(w, "add")) { out.push(FAdd) }
+  else { 0 } } }
+  return 0
+}
+
+fun parseQuery(src: String): List {
+  val filters = listNew()
+  val p = QParser(src, 0)
+  var go = true
+  while (go) {
+    val c = qpeek(p)
+    if (c == 0 - 1) { go = false }
+    else { if (c == 32 || c == 124) { qbump(p) }                 // whitespace or '|' — both just separate
+    else { if (c == 46) {                                        // '.'
+      qbump(p)
+      val d = qpeek(p)
+      if (d == 91) { parseBracket(p, filters) }                  // .[...]
+      else { if (isIdentCh(d)) { filters.push(FField(readIdent(p))) }   // .field
+      else { filters.push(FIdentity) } }                         // bare .
+    }
+    else { if (c == 91) { parseBracket(p, filters) }             // [...]
+    else { if (isIdentCh(c)) { pushWord(filters, readIdent(p)) } // length / keys / add
+    else { qbump(p) } } } } }
+  }
+  return filters
+}
+
+// ---------------- evaluation ----------------
+// apply ONE filter to ONE input value, producing a stream (0+ outputs).
+fun applyFilter(f: Filter, input: Json): List {
+  val out = listNew()
+  when (f) {
+    FIdentity -> out.push(input)
+    FField(name) -> when (objGet(input, name)) { Some(v) -> out.push(v)  None -> out.push(JNull) }
+    FIndex(i) -> when (arrGet(input, i)) { Some(v) -> out.push(v)  None -> out.push(JNull) }
+    FIterate -> { for (v in jsonValues(input)) { out.push(v) } }
+    FLength -> out.push(JNum(lengthOf(input)))
+    FKeys -> out.push(keysOf(input))
+    FAdd -> out.push(addOf(input))
+  }
+  return out
+}
+
+// run the pipeline: start with [root], then flat-map each filter across the whole stream.
+fun runQuery(filters: List, root: Json): List {
+  var stream = listNew()
+  stream.push(root)
+  for (f in filters) {
+    val next = listNew()
+    for (v in stream) { for (o in applyFilter(f, v)) { next.push(o) } }
+    stream = next
+  }
+  return stream
+}

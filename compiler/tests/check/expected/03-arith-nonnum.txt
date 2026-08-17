@@ -1,0 +1,2 @@
+error: line 1: arithmetic on non-numeric operands: String and Int
+1 semantic error(s)

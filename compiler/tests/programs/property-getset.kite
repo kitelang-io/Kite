@@ -1,0 +1,36 @@
+// Property getter/setter syntax (no-parens accessors), lowered by klower:
+//   xs.length / s.length   -> GETTER: nullary convention method List_length(xs)/String_length(s)
+//   b.area                 -> GETTER on a struct: `area` is not a field, so Box_area(b) is called
+//   b.wide = 7             -> SETTER on a struct: `wide` is not a field, so Box_wide_set(b, 7) is called
+//   b.w / b.h reads+stores -> REAL fields, unchanged (plain field load / field store)
+// Getter/setter accessors are ordinary nominal-convention functions <Type>_<name> / <Type>_<name>_set.
+// Exit code is the running accumulator, asserted by the suite (53).
+struct Box(var w: Int, var h: Int)
+fun Box_area(bx: Box): Int { return bx.w * bx.h }            // getter target: b.area
+fun Box_wide_set(bx: Box, v: Int): Int { bx.w = v  return 0 } // setter target: b.wide = v
+
+fun main(): Int {
+  var acc = 0
+  // --- list getter: xs.length (no parens) -> List_length(xs) ---
+  val xs = list()
+  xs.push(10)
+  xs.push(20)
+  xs.push(30)
+  acc = acc + xs.length        // getter -> 3    acc = 3
+  // --- string getter: s.length (no parens) -> String_length(s) ---
+  val s = "hello"
+  acc = acc + s.length         // getter -> 5    acc = 8
+  // --- struct getter: b.area (not a field) -> Box_area(b) ---
+  val b = Box(4, 5)
+  acc = acc + b.area           // getter -> 20   acc = 28
+  // --- real field reads (UNCHANGED: plain field loads) ---
+  acc = acc + b.w              // + 4            acc = 32
+  acc = acc + b.h              // + 5            acc = 37
+  // --- real field store (UNCHANGED: plain field store) ---
+  b.h = 9
+  acc = acc + b.h              // + 9            acc = 46
+  // --- struct setter: b.wide = 7 -> Box_wide_set(b, 7) sets w ---
+  b.wide = 7
+  acc = acc + b.w              // + 7            acc = 53
+  return acc
+}

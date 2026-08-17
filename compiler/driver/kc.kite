@@ -47,9 +47,9 @@ fun kwS(w: String): Int {
   if (strEq(w, "when")) { return 19 }
   return 1
 }
-fun pushT(t: List, k: Int, s: String): Int { listPush(t, TokS(k, s)) ; return 0 }
+fun pushT(t: List, k: Int, s: String): Int { t.push(TokS(k, s)) ; return 0 }
 fun lexS(src: String): List {
-  val t = listNew()
+  val t = list()
   val l = LxS(src, strLen(src), 0)
   var go = 1
   while (go == 1) {
@@ -75,7 +75,7 @@ fun lexS(src: String): List {
       } else { lexOpS(l, t) } } }
     }
   }
-  listPush(t, TokS(0, ""))
+  t.push(TokS(0, ""))
   return t
 }
 fun lexOpS(l: LxS, t: List): Int {
@@ -104,9 +104,9 @@ fun lexOpS(l: LxS, t: List): Int {
 
 // --- scalar parser (produces kenc.kite's Expr/Stmt/Func) ---
 struct PC(val toks: List, var pos: Int)
-fun pkS(p: PC): Int { val t: TokS = listGet(p.toks, p.pos) ; return t.kind }
-fun pkS2(p: PC): Int { if (p.pos + 1 >= listLen(p.toks)) { return 0 } val t: TokS = listGet(p.toks, p.pos + 1) ; return t.kind }
-fun ptS(p: PC): String { val t: TokS = listGet(p.toks, p.pos) ; return t.text }
+fun pkS(p: PC): Int { val t: TokS = p.toks.get(p.pos) ; return t.kind }
+fun pkS2(p: PC): Int { if (p.pos + 1 >= p.toks.len()) { return 0 } val t: TokS = p.toks.get(p.pos + 1) ; return t.kind }
+fun ptS(p: PC): String { val t: TokS = p.toks.get(p.pos) ; return t.text }
 fun eS(p: PC): Int { p.pos = p.pos + 1 ; return 0 }
 fun opS(k: Int): String {
   if (k == 30) { return "+" }
@@ -130,10 +130,10 @@ fun opS(k: Int): String {
   return "?"
 }
 fun pArgsS(p: PC): List {
-  val a = listNew()
+  val a = list()
   if (pkS(p) != 21) {
     var more = 1
-    while (more == 1) { listPush(a, pExprS(p)) ; if (pkS(p) == 24) { eS(p) } else { more = 0 } }
+    while (more == 1) { a.push(pExprS(p)) ; if (pkS(p) == 24) { eS(p) } else { more = 0 } }
   }
   eS(p)
   return a
@@ -179,10 +179,10 @@ fun pPatS(p: PC): Pat {
   if (isUpperS(nm)) {
     if (pkS(p) == 20) {
       eS(p)
-      val subs = listNew()
+      val subs = list()
       if (pkS(p) != 21) {
         var more = 1
-        while (more == 1) { listPush(subs, pPatS(p)) ; if (pkS(p) == 24) { eS(p) } else { more = 0 } }
+        while (more == 1) { subs.push(pPatS(p)) ; if (pkS(p) == 24) { eS(p) } else { more = 0 } }
       }
       eS(p)
       return PCtorP(nm, subs)
@@ -195,10 +195,10 @@ fun pWhenS(p: PC): Expr {
   eS(p) ; eS(p)                         // 'when' '('
   val subj = pExprS(p) ; eS(p)          // ')'
   eS(p)                                 // '{'
-  val arms = listNew()
+  val arms = list()
   while (pkS(p) != 23 && pkS(p) != 0) {
-    if (pkS(p) == 16) { eS(p) ; eS(p) ; listPush(arms, Arm(1, PWild, pExprS(p))) }  // else ->
-    else { val pat = pPatS(p) ; eS(p) ; listPush(arms, Arm(0, pat, pExprS(p))) }     // pat ->
+    if (pkS(p) == 16) { eS(p) ; eS(p) ; arms.push(Arm(1, PWild, pExprS(p))) }  // else ->
+    else { val pat = pPatS(p) ; eS(p) ; arms.push(Arm(0, pat, pExprS(p))) }     // pat ->
   }
   eS(p)                                 // '}'
   return EWhen(subj, arms)
@@ -253,18 +253,18 @@ fun pStmtS(p: PC): Stmt {
 }
 fun pBlockS(p: PC): Expr {
   eS(p)                                 // '{'
-  val stmts = listNew()
+  val stmts = list()
   var res = ENoRes
   var go = 1
   while (go == 1) {
     val k = pkS(p)
     if (k == 23 || k == 0) { go = 0 }
     else {
-      if (k == 11 || k == 12 || k == 13 || k == 14) { listPush(stmts, pStmtS(p)) }
+      if (k == 11 || k == 12 || k == 13 || k == 14) { stmts.push(pStmtS(p)) }
       else {
         val e = pExprS(p)
-        if (pkS(p) == 43) { eS(p) ; listPush(stmts, mkAssignS(e, pExprS(p))) }
-        else { if (pkS(p) == 23) { res = e } else { listPush(stmts, SExprS(e)) } }
+        if (pkS(p) == 43) { eS(p) ; stmts.push(mkAssignS(e, pExprS(p))) }
+        else { if (pkS(p) == 23) { res = e } else { stmts.push(SExprS(e)) } }
       }
     }
   }
@@ -273,22 +273,22 @@ fun pBlockS(p: PC): Expr {
 }
 fun pFnS(p: PC, funN: List, funRet: List): Func {
   eS(p) ; val nm = ptS(p) ; eS(p) ; eS(p)   // 'fun' name '('
-  val params = listNew()
-  val paramTys = listNew()
+  val params = list()
+  val paramTys = list()
   if (pkS(p) != 21) {
     var more = 1
     while (more == 1) {
       val pn = ptS(p) ; eS(p)
       var pt = ""
       if (pkS(p) == 25) { eS(p) ; pt = ptS(p) ; eS(p) ; skipTypeS(p) }
-      listPush(params, pn) ; listPush(paramTys, pt)
+      params.push(pn) ; paramTys.push(pt)
       if (pkS(p) == 24) { eS(p) } else { more = 0 }
     }
   }
   eS(p)                                 // ')'
   var rt = ""
   if (pkS(p) == 25) { eS(p) ; rt = ptS(p) ; eS(p) ; skipTypeS(p) }
-  listPush(funN, nm) ; listPush(funRet, rt)
+  funN.push(nm) ; funRet.push(rt)
   if (pkS(p) == 43) { eS(p) ; return Func(nm, params, paramTys, pExprS(p)) }  // = expr body
   return Func(nm, params, paramTys, pBlockS(p))
 }
@@ -308,7 +308,7 @@ fun pEnumS(p: PC, variantN: List, variantTag: List): Int {
       }
       eS(p)
     }
-    listPush(variantN, vn) ; listPush(variantTag, tag)
+    variantN.push(vn) ; variantTag.push(tag)
     tag = tag + 1
   }
   eS(p)                                 // '}'
@@ -318,8 +318,8 @@ fun pStructS(p: PC, structN: List, structF: List, structFT: List): Int {
   eS(p)                                 // 'struct'
   val name = ptS(p) ; eS(p)
   eS(p)                                 // '('
-  val fields = listNew()
-  val ftys = listNew()
+  val fields = list()
+  val ftys = list()
   if (pkS(p) != 21) {
     var more = 1
     while (more == 1) {
@@ -327,23 +327,23 @@ fun pStructS(p: PC, structN: List, structF: List, structFT: List): Int {
       val fn = ptS(p) ; eS(p)
       var ft = ""
       if (pkS(p) == 25) { eS(p) ; ft = ptS(p) ; eS(p) ; skipTypeS(p) }
-      listPush(fields, fn) ; listPush(ftys, ft)
+      fields.push(fn) ; ftys.push(ft)
       if (pkS(p) == 24) { eS(p) } else { more = 0 }
     }
   }
   eS(p)                                 // ')'
-  listPush(structN, name) ; listPush(structF, fields) ; listPush(structFT, ftys)
+  structN.push(name) ; structF.push(fields) ; structFT.push(ftys)
   return 0
 }
 fun parseAll(toks: List): PR {
   val p = PC(toks, 0)
-  val funcs = listNew() ; val structN = listNew() ; val structF = listNew() ; val structFT = listNew()
-  val variantN = listNew() ; val variantTag = listNew()
-  val funN = listNew() ; val funRet = listNew()
+  val funcs = list() ; val structN = list() ; val structF = list() ; val structFT = list()
+  val variantN = list() ; val variantTag = list()
+  val funN = list() ; val funRet = list()
   var go = 1
   while (go == 1) {
     val k = pkS(p)
-    if (k == 10) { listPush(funcs, pFnS(p, funN, funRet)) }
+    if (k == 10) { funcs.push(pFnS(p, funN, funRet)) }
     else { if (k == 17) { pStructS(p, structN, structF, structFT) }
     else { if (k == 18) { pEnumS(p, variantN, variantTag) }
     else { go = 0 } } }
@@ -361,6 +361,6 @@ fun main(): Int {
   val externals = externalsOf(asmR.relocs)
   val entry = entryOffset(code, "_main")
   val n = writeBytes("/tmp/kc_out", buildExeFull(asmR.words, asmR.relocs, cs, externals, entry, "_main", "kcout"))
-  println(concat("compiled ", concat(intToStr(listLen(pr.funcs)), concat(" funcs, ", concat(intToStr(listLen(pr.structN)), " structs")))))
-  return listLen(pr.funcs)
+  println(concat("compiled ", concat(intToStr(pr.funcs.len()), concat(" funcs, ", concat(intToStr(pr.structN.len()), " structs")))))
+  return pr.funcs.len()
 }

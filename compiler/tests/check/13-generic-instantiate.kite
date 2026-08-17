@@ -1,0 +1,2 @@
+fun id<T>(x: T): T = x
+fun m(): Int { val s: String = id(1)  return 0 }

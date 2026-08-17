@@ -1,0 +1,16 @@
+// kite::core::ops — operator overloading traits (Rust-style), routed through the existing trait system.
+//
+// An arithmetic operator desugars (in klower's lowerBin) to the matching trait method when the LEFT
+// operand's concrete type defines it:
+//   +  ->  Add::add      -  ->  Sub::sub      *  ->  Mul::mul      /  ->  Div::div      %  ->  Rem::rem
+// A type overloads an operator by implementing the trait, e.g.
+//   impl Add for V2 { fun add(self, rhs: V2): V2 { return V2(self.x + rhs.x, self.y + rhs.y) } }
+// Primitive Int/Float arithmetic has no such impl, so it falls through to the built-in machine ops —
+// this is zero-cost for the numeric core (the compiler's own sources only ever `+` integers).
+// `Self` denotes the implementing type. Auto-included via compiler/prelude.conf BEFORE the string module
+// (which impls Add for String to overload `+` as concatenation).
+trait Add { fun add(self, rhs: Self): Self }
+trait Sub { fun sub(self, rhs: Self): Self }
+trait Mul { fun mul(self, rhs: Self): Self }
+trait Div { fun div(self, rhs: Self): Self }
+trait Rem { fun rem(self, rhs: Self): Self }

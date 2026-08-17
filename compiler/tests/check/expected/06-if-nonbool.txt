@@ -1,0 +1,2 @@
+error: line 1: if condition must be Bool, found Int
+1 semantic error(s)

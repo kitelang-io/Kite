@@ -1,0 +1,25 @@
+// REGRESSION FIXTURE — this program is DELIBERATELY MALFORMED (it is missing one closing brace, so
+// function `f` is never closed and `fun main` appears while the parser is still inside f's body).
+//
+// The compiler MUST reject it with a diagnostic and a non-zero exit code. It MUST NOT segfault.
+//
+// History: this shape was originally (mis)filed as a "forward-reference codegen crash" — reordering
+// the callee definitions appeared to fix it. That was a red herring: the real defect was that the
+// parser's current-token accessors (pk/ptext/pline in frontend/kfront.kite) did an UNCHECKED
+// listGet(p.toks, p.pos). On malformed input the grammar advances the cursor past the final EOF
+// token, listGet returns null, and reading `t.kind` faulted at address 0x0 — a compiler segfault
+// instead of a parse error. Fixed by bounds-checking those accessors to return the same end-of-input
+// sentinels (kind 0 / text "") the lookahead helpers already use, so the grammar fails its match
+// cleanly. A correctly-brace-balanced version of this exact deep nesting parses and compiles fine.
+//
+// gate.sh asserts `kitec check` on this file exits non-zero AND is not signal-killed (not 139).
+fun f(s: String, i: Int, steps: List): Int {
+  val c = charAt(s, i)
+  if (c == 32) { listPush(steps, 1) } else { if (c == 124) { listPush(steps, 2) }
+  else { if (c == 46) { val d = charAt(s, i) if (d == 91) { listPush(steps, 3) } else { listPush(steps, 4) } }
+  else { if (c == 91) { listPush(steps, 6) }
+  else { if (c == 97) { listPush(steps, 7) }
+  else { listPush(steps, 8) } } } }
+  return 0
+}
+fun main(): Int { val s = listNew() f("x", 0, s) return listLen(s) }

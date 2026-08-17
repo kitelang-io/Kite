@@ -55,6 +55,19 @@ let rec compat a b =
 
 let join a b = if compat a b then b else if compat b a then a else TUnknown
 
+(* a single uppercase letter (T, A, K, V, ...) is an erased generic type PARAMETER *)
+let is_type_param n = String.length n = 1 && n.[0] >= 'A' && n.[0] <= 'Z'
+let is_type_param_ty = function TNamed (n, _) -> is_type_param n | _ -> false
+let is_unknown = function TUnknown -> true | _ -> false
+(* a "concrete" type we can reason about for type-parameter binding consistency: a real primitive or a
+   NON-type-parameter named type (a struct/enum/trait). *)
+let rec is_concrete = function
+  | TPrim _ -> true
+  | TNamed (n, _) -> not (is_type_param n)
+  | TNull x -> is_concrete x
+  | _ -> false
+let rec head_name = function TPrim x -> x | TNamed (n, _) -> n | TNull x -> head_name x | _ -> ""
+
 let rec show = function
   | TPrim s -> s
   | TNamed (n, []) -> n
@@ -67,14 +80,60 @@ type struct_info = { fields : (string * ty) list }
 
 type env = {
   funs : (string, ty list * ty) Hashtbl.t;
+  fun_gens : (string, generics) Hashtbl.t;      (* callee name -> generic params (for trait bounds) *)
   structs : (string, struct_info) Hashtbl.t;
   enums : (string, unit) Hashtbl.t;
+  impls : (string * string) list ref;           (* (type name, trait name) from `impl Trait for Type` *)
   mutable locals : (string * ty) list list;
   mutable cur_ret : ty option;
   diags : string list ref;
 }
 
 let err env msg = env.diags := msg :: !(env.diags)
+
+(* ---- generic instantiation (Target 1) ---- *)
+(* Bind type parameter [n] to argument type [at] for THIS call (subst is per-call). The consistency
+   error fires ONLY when the same parameter is bound twice to two mutually-incompatible CONCRETE types —
+   a definite type error under any instantiation. Opaque bindings (Unknown / another type-parameter)
+   are permissive and upgrade toward the concrete one, so no false positives on polymorphic code. *)
+let bind_type_var env subst n at =
+  match List.assoc_opt n !subst with
+  | None -> subst := (n, at) :: !subst
+  | Some prev ->
+    if is_unknown prev || is_type_param_ty prev then subst := (n, at) :: List.remove_assoc n !subst
+    else if is_unknown at || is_type_param_ty at then ()
+    else if is_concrete prev && is_concrete at then
+      (if (not (compat at prev)) && not (compat prev at) then
+         err env (Printf.sprintf "type parameter %s bound to incompatible types %s and %s" n (show prev) (show at)))
+    else ()
+
+(* substitute bound type parameters into a (return) type *)
+let rec inst_ty subst t =
+  match t with
+  | TNamed (n, []) when is_type_param n ->
+    (match List.assoc_opt n !subst with Some b -> b | None -> t)
+  | TNamed (n, args) -> TNamed (n, List.map (inst_ty subst) args)
+  | TNull x -> TNull (inst_ty subst x)
+  | TFun (ps, r) -> TFun (List.map (inst_ty subst) ps, inst_ty subst r)
+  | _ -> t
+
+(* ---- trait-bounds enforcement (Target 2) ---- *)
+(* trait-bound names declared on generic parameter [n] (e.g. `<T: Show + Eq>` -> ["Show"; "Eq"]) *)
+let bounds_of_generics generics n =
+  match List.find_opt (fun gp -> gp.gp_name = n) generics with
+  | Some gp -> List.map (fun b -> head_name (of_ast b)) gp.gp_bounds
+  | None -> []
+(* When type parameter [n: SomeTrait] is instantiated with a CONCRETE type [at], require that type to
+   impl the trait (impl registry). Only concrete types are checked, so passing another type parameter
+   through never false-positives. *)
+let check_bound env generics n at =
+  if is_concrete at then
+    let cn = head_name at in
+    List.iter
+      (fun tr ->
+        if not (List.mem (cn, tr) !(env.impls)) then
+          err env (Printf.sprintf "type %s does not satisfy trait bound %s on type parameter %s" (show at) tr n))
+      (bounds_of_generics generics n)
 
 let lookup_local env name =
   let rec go = function
@@ -203,18 +262,30 @@ and infer_call env f args =
   List.iter (fun a -> ignore (infer env a.arg_val)) args;
   match tf with
   | TFun (params, ret) ->
-    if List.length params <> List.length args then
+    if List.length params <> List.length args then (
       err env
         (Printf.sprintf "wrong number of arguments: expected %d, got %d" (List.length params)
-           (List.length args))
+           (List.length args));
+      ret)
     else
+      (* A bare type parameter (single-uppercase head) is instantiated by unification: bind it to the arg
+         type and check cross-occurrence consistency. Everything else keeps the exact prior structural
+         compat check, so non-generic calls are byte-identical to before. The generic return type is then
+         instantiated with the collected substitution. *)
+      let gens = match f with
+        | Ident name -> (match Hashtbl.find_opt env.fun_gens name with Some g -> g | None -> [])
+        | _ -> [] in
+      let subst = ref [] in
       List.iter2
         (fun pt a ->
           let at = infer env a.arg_val in
-          if not (compat at pt) then
+          if is_type_param_ty pt then (
+            bind_type_var env subst (head_name pt) at;
+            check_bound env gens (head_name pt) at)
+          else if not (compat at pt) then
             err env (Printf.sprintf "argument type %s is not compatible with parameter %s" (show at) (show pt)))
         params args;
-    ret
+      inst_ty subst ret
   | _ -> TUnknown
 
 and require_bool env t ctx =
@@ -288,8 +359,10 @@ let check (prog : program) : string list =
   let env =
     {
       funs = Hashtbl.create 64;
+      fun_gens = Hashtbl.create 64;
       structs = Hashtbl.create 64;
       enums = Hashtbl.create 32;
+      impls = ref [];
       locals = [];
       cur_ret = None;
       diags = ref [];
@@ -302,12 +375,19 @@ let check (prog : program) : string list =
       | FunDecl fd ->
         Hashtbl.replace env.funs fd.fn_name
           (List.map (fun p -> of_ast p.pty) fd.fn_params,
-           (match fd.fn_ret with Some t -> of_ast t | None -> TPrim "Unit"))
+           (match fd.fn_ret with Some t -> of_ast t | None -> TPrim "Unit"));
+        Hashtbl.replace env.fun_gens fd.fn_name fd.fn_generics
       | StructDecl td | ClassDecl td ->
         Hashtbl.replace env.structs td.td_name
           { fields = List.map (fun f -> (f.cf_name, of_ast f.cf_ty)) td.td_fields }
       | EnumDecl ed -> Hashtbl.replace env.enums ed.ed_name ()
-      | TraitDecl _ | ImplDecl _ | Import _ -> ())
+      | ImplDecl im ->
+        (match im.im_trait with
+         | Some (path, _) ->
+           let tr = List.nth path (List.length path - 1) in
+           env.impls := (head_name (of_ast im.im_type), tr) :: !(env.impls)
+         | None -> ())
+      | TraitDecl _ | Import _ -> ())
     prog;
   (* pass B: check bodies *)
   List.iter (check_decl env) prog;

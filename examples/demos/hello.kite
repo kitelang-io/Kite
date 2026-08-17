@@ -1,6 +1,6 @@
 // hello.kite — a taste of the surface syntax (Kotlin-flavored, ARC, no GC)
 
-import kite::io
+import kite::std::io
 
 struct Point(val x: Int, val y: Int)
 

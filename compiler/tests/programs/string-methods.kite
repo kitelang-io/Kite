@@ -1,0 +1,13 @@
+// String convention methods co-located with the type in kite::core::string: length()/charAt()/substr()
+// dispatch to String_length/String_charAt/String_substr, and repeat() to String_repeat. (`s.length()` uses
+// call syntax; a `s.length` getter with no parens is a separate parser effort — the method itself exists.)
+fun main(): Int {
+  val s = "hello"
+  var acc = s.length()        // 5
+  acc = acc + s.charAt(1)     // 'e' = 101 -> 106
+  val sub = s.substr(0, 2)    // "he", len 2
+  acc = acc + sub.length()    // + 2 = 108
+  val rep = "ab".repeat(3)    // "ababab", len 6
+  acc = acc + rep.length()    // + 6 = 114
+  return acc                  // 114
+}
