@@ -1,0 +1,4 @@
+error: unresolved name: label
+error: unresolved name: positive
+error: unresolved name: square
+3 error(s)

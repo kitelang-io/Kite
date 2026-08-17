@@ -1,0 +1,63 @@
+fun a(x: Int) : Int
+  block
+    return
+      if
+        binary >
+          ident x
+          int 0
+        then
+          int 1
+        else
+          int 2
+
+fun b(x: Int) : Int
+  block
+    val y
+      if
+        binary >
+          ident x
+          int 0
+        then
+          ident x
+        else
+          binary -
+            int 0
+            ident x
+    return
+      ident y
+
+fun c(x: Int) : Int
+  if
+    binary >
+      ident x
+      int 0
+    then
+      block
+        val z
+          binary +
+            ident x
+            int 1
+        result
+          ident z
+    else
+      int 0
+
+fun d(x: Int) : Int
+  block
+    return
+      if
+        binary >
+          ident x
+          int 2
+        then
+          int 10
+        else
+          if
+            binary >
+              ident x
+              int 1
+            then
+              int 20
+            else
+              int 30
+

@@ -1,0 +1,118 @@
+import kite::collections
+
+enum Ordering
+  Less
+  Equal
+  Greater
+
+trait Eq
+  fun eq(self, other: Self) : Bool
+    (signature)
+  fun ne(self, other: Self) : Bool
+    unary not !
+      call
+        field .eq
+          this
+        args
+          ident other
+
+trait Ord : Eq
+  fun cmp(self, other: Self) : Ordering
+    (signature)
+
+trait Iterator
+  type Item
+  fun next(mut self) : Item?
+    (signature)
+
+@derive(...)
+  ident Eq
+  ident Ord
+  ident Hash
+  ident Clone
+  ident Copy
+  ident Debug
+struct Vec2
+  pub val x : Int
+  pub val y : Int
+  fun lengthSq(self) : Int
+    block
+      return
+        binary +
+          binary *
+            field .x
+              this
+            field .x
+              this
+          binary *
+            field .y
+              this
+            field .y
+              this
+
+impl Add for Vec2
+  type Output = Vec2
+  fun add(self, rhs: Vec2) : Vec2
+    call
+      ident Vec2
+      args
+        binary +
+          field .x
+            this
+          field .x
+            ident rhs
+        binary +
+          field .y
+            this
+          field .y
+            ident rhs
+
+fun maxOf<T: Ord>(a: T, b: T) : T
+  block
+    return
+      if
+        binary ==
+          call
+            field .cmp
+              ident a
+            args
+              ident b
+          static ::Greater
+            ident Ordering
+        then
+          ident a
+        else
+          ident b
+
+fun collectInts<I>(it: inout I) : List<Int> where I: Iterator
+  block
+    var out
+      call
+        ident makeList
+    while
+      bool true
+      block
+        val x
+          elvis ?:
+            call
+              field .next
+                ident it
+            break
+        result
+          call
+            field .push
+              ident out
+            args
+              ident x
+    return
+      ident out
+
+impl<T: Display> Display for Boxed<T>
+  fun fmt(self, out: inout Formatter) : Result<Unit, FmtError>
+    call
+      field .fmt
+        field .value
+          this
+      args
+        ident out
+

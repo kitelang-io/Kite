@@ -1,0 +1,31 @@
+fun a(f: () -> Int) : Int
+  block
+    return
+      call
+        ident f
+
+fun b(f: (Int, String) -> Bool) : Int
+  block
+    return
+      int 0
+
+fun c(f: (Int) -> (Bool) -> Int) : Int
+  block
+    return
+      int 0
+
+fun d(f: (Int) -> Int?) : Int
+  block
+    return
+      int 0
+
+fun e(x: kite::collections::Map<K, V>?) : Int
+  block
+    return
+      int 0
+
+fun g(x: List<Int?>) : Int
+  block
+    return
+      int 0
+

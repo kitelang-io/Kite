@@ -1,0 +1,23 @@
+fun a() : String
+  block
+    return
+      string "hi"
+
+fun b(x: Int) : String
+  block
+    return
+      interp
+        lit "value="
+        expr
+          ident x
+        lit " and "
+        expr
+          binary +
+            ident x
+            int 1
+
+fun c() : String
+  block
+    return
+      string "raw \\n stays literal"
+

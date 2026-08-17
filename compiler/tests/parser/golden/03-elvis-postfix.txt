@@ -1,0 +1,49 @@
+fun m() : Int
+  block
+    val a
+      not-null !!
+        safe-field ?.y
+          safe-field ?.x
+            ident obj
+    val b
+      elvis ?:
+        elvis ?:
+          ident p
+          ident q
+        ident r
+    val c
+      elvis ?:
+        binary ||
+          ident x
+          ident y
+        ident z
+    val d
+      elvis ?:
+        safe-field ?.b
+          ident a
+        ident c
+    val e
+      call
+        type-app ::<Int>
+          ident f
+    val g
+      call
+        type-app ::<List<Int>, String>
+          ident collect
+        args
+          ident xs
+    val h
+      index
+        index
+          ident a
+          ident i
+        ident j
+    val k
+      index
+        call
+          type-app ::<K, V>
+            ident m
+        ident key
+    return
+      int 0
+

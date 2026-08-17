@@ -9,8 +9,10 @@
 // this is zero-cost for the numeric core (the compiler's own sources only ever `+` integers).
 // `Self` denotes the implementing type. Auto-included via compiler/prelude.conf BEFORE the string module
 // (which impls Add for String to overload `+` as concatenation).
-trait Add { fun add(self, rhs: Self): Self }
-trait Sub { fun sub(self, rhs: Self): Self }
-trait Mul { fun mul(self, rhs: Self): Self }
-trait Div { fun div(self, rhs: Self): Self }
-trait Rem { fun rem(self, rhs: Self): Self }
+// The @lang("op.X") attribute names the desugar role: klower's lowerBin maps a source operator to the
+// trait method's bare name (emitted mangled with the LEFT operand's type at the use site, e.g. V2_add).
+trait Add { @lang("op.+") fun add(self, rhs: Self): Self }
+trait Sub { @lang("op.-") fun sub(self, rhs: Self): Self }
+trait Mul { @lang("op.*") fun mul(self, rhs: Self): Self }
+trait Div { @lang("op./") fun div(self, rhs: Self): Self }
+trait Rem { @lang("op.%") fun rem(self, rhs: Self): Self }

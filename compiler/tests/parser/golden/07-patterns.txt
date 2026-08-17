@@ -1,0 +1,157 @@
+fun neg() : Int
+  block
+    return
+      when
+        subject 
+          ident n
+        patterns
+          int -1
+        ->
+          block
+            result
+              int 1
+        patterns
+          int 5
+        ->
+          block
+            result
+              int 2
+
+fun negf() : Int
+  block
+    return
+      when
+        subject 
+          ident n
+        patterns
+          float -2.5
+        ->
+          block
+            result
+              int 1
+        patterns
+          int 5
+        ->
+          block
+            result
+              int 2
+
+fun pats() : Int
+  block
+    return
+      when
+        subject 
+          ident e
+        patterns
+          char 99
+        ->
+          block
+            result
+              int 2
+        patterns
+          float 3.5
+        ->
+          block
+            result
+              int 3
+        patterns
+          string "a"
+        ->
+          block
+            result
+              int 5
+        patterns
+          null
+        ->
+          block
+            result
+              int 6
+        patterns
+          ctor Point
+            bind a
+            bind b
+        ->
+          block
+            result
+              int 7
+        patterns
+          ctor Config
+            field host (pun)
+            field port (pun)
+            ..
+        ->
+          block
+            result
+              int 8
+        patterns
+          ctor Point
+            field x =
+              int 0
+            field y =
+              int 0
+        ->
+          block
+            result
+              int 9
+        patterns
+          ctor Foo
+            ..
+        ->
+          block
+            result
+              int 10
+        patterns
+          ctor Baz
+            field y =
+              int 2
+            ..
+        ->
+          block
+            result
+              int 11
+        patterns
+          ctor Node
+            field left =
+              ctor Leaf
+                bind v
+            ..
+        ->
+          block
+            result
+              int 12
+        patterns
+          variant Op::Add
+        ->
+          block
+            result
+              int 13
+        patterns
+          is Int
+        ->
+          block
+            result
+              int 14
+        patterns
+          !in
+            ident xs
+        ->
+          block
+            result
+              int 15
+        patterns
+          bind n
+        guard
+          binary >
+            ident n
+            int 0
+        ->
+          block
+            result
+              int 16
+        patterns
+          _
+        ->
+          block
+            result
+              int 0
+

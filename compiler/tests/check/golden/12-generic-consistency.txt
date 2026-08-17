@@ -1,0 +1,2 @@
+error: type parameter T bound to incompatible types Int and String
+1 error(s)

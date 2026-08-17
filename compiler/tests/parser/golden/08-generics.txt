@@ -1,0 +1,16 @@
+fun f<T>(x: T) : T
+  ident x
+
+fun h<T: Show + Eq, U = Int>(x: T) : U
+  int 0
+
+struct Box<T>
+  val value : T
+
+struct Wrap<T> where T: Show + Eq
+  val v : T
+
+enum Opt<T>
+  None
+  Some(T)
+

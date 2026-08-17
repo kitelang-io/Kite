@@ -1,0 +1,175 @@
+import kite::collections
+
+@derive(...)
+  ident Eq
+  ident Ord
+class Registry<K: Hash + Eq, V> where V: Clone
+  pub val store : Map<K, V>
+  var count : Int
+  deinit
+    block
+      result
+        call
+          ident println
+          args
+            interp
+              lit "bye "
+              expr
+                ident count
+  fun get(self, key: K) : V?
+    index
+      ident store
+      ident key
+  fun put(mut self, key: K, value: V) : Bool
+    block
+      val slot
+        elvis ?:
+          index
+            ident store
+            ident key
+          call
+            ident default
+      assign =
+        field .count
+          this
+        binary +
+          ident count
+          int 1
+      return
+        bool true
+
+trait Codec<T> : Show where T: Clone
+  type Wire
+  fun encode(self, x: T) : List<Int>
+    (signature)
+  fun decode(self, bytes: List<Int>) : T
+    call
+      field .zero
+        this
+
+impl<T> Codec<T> for Json<T> where T: Serialize
+  type Wire = String
+  fun encode(self, x: T) : List<Int>
+    list
+      call
+        field .hash
+          ident x
+      binary &
+        int 255
+        int 1
+
+enum Node<T>
+  Leaf(val value : T)
+  Branch(Node<T>, Node<T>)
+  Empty
+
+fun walk<T>(n: Node<T>, f: (T) -> Int) : Int
+  when
+    subject 
+      ident n
+    patterns
+      ctor Leaf
+        field value =
+          bind v
+    ->
+      call
+        ident f
+        args
+          ident v
+    patterns
+      ctor Branch
+        bind l
+        bind r
+    ->
+      binary +
+        call
+          ident walk
+          args
+            ident l
+            ident f
+        call
+          ident walk
+          args
+            ident r
+            ident f
+    patterns
+      variant Empty
+    ->
+      int 0
+
+fun run() : Int
+  block
+    val xs
+      list
+        int 1
+        int 2
+        int 3
+    val doubled
+      call
+        field .map
+          ident xs
+        args
+          lambda ()
+            block
+              result
+                binary *
+                  ident it
+                  int 2
+    val msg
+      interp
+        lit "sum="
+        expr
+          call
+            ident fold
+            args
+              int 0
+              lambda (a: Int, b: Int)
+                block
+                  result
+                    binary +
+                      ident a
+                      ident b
+        lit ", first="
+        expr
+          index
+            ident xs
+            int 0
+    val r
+      elvis ?:
+        safe-field ?.result
+          call
+            ident compute
+        not-null !!
+          ident fallback
+    return
+      when
+        subject 
+          ident r
+        patterns
+          int -1
+        ->
+          block
+            result
+              int 0
+        patterns
+          is Int
+        ->
+          block
+            result
+              int 1
+        patterns
+          ctor Config
+            field host (pun)
+            field port (pun)
+            ..
+        ->
+          block
+            result
+              int 2
+        patterns
+          _
+        ->
+          block
+            result
+              int 3
+

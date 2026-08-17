@@ -43,22 +43,13 @@ fun memList(l: List, n: String): Bool {
   while (i < l.len()) { val x: String = l.get(i) ; if (strEq(x, n)) { return true } ; i = i + 1 }
   return false
 }
+// A "builtin" for name resolution is EXACTLY an intrinsic — a name with no Kite body. isIntrinsic()
+// (klower.kite) is the single source of truth, shared with the lowerer, so the two can never diverge.
+// Prelude names (concat, list, strLen, Some/None via imports, ...) are no longer whitelisted here: 0a
+// seeds them into the global scope from preludeSigs(), so they resolve because they are DEFINED. The
+// implicit lambda parameter `it` is bound in rLambda, not whitelisted.
 fun isBuiltin(n: String): Bool {
-  return strEq(n,"println") || strEq(n,"print") || strEq(n,"eprintln") || strEq(n,"eprint") ||
-      strEq(n,"assert") || strEq(n,"panic") || strEq(n,"abort") || strEq(n,"todo") || strEq(n,"unreachable") ||
-      strEq(n,"unit") || strEq(n,"it") ||
-      strEq(n,"Some") || strEq(n,"None") || strEq(n,"Ok") || strEq(n,"Err") ||
-      strEq(n,"string") || strEq(n,"listOf") || strEq(n,"mapOf") || strEq(n,"setOf") ||
-      strEq(n,"strLen") || strEq(n,"charAt") || strEq(n,"strEq") || strEq(n,"concat") || strEq(n,"substr") || strEq(n,"intToStr") ||
-      strEq(n,"listNew") || strEq(n,"listPush") || strEq(n,"listGet") || strEq(n,"listSet") || strEq(n,"listLen") ||
-      strEq(n,"readFile") || strEq(n,"writeFile") || strEq(n,"fopenW") || strEq(n,"fputByte") || strEq(n,"fcloseF") ||
-      strEq(n,"__argv") ||
-      strEq(n,"list") || strEq(n,"map") || strEq(n,"toInt") || strEq(n,"comptime") ||
-      strEq(n,"__retain") || strEq(n,"__release") || strEq(n,"__refcount") || strEq(n,"__decRefcount") ||
-      strEq(n,"__freeObj") || strEq(n,"__allocRC") || strEq(n,"__typeId") ||
-      strEq(n,"__rawAlloc") || strEq(n,"__rawFree") || strEq(n,"__rawRealloc") || strEq(n,"__rawLoad") ||
-      strEq(n,"__rawStore") || strEq(n,"__rawLoadByte") || strEq(n,"__rawStoreByte") ||
-      strEq(n,"__mapGetS") || strEq(n,"__mapGetI")
+  return isIntrinsic(n)
 }
 // lambda param string "x: Int, y" -> ["x","y"]; "" -> []
 fun splitLamParams(s: String): List {
@@ -162,6 +153,9 @@ fun rInterp(ctx: RCtx, parts: List): Int {
 fun rLambda(ctx: RCtx, params: String, body: FExpr): Int {
   val saved = rPush(ctx)
   val names = splitLamParams(params)
+  // A lambda with no explicit parameters implicitly binds the single parameter `it` (kfront leaves
+  // params="" for both `{ it }` and `{ -> ... }`; binding an unused `it` for the latter is harmless).
+  if (strEq(params, "")) { rBind(ctx, "it") }
   var i = 0
   while (i < names.len()) { val nm: String = names.get(i) ; rBind(ctx, nm) ; i = i + 1 }
   rExpr(ctx, body)
@@ -289,9 +283,50 @@ fun addVariants(globals: List, variants: List): Int {
   while (i < variants.len()) { val v: FVariant = variants.get(i) ; globals.push(v.name) ; i = i + 1 }
   return 0
 }
+// Collect the top-level global names (functions, types, enums+variants, traits) a parsed program
+// declares, WITHOUT dup-checking or diagnostics. Used to harvest the prelude's public names so the
+// checker can treat them as DEFINED, not merely whitelisted.
+fun collectDeclNames(decls: List, out: List): Int {
+  var i = 0
+  while (i < decls.len()) {
+    val d: Decl = decls.get(i)
+    when (d) {
+      DFun(fd) -> out.push(fd.name)
+      DType(kind, td) -> out.push(td.name)
+      DEnum(ed) -> { out.push(ed.name) ; addVariants(out, ed.variants) }
+      DTrait(tr) -> out.push(tr.name)
+      else -> 0
+    }
+    i = i + 1
+  }
+  return 0
+}
+// preludeSigs: parse the implicit-prelude modules ONCE and return their top-level names. The module list
+// comes from preludeConfPaths() — the SAME source of truth the lowerer (injectHelpers) reads — so the
+// checker and the lowerer can never disagree about what the prelude provides. Seeding the global scope
+// with these makes prelude names (concat, list, strLen, ...) resolve because they are DEFINED, not
+// whitelisted; this is what lets isBuiltin shrink to the intrinsic floor.
+fun preludeSigs(): List {
+  val out = list()
+  val paths = preludeConfPaths()
+  var pi = 0
+  while (pi < paths.len()) {
+    val src = readFile(paths.get(pi))
+    if (strLen(src) > 0) {
+      val plines = list()
+      val decls = parseProgramLn(lex(src), plines)
+      collectDeclNames(decls, out)
+    }
+    pi = pi + 1
+  }
+  return out
+}
 fun resolveCheck(decls: List, lines: List, skipDup: Int): List {
   val diags = list()
   val globals = list()
+  val pre = preludeSigs()
+  var pj = 0
+  while (pj < pre.len()) { globals.push(pre.get(pj)) ; pj = pj + 1 }
   collectGlobals(decls, lines, globals, diags, skipDup)
   val scopes = list()
   val ctx = RCtx(globals, scopes, diags, 0)

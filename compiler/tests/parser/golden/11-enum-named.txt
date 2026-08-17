@@ -1,0 +1,9 @@
+enum Shape
+  Circle(Float)
+  Rect(Float, Float)
+  Named(val w : Int, val h : Int)
+
+enum Res<T, E>
+  Ok(val value : T)
+  Err(E)
+

@@ -1,0 +1,21 @@
+// REGRESSION FIXTURE — this single import line names a namespace module whose resolved file path does
+// NOT exist on disk. `kcc check` on it MUST produce a deterministic diagnostic (a non-zero exit), and
+// MUST NOT segfault.
+//
+// History: `kcc check examples/demos/{traits,raw,types}.kite` all exited 139 (EXC_BAD_ACCESS,
+// address=0x68 in flockfile+28). The crash was NOT in the checker (kcheck.kite) — it was upstream, in
+// module resolution. A namespace import (`import a::b`) is mapped by impExtractPath (klower.kite) to a
+// file path (`::`->`/`, leading `kite/`->`lib/`, append `.kite`); collectModLine (klower.kite:1519)
+// then reads that path with readFile WITHOUT checking the file exists. For a missing module fopen()
+// returns NULL, and the readFile primitive (genReadFile in codegen.kite) fed that NULL straight into
+// fseek -> flockfile(NULL) -> fault.
+//
+// Fix: genReadFile now NULL-checks the fopen result and returns an empty string when the file cannot be
+// opened, so a dangling/aspirational import degrades to a graceful "unresolved name" diagnostic instead
+// of a segfault. (The compiler's own source only ever reads files that exist, so the guard branch never
+// runs while self-hosting — the fixpoint stays byte-identical.)
+//
+// `import kite::nonexistent_module` -> lib/nonexistent_module.kite (missing) -> must NOT crash.
+import kite::nonexistent_module
+
+fun main(): Int { return 0 }

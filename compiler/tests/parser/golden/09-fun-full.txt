@@ -1,0 +1,14 @@
+fun add(a: Int, b: Int) : Int
+  binary +
+    ident a
+    ident b
+
+fun consume(consuming self) : Int
+  int 0
+
+fun mix(a: Int, b: inout Foo, c: consuming Bar) : Bool
+  bool true
+
+fun swap(a: inout Int, b: inout Int)
+  block
+

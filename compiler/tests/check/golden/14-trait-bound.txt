@@ -1,0 +1,2 @@
+error: type Int does not satisfy trait bound Show on type parameter T
+1 error(s)

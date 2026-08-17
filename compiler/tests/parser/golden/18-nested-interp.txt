@@ -1,0 +1,55 @@
+fun a(y: Int) : String
+  block
+    return
+      interp
+        lit "a"
+        expr
+          interp
+            lit "b"
+            expr
+              ident y
+        lit "c"
+
+fun b(x: Int) : String
+  block
+    return
+      interp
+        expr
+          call
+            ident f
+            args
+              call
+                ident g
+                args
+                  ident x
+
+fun c(x: Int) : String
+  block
+    return
+      interp
+        lit "n="
+        expr
+          index
+            ident xs
+            ident x
+        lit " m="
+        expr
+          call
+            field .map
+              ident items
+            args
+              lambda ()
+                block
+                  result
+                    ident it
+
+fun d() : String
+  block
+    return
+      interp
+        expr
+          ident this
+        lit " and "
+        expr
+          this
+

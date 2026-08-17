@@ -1,0 +1,57 @@
+fun m() : Int
+  block
+    val a
+      lambda (x)
+        block
+          result
+            binary +
+              ident x
+              int 1
+    val b
+      lambda (x: Int, y: Foo)
+        block
+          result
+            ident x
+    val c
+      lambda ()
+        block
+          result
+            int 0
+    val d
+      block
+        result
+          ident it
+    expr-stmt
+      call
+        field .map
+          ident xs
+        args
+          lambda ()
+            block
+              result
+                binary *
+                  ident it
+                  int 2
+    expr-stmt
+      call
+        ident f
+        args
+          ident x
+          lambda ()
+            block
+              result
+                ident it
+    val g
+      call
+        ident fold
+        args
+          int 0
+          lambda (acc: Int, x: Int)
+            block
+              result
+                binary +
+                  ident acc
+                  ident x
+    return
+      int 0
+

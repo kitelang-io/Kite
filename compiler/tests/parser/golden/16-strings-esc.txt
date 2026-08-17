@@ -1,0 +1,20 @@
+fun a() : String
+  block
+    return
+      string "tab\tnl\nq\"bs\\end"
+
+fun b() : String
+  block
+    return
+      string "$x costs $5"
+
+fun c() : String
+  block
+    return
+      string "a\000b\000c"
+
+fun d() : String
+  block
+    return
+      string "plain no escapes"
+

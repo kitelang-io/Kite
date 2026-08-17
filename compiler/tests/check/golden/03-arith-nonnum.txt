@@ -1,0 +1,2 @@
+error: arithmetic on non-numeric operands: String and Int
+1 error(s)

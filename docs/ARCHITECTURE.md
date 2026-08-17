@@ -47,18 +47,19 @@ compiler/
   prelude.conf  the default-prelude CONFIG (data): names the lib modules auto-included into every
                 program (see "Prelude" below). The compiler's only tie to the stdlib — a list of names.
   tests/        run-parser-tests.sh · run-check-tests.sh · run-compiler-tests.sh
-                parser/  check/  programs/   kenc_test.kite (backend self-test)
+                parser/ (corpus + golden/) · check/ (corpus + golden/ + expected/) · programs/ ·
+                kenc_test.kite (backend self-test). The parser/checker harnesses diff kcc against the
+                committed golden snapshots — no live oracle.
 lib/            the **kite** standard library (kite:: resolves here): core.kite (kite::core),
                 alloc.kite (kite::alloc), std.kite (kite::std); nested modules under these three
                 top-level packages (e.g. lib/std/… = kite::std::…). The default prelude's code lives
                 here too, each convention method WITH its type (Kotlin-style, no sugar package):
                 lib/alloc/collections/list.kite (List/Map data structure + List_push/Map_size/list()/
                 map()) + lib/core/string.kite (String_charAt/len/substr), injected via the prelude config.
-bootstrap/      kite-seed — the committed prebuilt compiler; the gate/suite bootstrap from it (NO OCaml).
-                Also historical proof programs (calc, calcast, minikite, ...)
-stage0/         archived OCaml Fledge (lib/*.ml, bin/main.ml) + reseed.sh — the ONLY place OCaml is used,
-                to regenerate bootstrap/kite-seed when a parser change outdates it. Also the parser/checker
-                differential oracle (kitec parse/check).
+bootstrap/      kite-seed — the committed prebuilt compiler and the SOLE bootstrap; the gate/suite build
+                from it (NO OCaml). Also historical proof programs (calc, calcast, minikite, ...)
+                The OCaml stage-0 (Fledge) is retired to its own repo (kitelang-io/fledge); it is only
+                needed to reseed kite-seed after a parser change, and is no longer part of this tree.
 docs/           LANGUAGE-DESIGN.md, ROADMAP.md, PHASE-E-PARSER.md, this file, ...
 ```
 
@@ -90,10 +91,13 @@ that type (Kotlin-style, no separate sugar package): List/Map + their methods at
 `lib/alloc/collections/list.kite`, String's methods at `lib/core/string.kite`. Swapping the config or
 those modules changes the defaults without touching the compiler.
 
-**Bootstrap (OCaml dropped from the daily loop)**: the gate compiles the current source with
-`bootstrap/kite-seed` to get gen-1, then verifies self-reproduction (kcc2==kcc3) — no OCaml. The
-seed stays valid across codegen/lowering changes; only a **parser** change requires `stage0/reseed.sh`
-(Fledge → a fresh seed). This is the M8 "drop OCaml" milestone via a committed seed (à la Rust's stage0).
+**Bootstrap (OCaml retired)**: the gate compiles the current source with `bootstrap/kite-seed` to get
+gen-1, then verifies self-reproduction (kcc2==kcc3) — no OCaml. The seed is the **sole** bootstrap and
+stays valid across codegen/lowering changes; only a **parser** change that outdates it needs a reseed,
+now done from the archived OCaml Fledge in its own repo (kitelang-io/fledge). This completes the M8 "drop
+OCaml" milestone via a committed seed (à la Rust's stage0). The parser/checker regression net is no longer
+a live Fledge oracle but committed golden snapshots (`compiler/tests/{parser,check}/golden/`) diffed against
+kcc — regenerate a golden deliberately when adding syntax or checks.
 
 ## The IR seam — `enum Instr`
 

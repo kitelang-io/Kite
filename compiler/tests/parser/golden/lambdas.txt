@@ -1,0 +1,61 @@
+fun demo(xs: List<Int>) : Int
+  block
+    val evens
+      call
+        field .fold
+          call
+            field .map
+              call
+                field .filter
+                  ident xs
+                args
+                  lambda ()
+                    block
+                      result
+                        binary ==
+                          binary %
+                            ident it
+                            int 2
+                          int 0
+            args
+              lambda ()
+                block
+                  result
+                    binary *
+                      ident it
+                      ident it
+        args
+          int 0
+          lambda (a, x)
+            block
+              result
+                binary +
+                  ident a
+                  ident x
+    val g
+      lambda (a: Int, b: Int)
+        block
+          result
+            binary +
+              ident a
+              ident b
+    val h
+      lambda ()
+        block
+          result
+            int 42
+    expr-stmt
+      call
+        ident forEach
+        args
+          ident xs
+          lambda ()
+            block
+              result
+                call
+                  ident println
+                  args
+                    ident it
+    return
+      ident evens
+

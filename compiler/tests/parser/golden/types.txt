@@ -1,0 +1,39 @@
+import kite::io
+
+struct Rect
+  pub val width : Int
+  pub val height : Int
+  var scale : Int
+
+class File
+  val fd : Int32
+  deinit
+    block
+      result
+        call
+          ident sysClose
+          args
+            ident fd
+
+enum Expr
+  Lit(Int)
+  Bin(Op, Expr, Expr)
+  Var(val name : String)
+
+enum IoError
+  NotFound
+  Subprocess(val code : Int32)
+  Other(val msg : String)
+
+fun area(r: Rect) : Int
+  block
+    return
+      binary *
+        binary *
+          field .width
+            ident r
+          field .height
+            ident r
+        field .scale
+          ident r
+
