@@ -1,9 +1,9 @@
-// lib/alloc/collections/list.kite — the language-primitive List/Map (kite::alloc::collections::list).
-// The growable word-list {len@0, cap@8, data@16} that backs the [..] and {..} literals, built on the
-// compiler raw-memory intrinsics. In alloc because it OWNS a heap allocation; a sibling of vec/map.
-// Following Kotlin, a type's convention methods (the desugar landing points) live WITH the type, not
-// in a separate sugar library; the [..]/{..} constructors are top-level like Kotlin listOf()/mapOf().
-// Names are global (unmangled): the prelude injects them.
+// lib/alloc/collections/list.kite — the language-primitive List (kite::alloc::collections::list).
+// The growable word-list {len@0, cap@8, data@16} that backs the [..] literal, built on the compiler
+// raw-memory intrinsics. In alloc because it OWNS a heap allocation; a sibling of vec/map (Map lives in
+// the sibling map module). Following Kotlin, a type's convention methods (the desugar landing points)
+// live WITH the type, not in a separate sugar library; the [..] constructor is top-level like Kotlin
+// listOf(). Names are global (unmangled): the prelude injects them.
 //
 // List is a real CLASS: {n: count, cap: capacity, data: heap word-buffer}. listNew builds it with the
 // class constructor and the ops read/write its fields. NOTE: List is EXEMPT from automatic ARC (see
@@ -11,15 +11,19 @@
 // and the compiler nests lists-in-lists (structF/funP/variantTys), so a naive release would free an
 // inner list while the outer still holds its raw pointer (UAF). So List stays leak-managed as before;
 // the class only gives it a visible layout + methods.
-// Methods live IN the class body (self-style, like Vec) — these ARE the real implementation, mangled to
-// List_push / List_get / List_len / List_length by the method system. `push`/`get`/`set`/`len`, plus a
-// `length` getter alias (so `xs.length` no-parens resolves here).
-// @arc(manual): List is exempt from automatic ARC — its elements are type-erased words listPush can't
+// Methods live IN the class body (self-style, like Vec) — these ARE the real implementation AND the
+// desugar landing points, mangled to List_push / List_get / List_set / List_len / List_length by the
+// method system. The [..] literal lowering and a[i]/for-in desugar (klower's roleSym) resolve directly
+// to these mangled methods — there are NO free-function delegates anymore (pure method-ification).
+// `push`/`get`/`set`/`len`, plus a `length` getter alias (so `xs.length` no-parens resolves here).
+// @arc(manual): List is exempt from automatic ARC — its elements are type-erased words push can't
 // retain, and the compiler nests lists-in-lists, so a naive deep-release would UAF. Leak-managed.
 @arc(manual)
 class List(var n: Int, var cap: Int, var data: Int) {
   // @lang("list.push"): the [..] literal desugar appends elements via this method (emitted List_push).
+  // @lang("map.putList"): the {..} map desugar also appends into a parallel word-list via this method.
   @lang("list.push")
+  @lang("map.putList")
   fun push(self, x: consuming Int): Int {
     // grow-if-full. Guard cap==0 explicitly: 0*2 is still 0, so a lazily-allocated (cap 0) List would
     // realloc 0 bytes and write OOB at offset 0, then never grow (n==cap forever). Today list() starts
@@ -32,76 +36,35 @@ class List(var n: Int, var cap: Int, var data: Int) {
     self.n = self.n + 1
     return 0
   }
+  // @lang("list.get"): a[i] load / for-in element resolves to this method (emitted List_get).
+  @lang("list.get")
   fun get(self, i: Int): Int { return __rawLoad(self.data, i * 8) }
+  // @lang("list.set"): a[i] = v store resolves to this method (emitted List_set).
+  @lang("list.set")
   fun set(self, i: Int, x: consuming Int): Int { __rawStore(self.data, i * 8, x) return 0 }
+  // @lang("list.len"): for-in bound / a[i] length resolves to this method (emitted List_len).
+  @lang("list.len")
   fun len(self): Int { return self.n }
   fun length(self): Int { return self.n }
+
+  // Generic higher-order operations — one machine word per element, closures supported. These were the
+  // free rangeList/mapList/filterList/foldList/findList/sumList of kite::alloc::collections; folded in as
+  // real methods (xs.map(f) / xs.fold(acc,f) / xs.find(pred) / ...) alongside the type they operate on.
+  // The element type is the erased machine word (Int); the closure params carry function types so the
+  // parser records the real RETURN type (an untyped last param would absorb it), which makes chaining
+  // like `xs.map(f).sum()` resolve the receiver correctly.
+  fun map(self, f: (Int) -> Int): List { val out = list() var i = 0 while (i < self.n) { out.push(f(self.get(i))) i = i + 1 } return out }
+  fun filter(self, pred: (Int) -> Bool): List { val out = list() var i = 0 while (i < self.n) { val x = self.get(i) if (pred(x)) { out.push(x) } i = i + 1 } return out }
+  fun fold(self, acc: Int, f: (Int, Int) -> Int): Int { var a = acc var i = 0 while (i < self.n) { a = f(a, self.get(i)) i = i + 1 } return a }
+  // find returns a std Option<elem> (kite::core::option, in the prelude) — Some(x) for the first match, else None.
+  fun find(self, pred: (Int) -> Bool): Option { var i = 0 while (i < self.n) { val x = self.get(i) if (pred(x)) { return Some(x) } i = i + 1 } return None }
+  fun sum(self): Int { return self.fold(0, { a, x -> a + x }) }
 }
-
-fun listNew(): List { return list() }
-
-// free-function API — thin delegates to the methods, kept because the compiler's own 2000+ call sites
-// and the [..] literal lowering (klower) emit these names.
-@lang("list.len")
-fun listLen(l: List): Int { return l.len() }
-
-@lang("list.get")
-fun listGet(l: List, i: Int): Int { return l.get(i) }
-
-@lang("list.set")
-fun listSet(l: List, i: Int, x: consuming Int): Int { return l.set(i, x) }
-
-// @lang("map.putList"): the {..} map desugar appends into a parallel word-list via listPush.
-@lang("map.putList")
-fun listPush(l: List, x: consuming Int): Int { return l.push(x) }
 
 @lang("list.new")
 fun list(): List { return List(0, 4, __rawAlloc(4 * 8)) }
 
-// --- Map: a REAL nominal class (no longer a List-as-[k,v] alias) --------------------------------------
-// Storage is two parallel word-lists {keys@0, vals@8}: keys[i] pairs with vals[i]. String-keyed methods
-// (get/set/has/size/keys) are the m.get/set/... surface AND back m["k"]/m["k"]=v; an Int-keyed path
-// (getI/setI) backs m[intKey]. Like List, Map is EXEMPT from automatic ARC (isBuiltinNominal in
-// klower.kite): keys/vals are type-erased word Lists whose elements can't be retained, and the compiler
-// nests containers, so a naive deep-release would double-free. So Map stays leak-managed, consistent
-// with List; the class only gives it a visible layout + methods. isRelField (codegen) already excludes
-// both Map and its List fields from deep-release.
-// @arc(manual): Map, like List, is leak-managed (keys/vals are type-erased word Lists, containers nest).
-@arc(manual)
-class Map(var keys: List, var vals: List)
+// rangeList(n) — the list [0, 1, .., n-1]. A top-level List factory (no receiver), sibling to list().
+fun rangeList(n: Int): List { val out = list() var i = 0 while (i < n) { out.push(i) i = i + 1 } return out }
 
-@lang("map.new")
-fun mapNewM(): Map { return Map(listNew(), listNew()) }
-
-fun map(): Map { return mapNewM() }
-
-fun Map_size(m: Map): Int { return listLen(m.keys) }
-
-fun Map_get(m: Map, k: String): Int { var i = 0 while (i < listLen(m.keys)) { if (strEq(listGet(m.keys, i), k)) { return listGet(m.vals, i) } i = i + 1 } return 0 }
-
-fun Map_has(m: Map, k: String): Bool { var i = 0 while (i < listLen(m.keys)) { if (strEq(listGet(m.keys, i), k)) { return true } i = i + 1 } return false }
-
-// m.set / m["k"]=v : update k's value in place, else append (k, v).
-fun Map_set(m: Map, k: String, v: Int): Int { var i = 0 while (i < listLen(m.keys)) { if (strEq(listGet(m.keys, i), k)) { listSet(m.vals, i, v) return 0 } i = i + 1 } listPush(m.keys, k) listPush(m.vals, v) return 0 }
-
-// the keys, in insertion order — for iteration (`for (k in m.keys())`).
-fun Map_keys(m: Map): List { return m.keys }
-
-// Int-keyed path (m[intKey]): `==` compare instead of strEq.
-fun Map_getI(m: Map, k: Int): Int { var i = 0 while (i < listLen(m.keys)) { if (listGet(m.keys, i) == k) { return listGet(m.vals, i) } i = i + 1 } return 0 }
-
-fun Map_setI(m: Map, k: Int, v: Int): Int { var i = 0 while (i < listLen(m.keys)) { if (listGet(m.keys, i) == k) { listSet(m.vals, i, v) return 0 } i = i + 1 } listPush(m.keys, k) listPush(m.vals, v) return 0 }
-
-// index-dispatch entry points (unchanged names, now over the real Map): klower lowerIndex/lowerIndexStore
-// route m[k]/m[k]=v here, and these forward to the Map methods above.
-@lang("map.getS")
-fun __mapGetS(m: Map, k: String): Int { return Map_get(m, k) }
-
-@lang("map.getI")
-fun __mapGetI(m: Map, k: Int): Int { return Map_getI(m, k) }
-
-@lang("map.setS")
-fun __mapSetS(m: Map, k: String, v: Int): Int { return Map_set(m, k, v) }
-
-@lang("map.setI")
-fun __mapSetI(m: Map, k: Int, v: Int): Int { return Map_setI(m, k, v) }
+// Map moved to its own prelude module (kite::alloc::collections::map) as a method-ified class.

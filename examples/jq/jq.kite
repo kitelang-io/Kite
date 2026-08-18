@@ -14,7 +14,7 @@ enum Filter { FIdentity; FField(String); FIndex(Int); FIterate; FLength; FKeys; 
 // ---------------- lex + parse: query text -> List<Filter> ----------------
 struct QParser(val src: String, var pos: Int)
 
-fun qpeek(p: QParser): Int { if (p.pos >= strLen(p.src)) { return 0 - 1 } return charAt(p.src, p.pos) }
+fun qpeek(p: QParser): Int { if (p.pos >= p.src.len()) { return 0 - 1 } return p.src.charAt(p.pos) }
 
 fun qbump(p: QParser) { p.pos += 1 }
 
@@ -44,15 +44,15 @@ fun parseBracket(p: QParser, out: List): Int {
 }
 
 fun pushWord(out: List, w: String): Int {
-  if (strEq(w, "length")) { out.push(FLength) }
-  else { if (strEq(w, "keys")) { out.push(FKeys) }
-    else { if (strEq(w, "add")) { out.push(FAdd) }
+  if (w == "length") { out.push(FLength) }
+  else { if (w == "keys") { out.push(FKeys) }
+    else { if (w == "add") { out.push(FAdd) }
       else { 0 } } }
   return 0
 }
 
 fun parseQuery(src: String): List {
-  val filters = listNew()
+  val filters = list()
   val p = QParser(src, 0)
   var go = true
   while (go) {
@@ -76,7 +76,7 @@ fun parseQuery(src: String): List {
 // ---------------- evaluation ----------------
 // apply ONE filter to ONE input value, producing a stream (0+ outputs).
 fun applyFilter(f: Filter, input: Json): List {
-  val out = listNew()
+  val out = list()
   when (f) {
     FIdentity -> out.push(input)
     FField(name) -> when (objGet(input, name)) { Some(v) -> out.push(v) None -> out.push(JNull) }
@@ -91,10 +91,10 @@ fun applyFilter(f: Filter, input: Json): List {
 
 // run the pipeline: start with [root], then flat-map each filter across the whole stream.
 fun runQuery(filters: List, root: Json): List {
-  var stream = listNew()
+  var stream = list()
   stream.push(root)
   for (f in filters) {
-    val next = listNew()
+    val next = list()
     for (v in stream) { for (o in applyFilter(f, v)) { next.push(o) } }
     stream = next
   }

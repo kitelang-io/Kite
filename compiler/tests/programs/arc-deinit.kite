@@ -1,5 +1,5 @@
 class Resource(val id: Int, val log: List) {
-  deinit { listSet(self.log, 0, listGet(self.log, 0) + 1) }
+  deinit { self.log.set(0, self.log.get(0) + 1) }
 }
 
 fun makeAndDrop(log: List): Int {
@@ -8,9 +8,9 @@ fun makeAndDrop(log: List): Int {
 }
 
 fun main(): Int {
-  val log = listNew()
-  listPush(log, 0)
+  val log = list()
+  log.push(0)
   val x = makeAndDrop(log)
   val y = makeAndDrop(log)
-  return x + y * 10 + listGet(log, 0)
+  return x + y * 10 + log.get(0)
 }

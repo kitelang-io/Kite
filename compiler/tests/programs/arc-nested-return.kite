@@ -1,5 +1,5 @@
 class Res(val id: Int, val log: List) {
-  deinit { listSet(self.log, 0, listGet(self.log, 0) + 1) }
+  deinit { self.log.set(0, self.log.get(0) + 1) }
 }
 
 fun f(flag: Int, log: List): Int {
@@ -9,9 +9,9 @@ fun f(flag: Int, log: List): Int {
 }
 
 fun main(): Int {
-  val log = listNew()
-  listPush(log, 0)
+  val log = list()
+  log.push(0)
   val a = f(1, log)
   val b = f(0, log)
-  return a + b + listGet(log, 0)
+  return a + b + log.get(0)
 }

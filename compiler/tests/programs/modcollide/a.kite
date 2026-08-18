@@ -1,0 +1,5 @@
+// module-collision test fixture (relocated from the former lib/std/a.kite). Defines size/helper names
+// that deliberately COLLIDE with modcollide/b.kite to prove per-module namespacing (own-item-first).
+fun size(): Int { return 7 }
+
+fun helper(): Int { return size() * 100 }

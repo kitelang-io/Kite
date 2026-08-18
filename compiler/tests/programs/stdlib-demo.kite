@@ -1,45 +1,15 @@
-enum Option { Some(v); None }
-
-fun mapList(xs: List, f): List {
-  val out = listNew()
-  var i = 0
-  while (i < listLen(xs)) { listPush(out, f(listGet(xs, i))); i = i + 1 }
-  return out
-}
-
-fun filterList(xs: List, pred): List {
-  val out = listNew()
-  var i = 0
-  while (i < listLen(xs)) { val x = listGet(xs, i); if (pred(x)) { listPush(out, x) }; i = i + 1 }
-  return out
-}
-
-fun foldList(xs: List, acc: Int, f): Int {
-  var a = acc
-  var i = 0
-  while (i < listLen(xs)) { a = f(a, listGet(xs, i)); i = i + 1 }
-  return a
-}
-
-fun findList(xs: List, pred): Option {
-  var i = 0
-  while (i < listLen(xs)) { val x = listGet(xs, i); if (pred(x)) { return Some(x) }; i = i + 1 }
-  return None
-}
-
-fun getOr(o: Option, dflt: Int): Int {
-  return when (o) { Some(v) -> v; None -> dflt }
-}
-
+// stdlib-demo — exercises the standard library's higher-order List methods (map/filter/fold/find) and
+// the Option helpers, all from the prelude (kite::alloc::collections::list + kite::core::option). No
+// local reimplementations: these ARE the shipped methods.
 fun main(): Int {
-  val xs = listNew()
-  listPush(xs, 1); listPush(xs, 2); listPush(xs, 3); listPush(xs, 4); listPush(xs, 5)
-  val doubled = mapList(xs, { n -> n * 2 })
-  val evens = filterList(doubled, { n -> n % 4 == 0 })
-  val sum = foldList(evens, 0, { a, x -> a + x })
-  val found = findList(xs, { n -> n > 3 })
-  val fv = getOr(found, 0)
-  val none = findList(xs, { n -> n > 100 })
-  val nv = getOr(none, 99)
+  val xs = list()
+  xs.push(1); xs.push(2); xs.push(3); xs.push(4); xs.push(5)
+  val doubled = xs.map({ n -> n * 2 })
+  val evens = doubled.filter({ n -> n % 4 == 0 })
+  val sum = evens.fold(0, { a, x -> a + x })
+  val found = xs.find({ n -> n > 3 })
+  val fv = optGetOr(found, 0)
+  val none = xs.find({ n -> n > 100 })
+  val nv = optGetOr(none, 99)
   return sum * 10 + fv + nv
 }

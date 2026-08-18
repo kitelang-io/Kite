@@ -1,9 +1,0 @@
-import kite::alloc::collections::map
-
-fun main(): Int {
-  val m = mapNew()
-  m.put(1, 50)
-  m.put(2, 60)
-  m.put(1, 55) // overwrite
-  return m.get(1, 0) + m.get(2, 0) + m.get(9, 7) + m.size() // 55+60+7+2 = 124
-}

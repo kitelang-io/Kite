@@ -5,23 +5,23 @@
 fun w32(x: Int): Int { return x & 0xffffffff }
 
 fun condCode(c: String): Int {
-  if (strEq(c, "eq")) { return 0 }
-  if (strEq(c, "ne")) { return 1 }
-  if (strEq(c, "cs")) { return 2 }
-  if (strEq(c, "hs")) { return 2 }
-  if (strEq(c, "cc")) { return 3 }
-  if (strEq(c, "lo")) { return 3 }
-  if (strEq(c, "mi")) { return 4 }
-  if (strEq(c, "pl")) { return 5 }
-  if (strEq(c, "vs")) { return 6 }
-  if (strEq(c, "vc")) { return 7 }
-  if (strEq(c, "hi")) { return 8 }
-  if (strEq(c, "ls")) { return 9 }
-  if (strEq(c, "ge")) { return 10 }
-  if (strEq(c, "lt")) { return 11 }
-  if (strEq(c, "gt")) { return 12 }
-  if (strEq(c, "le")) { return 13 }
-  if (strEq(c, "al")) { return 14 }
+  if (c == "eq") { return 0 }
+  if (c == "ne") { return 1 }
+  if (c == "cs") { return 2 }
+  if (c == "hs") { return 2 }
+  if (c == "cc") { return 3 }
+  if (c == "lo") { return 3 }
+  if (c == "mi") { return 4 }
+  if (c == "pl") { return 5 }
+  if (c == "vs") { return 6 }
+  if (c == "vc") { return 7 }
+  if (c == "hi") { return 8 }
+  if (c == "ls") { return 9 }
+  if (c == "ge") { return 10 }
+  if (c == "lt") { return 11 }
+  if (c == "gt") { return 12 }
+  if (c == "le") { return 13 }
+  if (c == "al") { return 14 }
   return 0
 }
 
@@ -111,7 +111,7 @@ fun findLabel(lm: LabelMap, name: String): Int {
   var i = 0
   while (i < lm.names.len()) {
     val nm: String = lm.names.get(i)
-    if (strEq(nm, name)) { return lm.offs.get(i) }
+    if (nm == name) { return lm.offs.get(i) }
     i = i + 1
   }
   return 0
@@ -144,7 +144,7 @@ fun assemble(instrs: List): List {
 
 fun hasLabel(lm: LabelMap, name: String): Bool {
   var i = 0
-  while (i < lm.names.len()) { val nm: String = lm.names.get(i); if (strEq(nm, name)) { return true }; i = i + 1 }
+  while (i < lm.names.len()) { val nm: String = lm.names.get(i); if (nm == name) { return true }; i = i + 1 }
   return false
 }
 
@@ -206,7 +206,7 @@ fun assembleReloc(instrs: List): AsmR {
 
 fun idxOfStr(l: List, s: String): Int {
   var i = 0
-  while (i < l.len()) { val e: String = l.get(i); if (strEq(e, s)) { return i }; i = i + 1 }
+  while (i < l.len()) { val e: String = l.get(i); if (e == s) { return i }; i = i + 1 }
   return 0
 }
 
@@ -224,7 +224,7 @@ fun externalsOf(relocs: List): List {
 
 fun idxOfStr2(l: List, s: String): Int {
   var i = 0
-  while (i < l.len()) { val e: String = l.get(i); if (strEq(e, s)) { return i }; i = i + 1 }
+  while (i < l.len()) { val e: String = l.get(i); if (e == s) { return i }; i = i + 1 }
   return 0 - 1
 }
 
@@ -254,20 +254,20 @@ fun buildCstr(cstrN: List, cstrV: List): CstrSec {
 
 fun cstrOffOf(cs: CstrSec, sym: String): Int { return cs.labOff.get(idxOfStr(cs.labN, sym)) }
 
-fun hexDigit(d: Int): String { return substr("0123456789abcdef", d, 1) }
+fun hexDigit(d: Int): String { return "0123456789abcdef".substr(d, 1) }
 
 fun toHex8(n: Int): String {
   var s = ""
   var i = 7
-  while (i >= 0) { s = concat(s, hexDigit((n >> (i * 4)) & 15)); i = i - 1 }
+  while (i >= 0) { s = s + hexDigit((n >> (i * 4)) & 15); i = i - 1 }
   return s
 }
 
 // check one encoding against an expected 8-hex-digit string; return 0 ok / 1 fail
 fun chk(name: String, got: Int, want: String): Int {
   val g = toHex8(got)
-  if (strEq(g, want)) { println(concat("ok   ", concat(name, concat("  ", g)))); return 0 }
-  println(concat("FAIL ", concat(name, concat("  got ", concat(g, concat(" want ", want))))))
+  if (g == want) { println("ok   " + (name + ("  " + g))); return 0 }
+  println("FAIL " + (name + ("  got " + (g + (" want " + want)))))
   return 1
 }
 
@@ -276,31 +276,31 @@ fun checkProg(name: String, funcs: List, want: List): Int {
   val words = assemble(genProgram(funcs))
   var fails = 0
   if (words.len() != want.len()) {
-    println(concat("FAIL ", concat(name, concat(" length ", concat(intToStr(words.len()), concat(" want ", intToStr(want.len())))))))
+    println("FAIL " + (name + (" length " + (words.len().toStr() + (" want " + want.len().toStr())))))
     return 1
   }
   var i = 0
   while (i < words.len()) {
     val g: Int = words.get(i)
     val w: String = want.get(i)
-    if (strEq(toHex8(g), w) == false) {
-      println(concat("FAIL ", concat(name, concat(" [", concat(intToStr(i), concat("] got ", concat(toHex8(g), concat(" want ", w))))))))
+    if (toHex8(g) != w) {
+      println("FAIL " + (name + (" [" + (i.toStr() + ("] got " + (toHex8(g) + (" want " + w)))))))
       fails = fails + 1
     }
     i = i + 1
   }
-  if (fails == 0) { println(concat("ok   ", concat(name, concat("  ", concat(intToStr(words.len()), " words"))))) }
+  if (fails == 0) { println("ok   " + (name + ("  " + (words.len().toStr() + " words")))) }
   return fails
 }
 
 fun splitWords(s: String): List {
   val out = list()
-  val n = strLen(s)
+  val n = s.len()
   var i = 0
   var start = 0
   while (i <= n) {
-    if (i == n) { if (i > start) { out.push(substr(s, start, i - start)) } }
-    else { if (charAt(s, i) == 32) { if (i > start) { out.push(substr(s, start, i - start)) } start = i + 1 } }
+    if (i == n) { if (i > start) { out.push(s.substr(start, i - start)) } }
+    else { if (s.charAt(i) == 32) { if (i > start) { out.push(s.substr(start, i - start)) } start = i + 1 } }
     i = i + 1
   }
   return out
@@ -317,7 +317,7 @@ fun hexVal(c: Int): Int {
 fun parseHexK(s: String): Int {
   var v = 0
   var i = 0
-  while (i < strLen(s)) { v = (v << 4) | hexVal(charAt(s, i)); i = i + 1 }
+  while (i < s.len()) { v = (v << 4) | hexVal(s.charAt(i)); i = i + 1 }
   return v
 }
 
@@ -410,11 +410,11 @@ fun be32(b: List, v: Int): Int { u8(b, v >> 24); u8(b, v >> 16); u8(b, v >> 8); 
 
 fun be64(b: List, v: Int): Int { be32(b, (v >> 32) & 0xffffffff); be32(b, v & 0xffffffff); return 0 }
 
-fun writeStrB(b: List, s: String): Int { var i = 0; while (i < strLen(s)) { u8(b, charAt(s, i)); i = i + 1 }; return 0 }
+fun writeStrB(b: List, s: String): Int { var i = 0; while (i < s.len()) { u8(b, s.charAt(i)); i = i + 1 }; return 0 }
 
 fun fixedB(b: List, n: Int, s: String): Int {
   writeStrB(b, s)
-  var i = strLen(s)
+  var i = s.len()
   while (i < n) { u8(b, 0); i = i + 1 }
   return 0
 }
@@ -436,11 +436,11 @@ fun strBytesK(s: String): List {
   // unescaped) has no backslash, so it passes through — both stages converge.
   val out = list()
   var i = 0
-  val n = strLen(s)
+  val n = s.len()
   while (i < n) {
-    val c = charAt(s, i)
+    val c = s.charAt(i)
     if (c == 92 && i + 1 < n) {
-      val d = charAt(s, i + 1)
+      val d = s.charAt(i + 1)
       if (d == 110) { out.push(10); i = i + 2 }
       else { if (d == 116) { out.push(9); i = i + 2 }
         else { if (d == 114) { out.push(13); i = i + 2 }
@@ -473,10 +473,10 @@ fun buildExe(words: List, entryOff: Int, symName: String, ident: String): List {
   val expOff = cfOff + cfSize
   val symoff = expOff
   val nsyms = 1
-  val strsize = alignUp(1 + strLen(symName) + 1, 8)
+  val strsize = alignUp(1 + symName.len() + 1, 8)
   val stroff = symoff + 16
   val sigStart = alignUp(stroff + strsize, 16)
-  val identLen = strLen(ident) + 1
+  val identLen = ident.len() + 1
   val codeLimit = sigStart
   val ncodeslots = (codeLimit + 4095) / 4096
   val cdHashoffset = 88 + identLen
@@ -512,7 +512,7 @@ fun buildExe(words: List, entryOff: Int, symName: String, ident: String): List {
   u32b(b, 0); u32b(b, 0); u32b(b, 0); u32b(b, 0); u32b(b, 0); u32b(b, 0); u32b(b, 0); u32b(b, 0)
   u32b(b, 0xe); u32b(b, 32); u32b(b, 12); fixedB(b, 20, "/usr/lib/dyld")
   u32b(b, 0x1b); u32b(b, 24)
-  val uh = sha256H(strBytesK(concat(ident, concat(":", intToStr(textSize)))))
+  val uh = sha256H(strBytesK(ident + (":" + textSize.toStr())))
   be32(b, uh.get(0)); be32(b, uh.get(1)); be32(b, uh.get(2)); be32(b, uh.get(3))
   u32b(b, 0x32); u32b(b, 24); u32b(b, 1); u32b(b, 0x000B0000); u32b(b, 0x000B0000); u32b(b, 0)
   u32b(b, 0x80000028); u32b(b, 24); u64b(b, entryoff); u64b(b, 0)
@@ -629,7 +629,7 @@ fun buildExeFull(words: List, relocs: List, cs: CstrSec, externals: List, entryO
     si = si + 1
   }
   // string table
-  val strsize = alignUp(1 + strLen(symName) + 1, 8)
+  val strsize = alignUp(1 + symName.len() + 1, 8)
   val nsyms = 1
   // chained fixups payload
   val cf = list()
@@ -667,7 +667,7 @@ fun buildExeFull(words: List, relocs: List, cs: CstrSec, externals: List, entryO
   val symoff = expOff
   val stroff = symoff + nsyms * 16
   val sigStart = alignUp(stroff + strsize, 16)
-  val identLen = strLen(ident) + 1
+  val identLen = ident.len() + 1
   val codeLimit = sigStart
   val ncodeslots = (codeLimit + 4095) / 4096
   val cdLen = 88 + identLen + ncodeslots * 32
@@ -714,7 +714,7 @@ fun buildExeFull(words: List, relocs: List, cs: CstrSec, externals: List, entryO
   u32b(b, 0); u32b(b, 0); u32b(b, 0); u32b(b, 0); u32b(b, 0); u32b(b, 0); u32b(b, 0); u32b(b, 0)
   u32b(b, 0xe); u32b(b, 32); u32b(b, 12); fixedB(b, 20, "/usr/lib/dyld")
   u32b(b, 0x1b); u32b(b, 24)
-  val uh = sha256H(strBytesK(concat(ident, concat(":", intToStr(textSize)))))
+  val uh = sha256H(strBytesK(ident + (":" + textSize.toStr())))
   be32(b, uh.get(0)); be32(b, uh.get(1)); be32(b, uh.get(2)); be32(b, uh.get(3))
   u32b(b, 0x32); u32b(b, 24); u32b(b, 1); u32b(b, 0x000B0000); u32b(b, 0x000B0000); u32b(b, 0)
   u32b(b, 0x80000028); u32b(b, 24); u64b(b, entryoff); u64b(b, 0)

@@ -12,18 +12,18 @@ struct L(val src: String, var pos: Int)
 
 // current char at the cursor, or 0 at/after end of input.
 fun cur(l: L): Int {
-  if (l.pos >= strLen(l.src)) {
+  if (l.pos >= l.src.len()) {
     return 0
   }
-  return charAt(l.src, l.pos)
+  return l.src.charAt(l.pos)
 }
 
 // the char one position ahead, or 0 if that would be at/after end.
 fun nxt(l: L): Int {
-  if (l.pos + 1 >= strLen(l.src)) {
+  if (l.pos + 1 >= l.src.len()) {
     return 0
   }
-  return charAt(l.src, l.pos + 1)
+  return l.src.charAt(l.pos + 1)
 }
 
 fun isDigit(c: Int): Bool {
@@ -52,13 +52,13 @@ fun isTwoChar(c: Int, d: Int): Bool {
 
 // keyword check on an already-extracted identifier lexeme.
 fun isKeyword(s: String): Bool {
-  return strEq(s, "fun") || strEq(s, "val") || strEq(s, "var") || strEq(s, "if") || strEq(s, "else") || strEq(s, "while") || strEq(s, "return") || strEq(s, "true") || strEq(s, "false")
+  return s == "fun" || s == "val" || s == "var" || s == "if" || s == "else" || s == "while" || s == "return" || s == "true" || s == "false"
 }
 
 // scan the whole source, print each token, return the token count.
 fun tokenize(src: String): Int {
   val l = L(src, 0)
-  val n = strLen(src)
+  val n = src.len()
   var count = 0
   while (l.pos < n) {
     val c = cur(l)
@@ -71,7 +71,7 @@ fun tokenize(src: String): Int {
           l.pos = l.pos + 1
         }
         print("INT ")
-        println(substr(src, start, l.pos - start))
+        println(src.substr(start, l.pos - start))
         count = count + 1
       } else {
         if (isIdStart(c)) {
@@ -79,7 +79,7 @@ fun tokenize(src: String): Int {
           while (isAlnum(cur(l))) {
             l.pos = l.pos + 1
           }
-          val lex: String = substr(src, start, l.pos - start)
+          val lex: String = src.substr(start, l.pos - start)
           if (isKeyword(lex)) {
             print("KW ")
             println(lex)
@@ -95,7 +95,7 @@ fun tokenize(src: String): Int {
             oplen = 2
           }
           print("OP ")
-          println(substr(src, start, oplen))
+          println(src.substr(start, oplen))
           l.pos = l.pos + oplen
           count = count + 1
         }
@@ -111,8 +111,8 @@ fun main(): Int {
   println("--- test 2: if (x <= 10) { x = x == 2 } ---")
   val c2 = tokenize("if (x <= 10) { x = x == 2 }")
   print("count1=")
-  println(intToStr(c1))
+  println(c1.toStr())
   print("count2=")
-  println(intToStr(c2))
+  println(c2.toStr())
   return c1
 }

@@ -13,10 +13,10 @@ enum Ast {
 }
 
 fun peek(p: P): Int {
-  if (p.pos >= strLen(p.src)) {
+  if (p.pos >= p.src.len()) {
     return 0
   }
-  return charAt(p.src, p.pos)
+  return p.src.charAt(p.pos)
 }
 
 fun isDigit(c: Int): Bool {
@@ -107,9 +107,9 @@ fun evalAst(e: Ast): Int {
 
 fun main(): Int {
   val a: Ast = parse("(2+3)*4")
-  println(intToStr(evalAst(a))) // 20
+  println(evalAst(a).toStr()) // 20
   val b: Ast = parse("2+3*4")
-  println(intToStr(evalAst(b))) // 14
+  println(evalAst(b).toStr()) // 14
   val c: Ast = parse("2 * 3 + 4 * 5")
   return evalAst(c) // 26
 }

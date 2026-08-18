@@ -40,7 +40,7 @@ fun main(): Int {
   while (j < words.len()) {
     val w: Int = words.get(j)
     val wnt: String = want.get(j)
-    f = f + chk(concat("asm[", concat(intToStr(j), "]")), w, wnt)
+    f = f + chk("asm[" + (j.toStr() + "]"), w, wnt)
     j = j + 1
   }
   // ---- codegen verification against Fledge's machine words -----------------
@@ -93,7 +93,7 @@ fun main(): Int {
   val p4words = assembleExe(p4instrs)
   val p4entry = entryOffset(p4instrs, "_main")
   writeBytes("kp4", buildExe(p4words, p4entry, "_main", "kp4")) // cwd-relative (no shared /tmp)
-  println(concat("wrote kp4  entry_off=", intToStr(p4entry)))
-  println(concat("failures: ", intToStr(f)))
+  println("wrote kp4  entry_off=" + p4entry.toStr())
+  println("failures: " + f.toStr())
   return f
 }

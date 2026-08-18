@@ -5,10 +5,10 @@
 struct P(val src: String, var pos: Int)
 
 fun peek(p: P): Int {
-  if (p.pos >= strLen(p.src)) {
+  if (p.pos >= p.src.len()) {
     return 0
   }
-  return charAt(p.src, p.pos)
+  return p.src.charAt(p.pos)
 }
 
 fun isDigit(c: Int): Bool {
@@ -87,8 +87,8 @@ fun eval(src: String): Int {
 }
 
 fun main(): Int {
-  println(intToStr(eval("(2 + 3) * 4")))
-  println(intToStr(eval("2 + 3 * 4")))
-  println(intToStr(eval("100 - 7 * (3 + 4)")))
+  println(eval("(2 + 3) * 4").toStr())
+  println(eval("2 + 3 * 4").toStr())
+  println(eval("100 - 7 * (3 + 4)").toStr())
   return eval("2 * 3 + 4 * 5")
 }

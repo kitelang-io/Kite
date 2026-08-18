@@ -11,9 +11,9 @@ struct TokS(val kind: Int, val text: String)
 
 struct LxS(val src: String, val n: Int, var pos: Int)
 
-fun cS(l: LxS): Int { if (l.pos < l.n) { return charAt(l.src, l.pos) } return 0 }
+fun cS(l: LxS): Int { if (l.pos < l.n) { return l.src.charAt(l.pos) } return 0 }
 
-fun nS(l: LxS): Int { if (l.pos + 1 < l.n) { return charAt(l.src, l.pos + 1) } return 0 }
+fun nS(l: LxS): Int { if (l.pos + 1 < l.n) { return l.src.charAt(l.pos + 1) } return 0 }
 
 fun aS(l: LxS): Int { l.pos = l.pos + 1; return 0 }
 
@@ -45,16 +45,16 @@ fun trivS(l: LxS): Int {
 }
 
 fun kwS(w: String): Int {
-  if (strEq(w, "fun")) { return 10 }
-  if (strEq(w, "val")) { return 11 }
-  if (strEq(w, "var")) { return 12 }
-  if (strEq(w, "return")) { return 13 }
-  if (strEq(w, "while")) { return 14 }
-  if (strEq(w, "if")) { return 15 }
-  if (strEq(w, "else")) { return 16 }
-  if (strEq(w, "struct")) { return 17 }
-  if (strEq(w, "enum")) { return 18 }
-  if (strEq(w, "when")) { return 19 }
+  if (w == "fun") { return 10 }
+  if (w == "val") { return 11 }
+  if (w == "var") { return 12 }
+  if (w == "return") { return 13 }
+  if (w == "while") { return 14 }
+  if (w == "if") { return 15 }
+  if (w == "else") { return 16 }
+  if (w == "struct") { return 17 }
+  if (w == "enum") { return 18 }
+  if (w == "when") { return 19 }
   return 1
 }
 
@@ -62,7 +62,7 @@ fun pushT(t: List, k: Int, s: String): Int { t.push(TokS(k, s)); return 0 }
 
 fun lexS(src: String): List {
   val t = list()
-  val l = LxS(src, strLen(src), 0)
+  val l = LxS(src, src.len(), 0)
   var go = 1
   while (go == 1) {
     trivS(l)
@@ -73,16 +73,16 @@ fun lexS(src: String): List {
         val s = l.pos
         if (c == 48 && (nS(l) == 120 || nS(l) == 88)) { aS(l); aS(l); while (isHexD(cS(l))) { aS(l) } }
         else { while (isDig(cS(l))) { aS(l) } }
-        pushT(t, 2, substr(l.src, s, l.pos - s))
+        pushT(t, 2, l.src.substr(s, l.pos - s))
       }
       else { if (isAlp(c)) {
           val s = l.pos; while (isAln(cS(l))) { aS(l) }
-          val w = substr(l.src, s, l.pos - s); val k = kwS(w)
+          val w = l.src.substr(s, l.pos - s); val k = kwS(w)
           if (k == 1) { pushT(t, 1, w) } else { pushT(t, k, "") }
         } else { if (c == 34) {
             aS(l); val s = l.pos
             while (cS(l) != 34 && cS(l) != 0) { if (cS(l) == 92) { aS(l) } aS(l) }
-            val content = substr(l.src, s, l.pos - s); aS(l)
+            val content = l.src.substr(s, l.pos - s); aS(l)
             pushT(t, 3, content)
           } else { lexOpS(l, t) } } }
     }
@@ -171,8 +171,8 @@ fun pPrimS(p: PC): Expr {
   if (k == 3) { val t = ptS(p); eS(p); return EStr(t) }
   val nm = ptS(p); eS(p)
   if (pkS(p) == 20) { eS(p); return ECall(nm, pArgsS(p)) }
-  if (strEq(nm, "true")) { return EInt("1") } // bool literals are ints in the boxed model
-  if (strEq(nm, "false")) { return EInt("0") }
+  if (nm == "true") { return EInt("1") } // bool literals are ints in the boxed model
+  if (nm == "false") { return EInt("0") }
   return EIdent(nm)
 }
 
@@ -196,12 +196,12 @@ fun mkAssignS(e: Expr, rhs: Expr): Stmt {
   }
 }
 
-fun isUpperS(s: String): Bool { if (strLen(s) == 0) { return false } val c = charAt(s, 0); return c >= 65 && c <= 90 }
+fun isUpperS(s: String): Bool { if (s.len() == 0) { return false } val c = s.charAt(0); return c >= 65 && c <= 90 }
 
 fun pPatS(p: PC): Pat {
   if (pkS(p) == 2) { val t = ptS(p); eS(p); return PIntP(t) }
   val nm = ptS(p); eS(p)
-  if (strEq(nm, "_")) { return PWild }
+  if (nm == "_") { return PWild }
   if (isUpperS(nm)) {
     if (pkS(p) == 20) {
       eS(p)
@@ -412,6 +412,6 @@ fun main(argc: Int, argv: Int): Int {
   val externals = externalsOf(asmR.relocs)
   val entry = entryOffset(code, "_main")
   val n = writeBytes(output, buildExeFull(asmR.words, asmR.relocs, cs, externals, entry, "_main", "kcout"))
-  println(concat("compiled ", concat(intToStr(pr.funcs.len()), concat(" funcs, ", concat(intToStr(pr.structN.len()), " structs")))))
+  println("compiled " + (pr.funcs.len().toStr() + (" funcs, " + (pr.structN.len().toStr() + " structs"))))
   return pr.funcs.len()
 }

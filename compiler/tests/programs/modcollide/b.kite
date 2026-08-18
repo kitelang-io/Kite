@@ -1,0 +1,5 @@
+// module-collision test fixture (relocated from the former lib/std/b.kite). Same top-level names as
+// modcollide/a.kite; each module's `helper` must resolve `size` to ITS OWN module's `size`.
+fun size(): Int { return 35 }
+
+fun helper(): Int { return size() + 5 }
