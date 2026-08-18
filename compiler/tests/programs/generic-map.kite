@@ -3,6 +3,7 @@ fun map1<A, B>(xs: List, f: (A) -> B): List {
   for (x in xs) { listPush(out, f(x)) }
   return out
 }
+
 fun main(): Int {
   val xs = [1, 2, 3, 4]
   val ys = map1(xs, { n -> n * n })

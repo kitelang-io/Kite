@@ -5,6 +5,7 @@ fun buildLen(n: Int): Int {
     i = i + 1 }
   return listLen(xs)
 }
+
 fun sumBuilt(n: Int): Int {
   val xs = listNew()
   var i = 0
@@ -16,6 +17,7 @@ fun sumBuilt(n: Int): Int {
     j = j + 1 }
   return s
 }
+
 fun repLen(s: String, n: Int): Int {
   var out = ""
   var i = 0
@@ -23,6 +25,7 @@ fun repLen(s: String, n: Int): Int {
     i = i + 1 }
   return strLen(out)
 }
+
 fun main(): Int {
   val a = comptime(buildLen(5))
   val b = comptime(sumBuilt(5))

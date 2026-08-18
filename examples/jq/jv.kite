@@ -7,13 +7,15 @@ import kite::core::option
 import kite::alloc::collections
 
 struct Entry(val key: String, val value: Json)
-enum Json { JNull; JBool(Bool); JNum(Int); JStr(String); JArr(List); JObj(List) }   // JArr: List<Json>, JObj: List<Entry>
+
+enum Json { JNull; JBool(Bool); JNum(Int); JStr(String); JArr(List); JObj(List) } // JArr: List<Json>, JObj: List<Entry>
 
 fun entryKey(e: Entry): String { return e.key }
+
 fun entryValue(e: Entry): Json { return e.value }
 
 // a one-character String from a byte, via a NUL-terminated 2-byte scratch buffer (shared string util).
-fun chr(c: Int): String { val b = __rawAlloc(2)  __rawStoreByte(b, 0, c)  __rawStoreByte(b, 1, 0)  return b }
+fun chr(c: Int): String { val b = __rawAlloc(2) __rawStoreByte(b, 0, c) __rawStoreByte(b, 1, 0) return b }
 
 // jv_object_get — Some(value) for a present key, else None (also None if the value isn't an object).
 fun objGet(j: Json, name: String): Option {

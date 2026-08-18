@@ -1,2 +1,3 @@
 fun fexp(): Float { return 1.5e3 + 2e-4 + 1e9 }
+
 fun fexp2(): Float { return 1.0e10 + 3.14e0 + 6E2 }

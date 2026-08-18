@@ -11,6 +11,7 @@ struct Tok(val kind: Int, val ival: Int)
 enum Ast { Num(Int); Add(Ast, Ast); Sub(Ast, Ast); Mul(Ast, Ast); Div(Ast, Ast) }
 
 fun isDigit(c: Int): Bool { return c >= 48 && c <= 57 }
+
 fun isSpace(c: Int): Bool { return c == 32 }
 
 // ---- lexer: String -> List<Tok> -------------------------------------------
@@ -33,11 +34,11 @@ fun lex(src: String): List {
       } else {
         var k = 7
         if (c == 43) { k = 1 } else {
-        if (c == 45) { k = 2 } else {
-        if (c == 42) { k = 3 } else {
-        if (c == 47) { k = 4 } else {
-        if (c == 40) { k = 5 } else {
-        if (c == 41) { k = 6 } else { k = 7 } } } } } }
+          if (c == 45) { k = 2 } else {
+            if (c == 42) { k = 3 } else {
+              if (c == 47) { k = 4 } else {
+                if (c == 40) { k = 5 } else {
+                  if (c == 41) { k = 6 } else { k = 7 } } } } } }
         listPush(toks, Tok(k, 0))
         i = i + 1
       }
@@ -61,17 +62,17 @@ fun peekVal(ps: PS): Int {
   return t.ival
 }
 
-fun advance(ps: PS): Int { ps.pos = ps.pos + 1 ; return 0 }
+fun advance(ps: PS): Int { ps.pos = ps.pos + 1; return 0 }
 
 fun parseFactor(ps: PS): Ast {
   val k = peekKind(ps)
-  if (k == 5) {                 // '(' expr ')'
+  if (k == 5) { // '(' expr ')'
     advance(ps)
     val inner = parseExpr(ps)
-    advance(ps)                 // consume ')'
+    advance(ps) // consume ')'
     return inner
   }
-  val v = peekVal(ps)           // a number
+  val v = peekVal(ps) // a number
   advance(ps)
   return Num(v)
 }
@@ -120,8 +121,8 @@ fun compile(src: String): Int {
 }
 
 fun main(): Int {
-  println(intToStr(compile("(2 + 3) * 4")))       // 20
-  println(intToStr(compile("2 + 3 * 4")))         // 14
+  println(intToStr(compile("(2 + 3) * 4"))) // 20
+  println(intToStr(compile("2 + 3 * 4"))) // 14
   println(intToStr(compile("100 - 7 * (3 + 4)"))) // 51
-  return compile("2 * 3 + 4 * 5")                 // 26  (exit code)
+  return compile("2 * 3 + 4 * 5") // 26  (exit code)
 }

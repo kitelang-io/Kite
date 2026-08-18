@@ -1,7 +1,7 @@
 import kite::collections
 
 @derive(Eq, Ord)
-class Registry<K: Hash + Eq, V>(pub val store: Map<K, V>, var count: Int) where V: Clone {
+class Registry < K: Hash + Eq, V > (pub val store: Map<K, V>, var count: Int) where V: Clone {
   deinit { println("bye ${count}") }
   fun get(self, key: K): V? = store[key]
   fun put(mut self, key: K, value: V): Bool {
@@ -17,12 +17,12 @@ trait Codec<T>: Show where T: Clone {
   fun decode(self, bytes: List<Int>): T = self.zero()
 }
 
-impl<T> Codec<T> for Json<T> where T: Serialize {
+impl < T > Codec<T>for Json<T>where T: Serialize {
   type Wire = String
   fun encode(self, x: T): List<Int> = [x.hash(), 0xff & 1]
 }
 
-enum Node<T> { Leaf(value: T); Branch(Node<T>, Node<T>); Empty }
+enum Node<T>{ Leaf(value: T); Branch(Node<T>, Node<T>); Empty }
 
 fun walk<T>(n: Node<T>, f: (T) -> Int): Int = when (n) {
   Leaf(value = v) -> f(v)
@@ -38,7 +38,7 @@ fun run(): Int {
   return when (r) {
     -1 -> { 0 }
     is Int -> { 1 }
-    Config(host, port, ..) -> { 2 }
+    Config(host, port,..) -> { 2 }
     _ -> { 3 }
   }
 }

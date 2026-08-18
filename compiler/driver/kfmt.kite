@@ -1,0 +1,397 @@
+// compiler/driver/kfmt.kite — `kitec fmt`: a token-based, trivia-preserving Kite source formatter.
+//
+// Design: this is NOT an AST pretty-printer. It re-lexes the source into a flat stream of PIECES
+// (tokens + comments), each carrying its EXACT source spelling and the number of newlines that
+// preceded it, then re-emits that stream with a consistent style. Because every token keeps its
+// verbatim source slice, string/char contents and every Phase-1 numeric form (0x/0o/0b bases, `_`
+// digit separators, float exponents, integer suffixes like 42u16 / 7L) are preserved byte-for-byte,
+// and comments — which the compiler's own lexer discards — are captured as first-class pieces.
+//
+// Style applied (v1, NO line wrapping — existing line breaks are preserved):
+//   * indentation = 2 spaces per brace/paren/bracket nesting level (the repo's dominant indent);
+//   * one space around binary operators; a space after `,` `;` `:`; no padding just inside `(`/`[`;
+//   * field/path/range/attribute/generic tokens glued (a.b, a::b, 0..<n, @attr, List<Int>);
+//   * a blank line between top-level declarations AND between members of a class/struct/enum body
+//     (never right after `{` or before `}`); a doc-comment/attribute run attaches to the decl below it
+//     (the blank goes above the run); consecutive blanks collapsed to one;
+//   * trailing whitespace stripped; exactly one final newline.
+// Idempotent: zfFormat(zfFormat(x)) == zfFormat(x).
+
+// ============================ trivia-preserving lexer ======================
+// This file no longer carries its own lexer. Token boundaries + kinds have ONE source of truth: the
+// compiler's real lexer in compiler/frontend/kfront.kite, which this tool imports. The formatter drives
+// kfront's Lx cursor (cur/nxt/at/adv) and, for each real token, calls the SAME recognizer the compiler
+// uses (readNum / lexStr / lexChar / lexOp, and kw for identifiers/keywords) into a throwaway token
+// list — it advances lx exactly as the compiler would and reports the token KIND, while the formatter
+// slices the VERBATIM source span from lx's advancement (so numeric bases / `_` separators / suffixes,
+// strings, and chars are byte-preserved). Comments — which the compiler's skipTrivia discards — are
+// advanced with kfront's shared scanLineComment / scanBlockComment and captured here as pieces. There
+// is thus no second lexer to drift from the compiler's.
+
+// A piece is one token OR one comment. kind reuses the frontend's token numbers (see kfront.kite);
+// plus 90 = `;` (the frontend treats `;` as trivia, a formatter keeps it), 200 = // line comment,
+// 201 = /* */ block comment, 99 = an unrecognized single char (emitted verbatim). text = exact
+// source spelling; nl = count of newlines in the gap before this piece.
+struct ZfPiece(val kind: Int, val text: String, val nl: Int)
+
+// One entry per open bracket, indexed by (nesting depth - 1) so the innermost open scope is at
+// scopes[depth-1]. `typeBody` is 1 only for the `{` that opens a class/struct/enum body (where members
+// get a blank line between them); `lines` counts direct-child line-starts seen so far in that scope, so
+// a decl-start member with lines==0 is the FIRST member (no blank right after `{`).
+struct ZfScope(var typeBody: Int, var lines: Int)
+
+// push/overwrite the scope at `idx`; depth grows one at a time so idx is either == len (append) or < len
+// (reuse a popped slot). No real pop is needed — a closed level is just overwritten on the next open.
+fun zfScopeSet(scopes: List, idx: Int, sc: ZfScope): Int {
+  if (idx < scopes.len()) { scopes.set(idx, sc) } else { scopes.push(sc) }
+  return 0
+}
+
+// strip trailing spaces/tabs from a line/comment.
+fun zfRstrip(s: String): String {
+  var e = strLen(s)
+  var go = 1
+  while (go == 1 && e > 0) {
+    val c = charAt(s, e - 1)
+    if (c == 32 || c == 9) { e = e - 1 } else { go = 0 }
+  }
+  return substr(s, 0, e)
+}
+
+// kind of the token kfront's lexer just pushed onto a throwaway list (99 = it pushed nothing, e.g. an
+// unrecognized single char that lexOp advanced over without emitting — emitted verbatim by the caller).
+fun zfLastKind(toks: List): Int {
+  if (toks.len() == 0) { return 99 }
+  val t: Tok = toks.get(toks.len() - 1)
+  return t.kind
+}
+
+// one // line comment (from `//` to end of line, trailing whitespace stripped). Boundary decided by
+// kfront's shared scanLineComment — the SAME function the compiler's skipTrivia uses to discard it.
+fun zfLexLine(l: Lx, pieces: List, nl: Int): Int {
+  val s = l.pos
+  scanLineComment(l)
+  pieces.push(ZfPiece(200, zfRstrip(substr(l.src, s, l.pos - s)), nl))
+  return 0
+}
+
+// one /* nested block comment */, preserved verbatim (internal newlines and all). Boundary decided by
+// kfront's shared scanBlockComment.
+fun zfLexBlock(l: Lx, pieces: List, nl: Int): Int {
+  val s = l.pos
+  scanBlockComment(l)
+  pieces.push(ZfPiece(201, substr(l.src, s, l.pos - s), nl))
+  return 0
+}
+
+// one real token (number / identifier-or-keyword / string / char / `;` / operator). The boundary and
+// kind come from kfront's OWN lexer: readNum / lexStr / lexChar / lexOp advance lx exactly as the
+// compiler would (into a throwaway list we read the kind from), and kw() classifies an identifier run;
+// the formatter then slices the verbatim source span [s, l.pos). `;` is trivia to the compiler, so the
+// formatter recognizes it directly as its own piece (kind 90).
+fun zfLexToken(l: Lx, pieces: List, nl: Int): Int {
+  val s = l.pos
+  val c = cur(l)
+  var kind = 0
+  if (isDigit(c)) { val sc = list(); readNum(l, sc); kind = zfLastKind(sc) }
+  else { if (isAlpha(c)) {
+      while (isAlnum(cur(l))) { adv(l) }
+      kind = kw(substr(l.src, s, l.pos - s))
+    }
+    else { if (c == 34) { val sc = list(); lexStr(l, sc); kind = zfLastKind(sc) }
+      else { if (c == 39) { val sc = list(); lexChar(l, sc); kind = 9 }
+        else { if (c == 59) { adv(l); kind = 90 } // ; -> a real token to the formatter
+          else { val sc = list(); lexOp(l, sc); kind = zfLastKind(sc) } } } } }
+  pieces.push(ZfPiece(kind, substr(l.src, s, l.pos - s), nl))
+  return 0
+}
+
+// lex the whole source into pieces, tracking newline counts (comments included). Uses kfront's Lx
+// cursor; whitespace / newlines / `;` and comment openers are handled here (the formatter keeps the
+// trivia the compiler throws away), and every real token is delegated to kfront's lexer via zfLexToken.
+fun zfLex(src: String): List {
+  val pieces = list()
+  val l = Lx(src, strLen(src), 0, 1)
+  var pendingNl = 0
+  var go = 1
+  while (go == 1) {
+    val c = cur(l)
+    if (c == 0) { go = 0 }
+    else {
+      if (c == 32 || c == 9 || c == 13) { adv(l) }
+      else { if (c == 10) { pendingNl = pendingNl + 1; adv(l) }
+        else { if (c == 47 && nxt(l) == 47) { zfLexLine(l, pieces, pendingNl); pendingNl = 0 }
+          else { if (c == 47 && nxt(l) == 42) { zfLexBlock(l, pieces, pendingNl); pendingNl = 0 }
+            else { zfLexToken(l, pieces, pendingNl); pendingNl = 0 } } } }
+    }
+  }
+  return pieces
+}
+
+// ============================ classification passes ========================
+fun zfIsComment(k: Int): Bool { return k == 200 || k == 201 }
+
+// a token that can end a value (so a following `-`/`+` is binary subtraction/addition, not unary).
+fun zfValueEnding(k: Int): Bool {
+  return k == 1 || k == 2 || k == 3 || k == 4 || k == 9 ||
+  k == 5 || k == 6 || k == 7 || k == 8 || k == 69 ||
+  k == 21 || k == 75 || k == 23 || k == 78 || k == 45 ||
+  k == 15 || k == 16 || k == 17
+}
+
+// mark prefix-unary `-`/`+`/`!` (glue to their operand). `!` is always prefix here.
+fun zfMarkUnary(pieces: List): List {
+  val m = pieces.len()
+  val res = list()
+  var prevSig = 0
+  var i = 0
+  while (i < m) {
+    val p: ZfPiece = pieces.get(i)
+    val k = p.kind
+    var u = 0
+    if (k == 44) { u = 1 }
+    else { if (k == 31 || k == 30) { if (!zfValueEnding(prevSig)) { u = 1 } } }
+    res.push(u)
+    if (!zfIsComment(k)) { prevSig = k }
+    i = i + 1
+  }
+  return res
+}
+
+// kinds allowed inside a generic argument list during the `<...>` disambiguation scan.
+fun zfInGeneric(k: Int): Bool {
+  return k == 1 || k == 24 || k == 26 || k == 37 || k == 38 || k == 45 ||
+  k == 20 || k == 21 || k == 60 || k == 74 || k == 75
+}
+
+fun zfPieceKind(pieces: List, i: Int): Int { val p: ZfPiece = pieces.get(i); return p.kind }
+
+// Disambiguate `<` `>` as generic brackets (glued, no spaces) vs comparison operators (spaced).
+// A `<` opens a generic when the previous significant token is an identifier (or a `>` that already
+// closed a generic) AND a forward scan over generic-legal tokens on the same line reaches a matching
+// `>` at depth 0. Otherwise both `<` and `>` stay comparisons.
+fun zfMarkAngles(pieces: List): List {
+  val m = pieces.len()
+  val res = list()
+  var t = 0
+  while (t < m) { res.push(0); t = t + 1 }
+  var i = 0
+  while (i < m) {
+    if (zfPieceKind(pieces, i) == 37) {
+      var pj = i - 1
+      while (pj >= 0 && zfIsComment(zfPieceKind(pieces, pj))) { pj = pj - 1 }
+      var okPrev = 0
+      if (pj >= 0) {
+        val pk2 = zfPieceKind(pieces, pj)
+        val pa2: Int = res.get(pj)
+        if (pk2 == 1 || (pk2 == 38 && pa2 == 1)) { okPrev = 1 }
+      }
+      if (okPrev == 1) {
+        var depth = 1
+        var j = i + 1
+        var matched = 0 - 1
+        var fail = 0
+        while (j < m && depth > 0 && fail == 0) {
+          val q: ZfPiece = pieces.get(j)
+          if (q.nl >= 1) { fail = 1 }
+          else {
+            val kq = q.kind
+            if (kq == 200 || kq == 201) { fail = 1 }
+            else { if (kq == 37) { depth = depth + 1 }
+              else { if (kq == 38) { depth = depth - 1; if (depth == 0) { matched = j } }
+                else { if (!zfInGeneric(kq)) { fail = 1 } } } }
+          }
+          if (matched >= 0) { j = m } else { j = j + 1 }
+        }
+        if (matched >= 0) { res.set(i, 1); res.set(matched, 1) }
+      }
+    }
+    i = i + 1
+  }
+  return res
+}
+
+// ============================ spacing + emit ===============================
+// number of spaces between two same-line pieces: default 1, with glue rules forcing 0.
+fun zfSpace(pk: Int, pa: Int, pu: Int, ck: Int, ca: Int, cu: Int): Int {
+  if (pu == 1) { return 0 } // after a prefix-unary op
+  if (ck == 24 || ck == 90 || ck == 25) { return 0 } // before , ; :
+  if (pk == 20 || pk == 74) { return 0 } // after ( [
+  if (ck == 21 || ck == 75) { return 0 } // before ) ]
+  if (pk == 27 || ck == 27) { return 0 } // . field access
+  if (pk == 26 || ck == 26) { return 0 } // :: path
+  if (pk == 76 || ck == 76) { return 0 } // ?. safe field
+  if (ck == 78) { return 0 } // before postfix !!
+  if (ck == 45) { return 0 } // before nullable ?
+  if (pk == 73) { return 0 } // after @ attribute
+  if (pk == 28 || ck == 28 || pk == 83 || ck == 83) { return 0 } // .. / ..< ranges
+  if (ck == 37 && ca == 1) { return 0 } // before generic <
+  if (pk == 37 && pa == 1) { return 0 } // after generic <
+  if (ck == 38 && ca == 1) { return 0 } // before generic >
+  if (pk == 38 && pa == 1) { return 0 } // after generic >  (>> or >()
+  if (ck == 20) { // before ( : call vs keyword
+    if (pk == 1 || pk == 21 || pk == 75 || pk == 78 || pk == 45) { return 0 }
+    if (pk == 38 && pa == 1) { return 0 }
+  }
+  if (ck == 74) { // before [ : index vs literal
+    if (pk == 1 || pk == 21 || pk == 75) { return 0 }
+  }
+  return 1
+}
+
+// TOKEN-BOUNDARY SAFETY. A source formatter must never emit two adjacent tokens with 0 spaces if the
+// glued text re-lexes differently. `a` = last char of the left token, `b` = first char of the right
+// token; returns true if `a`+`b` begins a longer token that kfront's lexer (lexOp/skipTrivia) would
+// greedily consume as one. Derived directly from kfront.kite: every (c,d) branch in lexOp that advances
+// past `d`, plus the `//` and `/*` comment starts in skipTrivia. Being conservative here only ever adds
+// a space; it can never change program meaning.
+fun zfWouldMerge(a: Int, b: Int): Bool {
+  if (a == 58) { return b == 58 } // :  -> ::
+  if (a == 46) { return b == 46 } // .  -> .. (and ..<)
+  if (a == 43) { return b == 61 } // +  -> +=
+  if (a == 45) { return b == 62 || b == 61 } // -  -> -> -=
+  if (a == 42) { return b == 61 } // *  -> *=
+  if (a == 47) { return b == 61 || b == 47 || b == 42 } // /  -> /=  //  /*
+  if (a == 37) { return b == 61 } // %  -> %=
+  if (a == 61) { return b == 61 } // =  -> ==
+  if (a == 33) { return b == 61 || b == 33 } // !  -> != !!
+  if (a == 60) { return b == 61 || b == 60 } // <  -> <= <<
+  if (a == 62) { return b == 61 || b == 62 } // >  -> >= >>
+  if (a == 38) { return b == 38 } // &  -> &&
+  if (a == 124) { return b == 124 } // |  -> ||
+  if (a == 63) { return b == 46 || b == 58 } // ?  -> ?. ?:
+  return false
+}
+
+// Would gluing the whole left token `pt` to the right token starting with char `b` re-lex differently?
+// Covers the single-char boundary (last char of pt + b) plus the one two-char extension in the lexer:
+// a `..` (kind 28) directly followed by `<` re-lexes as `..<` (kind 83), a boundary the char-pair test
+// alone misses because it only sees the trailing `.`.
+fun zfMergeHazard(pk: Int, pt: String, b: Int): Bool {
+  if (pk == 28 && b == 60) { return true } // ..  +  <  -> ..<
+  val pn = strLen(pt)
+  if (pn == 0) { return false }
+  return zfWouldMerge(charAt(pt, pn - 1), b)
+}
+
+fun zfIndent(n: Int): String {
+  var s = ""
+  var i = 0
+  while (i < n) { s = concat(s, "  "); i = i + 1 }
+  return s
+}
+
+fun zfIsDeclStart(k: Int): Bool {
+  return k == 10 || k == 54 || k == 55 || k == 65 || k == 66 || k == 67 || k == 80 || k == 56 ||
+  k == 200 || k == 201 || k == 73
+}
+
+// balanced O(n log n) join of the chunk list (avoids O(n^2) left-fold concat).
+fun zfJoin(cs: List): String {
+  var work = cs
+  while (work.len() > 1) {
+    val nxt = list()
+    var i = 0
+    while (i + 1 < work.len()) {
+      val a: String = work.get(i)
+      val b: String = work.get(i + 1)
+      nxt.push(concat(a, b))
+      i = i + 2
+    }
+    if (i < work.len()) { val a: String = work.get(i); nxt.push(a) }
+    work = nxt
+  }
+  if (work.len() == 0) { return "" }
+  val r: String = work.get(0)
+  return r
+}
+
+// the core: re-emit the piece stream with consistent indentation, spacing, and blank lines.
+fun zfFormat(src: String): String {
+  val pieces = zfLex(src)
+  val m = pieces.len()
+  if (m == 0) { return "" }
+  val angle = zfMarkAngles(pieces)
+  val unary = zfMarkUnary(pieces)
+  val out = list()
+  val scopes = list() // ZfScope stack, indexed by (depth - 1)
+  var depth = 0
+  var pendingType = 0 // a class/struct/enum header is open, awaiting its body `{`
+  var pendingTypeDepth = 0 // the depth the header keyword appeared at
+  var prevKind = 0
+  var prevAngle = 0
+  var prevUnary = 0
+  var prevText = ""
+  var prevLineFirstKind = 0
+  var i = 0
+  while (i < m) {
+    val p: ZfPiece = pieces.get(i)
+    val k = p.kind
+    val ca: Int = angle.get(i)
+    val cu: Int = unary.get(i)
+    var atLineStart = 0
+    if (i == 0 || p.nl >= 1) { atLineStart = 1 }
+    if (k == 21 || k == 23 || k == 75) { depth = depth - 1; if (depth < 0) { depth = 0 } }
+    if (atLineStart == 1) {
+      // are we DIRECTLY inside a class/struct/enum body (member level)?
+      var inTypeBody = 0
+      if (depth >= 1) {
+        val scT: ZfScope = scopes.get(depth - 1)
+        if (scT.typeBody == 1) { inTypeBody = 1 }
+      }
+      if (i > 0) {
+        var blanks = p.nl - 1
+        if (blanks > 1) { blanks = 1 }
+        if (blanks < 0) { blanks = 0 }
+        var forceHere = 0
+        if (depth == 0) { forceHere = 1 } // top-level declaration
+        if (inTypeBody == 1) { forceHere = 1 } // class/struct/enum body member
+        if (forceHere == 1 && zfIsDeclStart(k)) {
+          var suppress = 0
+          // a comment/attribute run on the previous line documents THIS decl: no blank between them
+          if (prevLineFirstKind == 200 || prevLineFirstKind == 201 || prevLineFirstKind == 73) { suppress = 1 }
+          // first member of a body: no blank right after the opening `{`
+          if (inTypeBody == 1) {
+            val scF: ZfScope = scopes.get(depth - 1)
+            if (scF.lines == 0) { suppress = 1 }
+          }
+          if (suppress == 0) { if (blanks < 1) { blanks = 1 } }
+        }
+        out.push("\n")
+        while (blanks > 0) { out.push("\n"); blanks = blanks - 1 }
+      }
+      out.push(zfIndent(depth))
+      prevLineFirstKind = k
+      // this line is direct-child content of the innermost scope; count it for later siblings.
+      if (depth >= 1) { val scC: ZfScope = scopes.get(depth - 1); scC.lines = scC.lines + 1 }
+    } else {
+      var sp = zfSpace(prevKind, prevAngle, prevUnary, k, ca, cu)
+      if (sp == 0 && !zfIsComment(k) && strLen(p.text) > 0) {
+        if (zfMergeHazard(prevKind, prevText, charAt(p.text, 0))) { sp = 1 }
+      }
+      if (sp == 1) { out.push(" ") }
+    }
+    out.push(p.text)
+    // track an open class/struct/enum header so its body `{` can be recognized. Any keyword that starts
+    // a different construct (fun/trait/impl/const/val/var/return) or an `=`/`;` ends the header search.
+    if (k == 65 || k == 54 || k == 55) { pendingType = 1; pendingTypeDepth = depth }
+    else { if (k == 10 || k == 66 || k == 67 || k == 80 || k == 11 || k == 12 || k == 13 || k == 43 || k == 90) { pendingType = 0 } }
+    if (k == 20 || k == 74) {
+      depth = depth + 1
+      zfScopeSet(scopes, depth - 1, ZfScope(0, 0))
+    }
+    else { if (k == 22) {
+        var isType = 0
+        if (pendingType == 1 && depth == pendingTypeDepth) { isType = 1; pendingType = 0 }
+        depth = depth + 1
+        zfScopeSet(scopes, depth - 1, ZfScope(isType, 0))
+      } }
+    prevKind = k; prevAngle = ca; prevUnary = cu; prevText = p.text
+    i = i + 1
+  }
+  out.push("\n")
+  return zfJoin(out)
+}
+
+// The CLI that drives zfFormat lives in the standalone tool (compiler/tools/kitefmt.kite); this file
+// is now a pure formatter library, imported by that tool and NOT by the self-hosting compiler.

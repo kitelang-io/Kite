@@ -5,24 +5,24 @@ struct Rect(pub val width: Int, pub val height: Int, var scale: Int)
 
 // reference type (ARC) with a deinit for RAII cleanup
 class File(val fd: Int32) {
-    deinit {
-        sysClose(fd)
-    }
+  deinit {
+    sysClose(fd)
+  }
 }
 
 // payloaded enum: no payload, positional-type payload, named-field payload
 enum Expr {
-    Lit(Int)
-    Bin(Op, Expr, Expr)
-    Var(name: String)
+  Lit(Int)
+  Bin(Op, Expr, Expr)
+  Var(name: String)
 }
 
 enum IoError {
-    NotFound
-    Subprocess(code: Int32)
-    Other(msg: String)
+  NotFound
+  Subprocess(code: Int32)
+  Other(msg: String)
 }
 
 fun area(r: Rect): Int {
-    return r.width * r.height * r.scale
+  return r.width * r.height * r.scale
 }

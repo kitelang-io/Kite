@@ -2,29 +2,29 @@
 // Build & run:  kitec run examples/native_loops.kite   (exit code = result)
 
 fun gcd(a: Int, b: Int): Int {
-    var x = a
-    var y = b
-    while (y != 0) {
-        val t = y
-        y = x % y
-        x = t
-    }
-    return x
+  var x = a
+  var y = b
+  while (y != 0) {
+    val t = y
+    y = x % y
+    x = t
+  }
+  return x
 }
 
 fun fib(n: Int): Int {
-    var a = 0
-    var b = 1
-    var i = 0
-    while (i < n) {
-        val t = a + b
-        a = b
-        b = t
-        i = i + 1
-    }
-    return a
+  var a = 0
+  var b = 1
+  var i = 0
+  while (i < n) {
+    val t = a + b
+    a = b
+    b = t
+    i = i + 1
+  }
+  return a
 }
 
 fun main(): Int {
-    return gcd(48, 36) + fib(10)   // 12 + 55 = 67
+  return gcd(48, 36) + fib(10) // 12 + 55 = 67
 }

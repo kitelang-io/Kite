@@ -16,7 +16,9 @@
 // charAt is just a byte load; strLen scans to the terminating 0. (`&&`/`!=` avoided — `&&` is bitwise.)
 @lang("str.get")
 fun charAt(s: String, i: Int): Int { return __rawLoadByte(s, i) }
+
 fun strLen(s: String): Int { var i = 0 var go = 1 while (go == 1) { if (__rawLoadByte(s, i) == 0) { go = 0 } else { i = i + 1 } } return i }
+
 // byte-by-byte compare to the terminating 0 (returns Bool to match the intrinsic's registered type).
 fun strEq(a: String, b: String): Bool {
   var i = 0
@@ -29,6 +31,7 @@ fun strEq(a: String, b: String): Bool {
   }
   return false
 }
+
 // concat allocates la+lb+1 bytes and copies both, NUL-terminated (leaks like the old libc version).
 @lang("str.concat")
 fun concat(a: String, b: String): String {
@@ -42,6 +45,7 @@ fun concat(a: String, b: String): String {
   __rawStoreByte(r, la + lb, 0)
   return r
 }
+
 // substr(s, start, length): copy length bytes from s+start into a fresh NUL-terminated buffer.
 fun substr(s: String, st: Int, len: Int): String {
   val r = __rawAlloc(len + 1)
@@ -50,6 +54,7 @@ fun substr(s: String, st: Int, len: Int): String {
   __rawStoreByte(r, len, 0)
   return r
 }
+
 // intToStr: base-10, handles 0 and negatives, into a fresh NUL-terminated buffer. `%` avoided via
 // d = mm - (mm/10)*10. (ASCII '0'=48, '-'=45.) Was libc snprintf("%ld").
 @lang("str.show")
@@ -70,15 +75,21 @@ fun intToStr(n: Int): String {
   if (neg == 1) { __rawStoreByte(r, 0, 45) }
   return r
 }
+
 fun String_charAt(s: String, i: Int): Int { return charAt(s, i) }
+
 fun String_len(s: String): Int { return strLen(s) }
+
 // `length` is the getter alias of `len`: a nullary method, so `s.length` (no parens) resolves here
 // via klower's getter routing. NB: the receiver param is named `s`, not `self` — `self` is a reserved
 // receiver keyword valid only inside a struct/impl method; free-function accessors need a plain name.
 fun String_length(s: String): Int { return strLen(s) }
+
 fun String_substr(s: String, a: Int, b: Int): String { return substr(s, a, b) }
+
 // `s.repeat(n)` — n copies of s, concatenated (n<=0 yields ""). Allocating, but only via the concat primitive.
 fun String_repeat(s: String, n: Int): String { var out = "" var i = 0 while (i < n) { out = concat(out, s) i = i + 1 } return out }
+
 // String overloads `+` as concatenation via the Add operator trait (see kite::core::ops): klower's
 // lowerBin desugars `a + b` where a: String to String_add(a, b). Registered as the mangled method String_add.
 // @arc(manual): String is a primitive C-string word — never ref-counted, exempt from automatic ARC. It

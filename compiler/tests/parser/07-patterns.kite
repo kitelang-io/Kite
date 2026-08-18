@@ -4,12 +4,14 @@ fun neg(): Int {
     5 -> { 2 }
   }
 }
+
 fun negf(): Int {
   return when (n) {
     -2.5 -> { 1 }
     5 -> { 2 }
   }
 }
+
 fun pats(): Int {
   return when (e) {
     'c' -> { 2 }
@@ -17,11 +19,11 @@ fun pats(): Int {
     "a" -> { 5 }
     null -> { 6 }
     Point(a, b) -> { 7 }
-    Config(host, port, ..) -> { 8 }
+    Config(host, port,..) -> { 8 }
     Point(x = 0, y = 0) -> { 9 }
     Foo(..) -> { 10 }
     Baz(.., y = 2) -> { 11 }
-    Node(left = Leaf(v), ..) -> { 12 }
+    Node(left = Leaf(v),..) -> { 12 }
     Op::Add -> { 13 }
     is Int -> { 14 }
     !in xs -> { 15 }

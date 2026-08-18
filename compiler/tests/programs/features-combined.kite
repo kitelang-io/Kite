@@ -1,15 +1,20 @@
 import kite::alloc
 
 trait Describable { fun tag(self): Int }
+
 class Handle(val id: Int)
+
 struct Point(val x: Int, val y: Int)
+
 impl Describable for Point {
   fun tag(self): Int = self.x + self.y
 }
+
 fun getHandle(flag: Int): Handle {
   if (flag == 1) { return Handle(99) }
   return null
 }
+
 fun main(): Int {
   val sz = comptime(4 * 8)
   val p = Point(3, 4)

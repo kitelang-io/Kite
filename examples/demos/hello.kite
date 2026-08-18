@@ -5,24 +5,24 @@ import kite::std::io
 struct Point(val x: Int, val y: Int)
 
 fun distanceSquared(a: Point, b: Point): Int {
-    val dx = a.x - b.x
-    val dy = a.y - b.y
-    return dx * dx + dy * dy
+  val dx = a.x - b.x
+  val dy = a.y - b.y
+  return dx * dx + dy * dy
 }
 
 fun describe(n: Int?): String {
-    return when {
-        n == null -> "nothing"
-        n < 0     -> "negative"
-        n == 0    -> "zero"
-        else      -> "positive"
-    }
+  return when {
+    n == null -> "nothing"
+    n < 0 -> "negative"
+    n == 0 -> "zero"
+    else -> "positive"
+  }
 }
 
 fun main() {
-    val origin = Point(0, 0)
-    val p = Point(3, 4)
-    val d = distanceSquared(origin, p)   /* 25 */
-    println("distance^2 = " + d)
-    println(describe(d))
+  val origin = Point(0, 0)
+  val p = Point(3, 4)
+  val d = distanceSquared(origin, p) /* 25 */
+  println("distance^2 = " + d)
+  println(describe(d))
 }

@@ -1,14 +1,24 @@
 // kite::alloc::collections — generic List operations (one machine word per element).
-import kite::core::option    // findList returns Option
-fun rangeList(n: Int): List { val out = list()  var i = 0  while (i < n) { out.push(i)  i = i + 1 }  return out }
-fun mapList(xs: List, f): List { val out = list()  var i = 0  while (i < xs.len()) { out.push(f(xs.get(i)))  i = i + 1 }  return out }
-fun filterList(xs: List, pred): List { val out = list()  var i = 0  while (i < xs.len()) { val x = xs.get(i)  if (pred(x)) { out.push(x) }  i = i + 1 }  return out }
-fun foldList(xs: List, acc: Int, f): Int { var a = acc  var i = 0  while (i < xs.len()) { a = f(a, xs.get(i))  i = i + 1 }  return a }
-fun findList(xs: List, pred): Option { var i = 0  while (i < xs.len()) { val x = xs.get(i)  if (pred(x)) { return Some(x) }  i = i + 1 }  return None }
-fun anyList(xs: List, pred): Bool { var i = 0  while (i < xs.len()) { if (pred(xs.get(i))) { return true }  i = i + 1 }  return false }
-fun allList(xs: List, pred): Bool { var i = 0  while (i < xs.len()) { if (pred(xs.get(i)) == false) { return false }  i = i + 1 }  return true }
-fun reverseList(xs: List): List { val out = list()  var i = xs.len() - 1  while (i >= 0) { out.push(xs.get(i))  i = i - 1 }  return out }
+import kite::core::option // findList returns Option
+
+fun rangeList(n: Int): List { val out = list() var i = 0 while (i < n) { out.push(i) i = i + 1 } return out }
+
+fun mapList(xs: List, f): List { val out = list() var i = 0 while (i < xs.len()) { out.push(f(xs.get(i))) i = i + 1 } return out }
+
+fun filterList(xs: List, pred): List { val out = list() var i = 0 while (i < xs.len()) { val x = xs.get(i) if (pred(x)) { out.push(x) } i = i + 1 } return out }
+
+fun foldList(xs: List, acc: Int, f): Int { var a = acc var i = 0 while (i < xs.len()) { a = f(a, xs.get(i)) i = i + 1 } return a }
+
+fun findList(xs: List, pred): Option { var i = 0 while (i < xs.len()) { val x = xs.get(i) if (pred(x)) { return Some(x) } i = i + 1 } return None }
+
+fun anyList(xs: List, pred): Bool { var i = 0 while (i < xs.len()) { if (pred(xs.get(i))) { return true } i = i + 1 } return false }
+
+fun allList(xs: List, pred): Bool { var i = 0 while (i < xs.len()) { if (pred(xs.get(i)) == false) { return false } i = i + 1 } return true }
+
+fun reverseList(xs: List): List { val out = list() var i = xs.len() - 1 while (i >= 0) { out.push(xs.get(i)) i = i - 1 } return out }
+
 fun sumList(xs: List): Int { return foldList(xs, 0, { a, x -> a + x }) }
 
 pub import kite::alloc::collections::vec
+
 pub import kite::alloc::collections::map

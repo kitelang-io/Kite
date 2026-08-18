@@ -1,0 +1,17 @@
+// Regression: prefix `!` on a Bool-returning CALL must be LOGICAL not (0<->1),
+// not arithmetic/bitwise negate. Buggy codegen emitted INeg for every unary op,
+// so `!f()` (f()==1) became -1 (truthy) and the guarded branch fired.
+fun f(): Bool { return true }
+fun g(): Bool { return false }
+
+fun main(): Int {
+  var acc = 0
+  if (!f()) { acc = acc + 100 }   // !true  == false -> branch skipped
+  if (!g()) { acc = acc + 5 }     // !false == true  -> +5
+  // `!` on a call used directly as a Bool value stored/returned:
+  val nf = !f()                   // false (0)
+  val ng = !g()                   // true  (1)
+  if (nf) { acc = acc + 100 }     // skipped
+  if (ng) { acc = acc + 2 }       // +2
+  return acc                      // 7
+}

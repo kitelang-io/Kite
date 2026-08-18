@@ -3,6 +3,7 @@
 // convention methods live in kite::core::string (auto-prelude); these are opt-in extras you `import`.
 // `strRepeat` is the free-function alias of the `s.repeat(n)` convention method (String_repeat, prelude).
 fun strRepeat(s: String, n: Int): String { return String_repeat(s, n) }
-fun joinList(xs: List, sep: String): String { var out = ""  var i = 0  while (i < xs.len()) { if (i > 0) { out = concat(out, sep) }  out = concat(out, xs.get(i))  i = i + 1 }  return out }
+
+fun joinList(xs: List, sep: String): String { var out = "" var i = 0 while (i < xs.len()) { if (i > 0) { out = concat(out, sep) } out = concat(out, xs.get(i)) i = i + 1 } return out }
 
 pub import kite::alloc::string::strbuf

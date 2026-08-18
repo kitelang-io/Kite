@@ -1,10 +1,12 @@
 class Resource(val id: Int, val log: List) {
   deinit { listSet(self.log, 0, listGet(self.log, 0) + 1) }
 }
+
 fun makeAndDrop(log: List): Int {
   val r = Resource(7, log)
   return r.id
 }
+
 fun main(): Int {
   val log = listNew()
   listPush(log, 0)

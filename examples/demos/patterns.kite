@@ -1,62 +1,62 @@
 enum Op { Add; Sub }
 
 enum Expr {
-    Lit(Int)
-    Neg(Expr)
-    Bin(Op, Expr, Expr)
-    Var(name: String)
+  Lit(Int)
+  Neg(Expr)
+  Bin(Op, Expr, Expr)
+  Var(name: String)
 }
 
 // nested patterns, positional payloads, guards, else
 fun eval(e: Expr): Int {
-    return when (e) {
-        Lit(n)                         -> n
-        Neg(Lit(n))                    -> -n
-        Bin(op, l, r) if op == Op::Add -> eval(l) + eval(r)
-        Bin(_, l, r)                   -> combine(eval(l), eval(r))
-        else                           -> 0
-    }
+  return when (e) {
+    Lit(n) -> n
+    Neg(Lit(n)) -> -n
+    Bin(op, l, r) if op == Op::Add -> eval(l) + eval(r)
+    Bin(_, l, r) -> combine(eval(l), eval(r))
+    else -> 0
+  }
 }
 
 // struct record patterns: rename, pun, rest
 fun describe(p: Point): String {
-    return when (p) {
-        Point(x = 0, y = 0) -> "origin"
-        Point(x = 0, y)     -> "on y-axis at ${y}"
-        Point(x, ..)        -> "x = ${x}"
-    }
+  return when (p) {
+    Point(x = 0, y = 0) -> "origin"
+    Point(x = 0, y) -> "on y-axis at ${y}"
+    Point(x,..) -> "x = ${x}"
+  }
 }
 
 // char-range membership + or-patterns
 fun classify(c: Char): Kind {
-    return when (c) {
-        in '0'..'9'               -> Kind::Digit
-        in 'a'..'z' | in 'A'..'Z' -> Kind::Alpha
-        else                      -> Kind::Other
-    }
+  return when (c) {
+    in '0'..'9' -> Kind::Digit
+    in 'a'..'z' | in 'A'..'Z' -> Kind::Alpha
+    else -> Kind::Other
+  }
 }
 
 // subject binding + is-narrowing on enum tags
 fun tag(n: Node): String {
-    return when (val x = n) {
-        is Leaf   -> "leaf"
-        is Branch -> "branch"
-    }
+  return when (val x = n) {
+    is Leaf -> "leaf"
+    is Branch -> "branch"
+  }
 }
 
 // subject-less form: boolean conditions
 fun tier(score: Int): String {
-    return when {
-        score >= 90 -> "A"
-        score >= 80 -> "B"
-        else        -> "F"
-    }
+  return when {
+    score >= 90 -> "A"
+    score >= 80 -> "B"
+    else -> "F"
+  }
 }
 
 // Option variant patterns
 fun handle(o: Expr?): Int {
-    return when (o) {
-        Some(v) -> eval(v)
-        None    -> 0
-    }
+  return when (o) {
+    Some(v) -> eval(v)
+    None -> 0
+  }
 }

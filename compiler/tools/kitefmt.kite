@@ -1,0 +1,41 @@
+// compiler/tools/kitefmt.kite — the standalone `kitefmt` CLI.
+//
+// The Kite source formatter used to live INSIDE the self-hosting compiler as a `kitec fmt`
+// subcommand, which bloated kitec's fixpoint. It now builds as its OWN program: this entry point
+// imports the trivia-preserving formatter (kfmt.kite) and drives it from argv, exactly like any
+// other Kite program the compiler builds. kitec no longer contains — or accepts — `fmt`.
+//
+//   build: kitec compiler/tools/kitefmt.kite -o kitefmt
+//   run:   kitefmt <file.kite>          format to stdout
+//          kitefmt -w <file.kite>       format in place (--write)
+//          kitefmt --check <file.kite>  exit non-zero if <file.kite> is not already formatted
+// kfront.kite is the compiler's real lexer + front-end; kfmt reuses its tokenizer (single source of
+// truth for token boundaries/kinds — no parallel lexer). It is a flat quoted include, so kfmt's calls
+// to lex helpers (cur/adv/readNum/lexStr/lexOp/kw/scanLineComment/…) resolve to kfront's definitions.
+import "compiler/frontend/kfront.kite"
+import "compiler/driver/kfmt.kite"
+
+fun main(argc: Int, argv: Int): Int {
+  var file = ""
+  var write = 0
+  var check = 0
+  var i = 1
+  while (i < argc) {
+    val a = __argv(argv, i)
+    if (strEq(a, "-w") || strEq(a, "--write")) { write = 1 }
+    else { if (strEq(a, "--check")) { check = 1 }
+      else { if (strEq(file, "")) { file = a } } }
+    i = i + 1
+  }
+  if (strEq(file, "")) { println("kitefmt: no input file (usage: kitefmt [-w|--check] <file.kite>)"); return 1 }
+  val src = readFile(file)
+  val out = zfFormat(src)
+  if (check == 1) {
+    if (strEq(out, src)) { return 0 }
+    println(concat(file, ": not formatted (run `kitefmt -w`)"))
+    return 1
+  }
+  if (write == 1) { writeFile(file, out); return 0 }
+  print(out)
+  return 0
+}

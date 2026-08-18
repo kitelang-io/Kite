@@ -1,2 +1,3 @@
 enum Shape { Circle(Float); Rect(Float, Float); Named(w: Int, h: Int) }
-enum Res<T, E> { Ok(value: T); Err(E) }
+
+enum Res<T, E>{ Ok(value: T); Err(E) }

@@ -1,4 +1,7 @@
 fun a(): String { return "tab\tnl\nq\"bs\\end" }
+
 fun b(): String { return "\$x costs \$5" }
+
 fun c(): String { return "a\0b\0c" }
+
 fun d(): String { return "plain no escapes" }

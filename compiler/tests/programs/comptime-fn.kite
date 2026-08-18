@@ -2,6 +2,7 @@ fun fib(n: Int): Int {
   if (n < 2) { return n }
   return fib(n - 1) + fib(n - 2)
 }
+
 fun fact(n: Int): Int {
   var r = 1
   var i = 1
@@ -9,7 +10,9 @@ fun fact(n: Int): Int {
     i = i + 1 }
   return r
 }
+
 const FIB10 = fib(10)
+
 fun main(): Int {
   val a = comptime(fib(7))
   val b = comptime(fact(5))

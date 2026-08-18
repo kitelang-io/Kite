@@ -10,8 +10,8 @@ import kite::std::b
 use b::size
 
 fun main(): Int {
-  if (size() != 35) { return 91 }        // `use b::size` -> bare size is b's
-  if (a::helper() != 700) { return 92 }  // a::helper resolves size to a's own (7*100)
-  if (b::helper() != 40) { return 93 }   // b::helper resolves size to b's own (35+5)
-  return a::size() + b::size()           // 7 + 35 = 42
+  if (size() != 35) { return 91 } // `use b::size` -> bare size is b's
+  if (a::helper() != 700) { return 92 } // a::helper resolves size to a's own (7*100)
+  if (b::helper() != 40) { return 93 } // b::helper resolves size to b's own (35+5)
+  return a::size() + b::size() // 7 + 35 = 42
 }

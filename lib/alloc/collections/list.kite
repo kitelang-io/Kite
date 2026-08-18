@@ -33,22 +33,28 @@ class List(var n: Int, var cap: Int, var data: Int) {
     return 0
   }
   fun get(self, i: Int): Int { return __rawLoad(self.data, i * 8) }
-  fun set(self, i: Int, x: consuming Int): Int { __rawStore(self.data, i * 8, x)  return 0 }
+  fun set(self, i: Int, x: consuming Int): Int { __rawStore(self.data, i * 8, x) return 0 }
   fun len(self): Int { return self.n }
   fun length(self): Int { return self.n }
 }
+
 fun listNew(): List { return list() }
+
 // free-function API — thin delegates to the methods, kept because the compiler's own 2000+ call sites
 // and the [..] literal lowering (klower) emit these names.
 @lang("list.len")
 fun listLen(l: List): Int { return l.len() }
+
 @lang("list.get")
 fun listGet(l: List, i: Int): Int { return l.get(i) }
+
 @lang("list.set")
 fun listSet(l: List, i: Int, x: consuming Int): Int { return l.set(i, x) }
+
 // @lang("map.putList"): the {..} map desugar appends into a parallel word-list via listPush.
 @lang("map.putList")
 fun listPush(l: List, x: consuming Int): Int { return l.push(x) }
+
 @lang("list.new")
 fun list(): List { return List(0, 4, __rawAlloc(4 * 8)) }
 
@@ -63,26 +69,39 @@ fun list(): List { return List(0, 4, __rawAlloc(4 * 8)) }
 // @arc(manual): Map, like List, is leak-managed (keys/vals are type-erased word Lists, containers nest).
 @arc(manual)
 class Map(var keys: List, var vals: List)
+
 @lang("map.new")
 fun mapNewM(): Map { return Map(listNew(), listNew()) }
+
 fun map(): Map { return mapNewM() }
+
 fun Map_size(m: Map): Int { return listLen(m.keys) }
+
 fun Map_get(m: Map, k: String): Int { var i = 0 while (i < listLen(m.keys)) { if (strEq(listGet(m.keys, i), k)) { return listGet(m.vals, i) } i = i + 1 } return 0 }
+
 fun Map_has(m: Map, k: String): Bool { var i = 0 while (i < listLen(m.keys)) { if (strEq(listGet(m.keys, i), k)) { return true } i = i + 1 } return false }
+
 // m.set / m["k"]=v : update k's value in place, else append (k, v).
 fun Map_set(m: Map, k: String, v: Int): Int { var i = 0 while (i < listLen(m.keys)) { if (strEq(listGet(m.keys, i), k)) { listSet(m.vals, i, v) return 0 } i = i + 1 } listPush(m.keys, k) listPush(m.vals, v) return 0 }
+
 // the keys, in insertion order — for iteration (`for (k in m.keys())`).
 fun Map_keys(m: Map): List { return m.keys }
+
 // Int-keyed path (m[intKey]): `==` compare instead of strEq.
 fun Map_getI(m: Map, k: Int): Int { var i = 0 while (i < listLen(m.keys)) { if (listGet(m.keys, i) == k) { return listGet(m.vals, i) } i = i + 1 } return 0 }
+
 fun Map_setI(m: Map, k: Int, v: Int): Int { var i = 0 while (i < listLen(m.keys)) { if (listGet(m.keys, i) == k) { listSet(m.vals, i, v) return 0 } i = i + 1 } listPush(m.keys, k) listPush(m.vals, v) return 0 }
+
 // index-dispatch entry points (unchanged names, now over the real Map): klower lowerIndex/lowerIndexStore
 // route m[k]/m[k]=v here, and these forward to the Map methods above.
 @lang("map.getS")
 fun __mapGetS(m: Map, k: String): Int { return Map_get(m, k) }
+
 @lang("map.getI")
 fun __mapGetI(m: Map, k: Int): Int { return Map_getI(m, k) }
+
 @lang("map.setS")
 fun __mapSetS(m: Map, k: String, v: Int): Int { return Map_set(m, k, v) }
+
 @lang("map.setI")
 fun __mapSetI(m: Map, k: Int, v: Int): Int { return Map_setI(m, k, v) }

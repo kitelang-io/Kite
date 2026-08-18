@@ -1,7 +1,11 @@
 struct Acc(var total: Int, var count: Int)
-fun record(acc: Acc, v: Int): Int { acc.total = acc.total + v  acc.count = acc.count + 1  return 0 }
+
+fun record(acc: Acc, v: Int): Int { acc.total = acc.total + v acc.count = acc.count + 1 return 0 }
+
 fun mean(acc: Acc): Int { if (acc.count == 0) { return 0 } return acc.total / acc.count }
+
 fun each(xs: List, f: (Int) -> Int): Int { for (v in xs) { f(v) } return 0 }
+
 fun main(): Int {
   val a = Acc(0, 0)
   val xs = [10, 20, 30, 40]

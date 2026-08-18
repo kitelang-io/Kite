@@ -2,7 +2,7 @@ import kite::text::StringBuilder
 
 // triple-quoted raw string: spans lines, no backslash escapes, still interpolates
 fun banner(name: String): String {
-    return """
+  return """
     ================
      hello, $name
      path: C:\Users\kite\bin   (backslashes are literal here)

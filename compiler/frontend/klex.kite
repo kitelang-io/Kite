@@ -20,12 +20,17 @@
 struct Lx(val src: String, val n: Int, var pos: Int)
 
 fun cur(lx: Lx): Int { if (lx.pos < lx.n) { return charAt(lx.src, lx.pos) } return 0 }
+
 fun nxt(lx: Lx): Int { if (lx.pos + 1 < lx.n) { return charAt(lx.src, lx.pos + 1) } return 0 }
+
 fun at2(lx: Lx): Int { if (lx.pos + 2 < lx.n) { return charAt(lx.src, lx.pos + 2) } return 0 }
-fun advance(lx: Lx): Int { lx.pos = lx.pos + 1 ; return 0 }
+
+fun advance(lx: Lx): Int { lx.pos = lx.pos + 1; return 0 }
 
 fun isDigit(c: Int): Bool { return c >= 48 && c <= 57 }
+
 fun isAlpha(c: Int): Bool { return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c == 95 }
+
 fun isAlnum(c: Int): Bool { return isAlpha(c) || isDigit(c) }
 
 fun startsWith(s: String, p: String): Bool {
@@ -51,36 +56,38 @@ fun canEnd(s: String): Bool {
 // --- comments + whitespace (mirrors lexer.ml skip_trivia / skip_comment); the
 //     return value is 1 iff a line break was crossed (for ATI). -----------------
 fun skipLine(lx: Lx): Int {
-  while (cur(lx) != 10 && cur(lx) != 0) { advance(lx) }       // stop AT the newline
+  while (cur(lx) != 10 && cur(lx) != 0) { advance(lx) } // stop AT the newline
   return 0
 }
+
 fun skipBlock(lx: Lx): Int {
   var depth = 1
   var sawNl = 0
   while (depth > 0) {
     val c = cur(lx)
     val d = nxt(lx)
-    if (c == 0) { depth = 0 }                                  // EOF: bail
-    else { if (c == 47 && d == 42) { advance(lx) ; advance(lx) ; depth = depth + 1 }
-    else { if (c == 42 && d == 47) { advance(lx) ; advance(lx) ; depth = depth - 1 }
-    else { if (c == 10) { sawNl = 1 ; advance(lx) } else { advance(lx) } } } }
+    if (c == 0) { depth = 0 } // EOF: bail
+    else { if (c == 47 && d == 42) { advance(lx); advance(lx); depth = depth + 1 }
+      else { if (c == 42 && d == 47) { advance(lx); advance(lx); depth = depth - 1 }
+        else { if (c == 10) { sawNl = 1; advance(lx) } else { advance(lx) } } } }
   }
   return sawNl
 }
+
 fun skipTrivia(lx: Lx): Int {
   var sawNl = 0
   var go = 1
   while (go == 1) {
     val c = cur(lx)
-    if (c == 10) { sawNl = 1 ; advance(lx) }
+    if (c == 10) { sawNl = 1; advance(lx) }
     else { if (c == 32 || c == 9 || c == 13) { advance(lx) }
-    else {
-      if (c == 47) {                                           // '/'
-        val d = nxt(lx)
-        if (d == 47) { advance(lx) ; advance(lx) ; skipLine(lx) }
-        else { if (d == 42) { advance(lx) ; advance(lx) ; if (skipBlock(lx) == 1) { sawNl = 1 } }
-        else { go = 0 } }                                      // a real SLASH operator
-      } else { go = 0 } }
+      else {
+        if (c == 47) { // '/'
+          val d = nxt(lx)
+          if (d == 47) { advance(lx); advance(lx); skipLine(lx) }
+          else { if (d == 42) { advance(lx); advance(lx); if (skipBlock(lx) == 1) { sawNl = 1 } }
+            else { go = 0 } } // a real SLASH operator
+        } else { go = 0 } }
     }
   }
   return sawNl
@@ -135,7 +142,7 @@ fun readIdent(lx: Lx): String {
 fun readNumber(lx: Lx): String {
   val start = lx.pos
   while (isDigit(cur(lx))) { advance(lx) }
-  if (cur(lx) == 46 && isDigit(nxt(lx))) {                     // '.' then digit -> float
+  if (cur(lx) == 46 && isDigit(nxt(lx))) { // '.' then digit -> float
     advance(lx)
     while (isDigit(cur(lx))) { advance(lx) }
     val f = substr(lx.src, start, lx.pos - start)
@@ -146,20 +153,20 @@ fun readNumber(lx: Lx): String {
 }
 
 fun readChar(lx: Lx): String {
-  advance(lx)                                                  // opening '
+  advance(lx) // opening '
   var code = 0
-  if (cur(lx) == 92) {                                         // escape
+  if (cur(lx) == 92) { // escape
     advance(lx)
     val e = cur(lx)
     if (e == 110) { code = 10 } else {
-    if (e == 116) { code = 9 } else {
-    if (e == 114) { code = 13 } else {
-    if (e == 92) { code = 92 } else {
-    if (e == 39) { code = 39 } else {
-    if (e == 48) { code = 0 } else { code = e } } } } } }
+      if (e == 116) { code = 9 } else {
+        if (e == 114) { code = 13 } else {
+          if (e == 92) { code = 92 } else {
+            if (e == 39) { code = 39 } else {
+              if (e == 48) { code = 0 } else { code = e } } } } } }
     advance(lx)
-  } else { code = cur(lx) ; advance(lx) }
-  advance(lx)                                                  // closing '
+  } else { code = cur(lx); advance(lx) }
+  advance(lx) // closing '
   return concat("CHAR(", concat(intToStr(code), ")"))
 }
 
@@ -179,10 +186,10 @@ fun escapeS(s: String): String {
     val c = charAt(s, i)
     if (c == 92) { out = concat(out, "\\\\") }
     else { if (c == 34) { out = concat(out, "\\\"") }
-    else { if (c == 10) { out = concat(out, "\\n") }
-    else { if (c == 9) { out = concat(out, "\\t") }
-    else { if (c == 13) { out = concat(out, "\\r") }
-    else { out = concat(out, substr(s, i, 1)) } } } } }
+      else { if (c == 10) { out = concat(out, "\\n") }
+        else { if (c == 9) { out = concat(out, "\\t") }
+          else { if (c == 13) { out = concat(out, "\\r") }
+            else { out = concat(out, substr(s, i, 1)) } } } } }
     i = i + 1
   }
   return out
@@ -206,7 +213,7 @@ fun tokenizeSub(sub: String): String {
     if (lx.pos >= lx.n) { go = 0 }
     else {
       val t = tokStr(lx)
-      if (first == 1) { out = t ; first = 0 } else { out = concat(out, concat(" ", t)) }
+      if (first == 1) { out = t; first = 0 } else { out = concat(out, concat(" ", t)) }
     }
   }
   return out
@@ -221,8 +228,8 @@ fun atClose(lx: Lx, triple: Int): Bool {
 fun readString(lx: Lx): String {
   var triple = 0
   if (cur(lx) == 34 && nxt(lx) == 34 && at2(lx) == 34) { triple = 1 }
-  advance(lx)                                                  // opening quote
-  if (triple == 1) { advance(lx) ; advance(lx) }
+  advance(lx) // opening quote
+  if (triple == 1) { advance(lx); advance(lx) }
   var out = ""
   var nparts = 0
   var hasInterp = 0
@@ -242,54 +249,54 @@ fun readString(lx: Lx): String {
         val rawp = substr(lx.src, wholeStart, lx.pos - wholeStart)
         if (triple == 1) { payload = escapeS(rawp) } else { payload = rawp }
       }
-      advance(lx)                                              // closing quote
-      if (triple == 1) { advance(lx) ; advance(lx) }
+      advance(lx) // closing quote
+      if (triple == 1) { advance(lx); advance(lx) }
       scanning = 0
     } else {
       val c = cur(lx)
-      if (c == 0) { scanning = 0 }                             // unterminated: bail
+      if (c == 0) { scanning = 0 } // unterminated: bail
       else {
-        if (triple == 0 && c == 92) { advance(lx) ; advance(lx) }   // escape: stays in chunk
+        if (triple == 0 && c == 92) { advance(lx); advance(lx) } // escape: stays in chunk
         else {
-          if (c == 36 && nxt(lx) == 123) {                     // ${ expr }
+          if (c == 36 && nxt(lx) == 123) { // ${ expr }
             if (lx.pos > chunkStart) {
               val chunk = substr(lx.src, chunkStart, lx.pos - chunkStart)
               out = appendPart(out, nparts, strPart(chunk, triple))
               nparts = nparts + 1
             }
             hasInterp = 1
-            advance(lx) ; advance(lx)                          // $ {
+            advance(lx); advance(lx) // $ {
             val subStart = lx.pos
             var depth = 1
             var sc = 1
             while (sc == 1) {
               val cc = cur(lx)
               if (cc == 0) { sc = 0 }
-              else { if (cc == 123) { depth = depth + 1 ; advance(lx) }
-              else { if (cc == 125) { depth = depth - 1 ; if (depth == 0) { sc = 0 } else { advance(lx) } }
-              else { advance(lx) } } }
+              else { if (cc == 123) { depth = depth + 1; advance(lx) }
+                else { if (cc == 125) { depth = depth - 1; if (depth == 0) { sc = 0 } else { advance(lx) } }
+                  else { advance(lx) } } }
             }
             val sub = substr(lx.src, subStart, lx.pos - subStart)
-            advance(lx)                                        // closing }
+            advance(lx) // closing }
             out = appendPart(out, nparts, concat("expr(", concat(tokenizeSub(sub), ")")))
             nparts = nparts + 1
             chunkStart = lx.pos
           } else {
-            if (c == 36 && isAlpha(nxt(lx))) {                 // $ident
+            if (c == 36 && isAlpha(nxt(lx))) { // $ident
               if (lx.pos > chunkStart) {
                 val chunk = substr(lx.src, chunkStart, lx.pos - chunkStart)
                 out = appendPart(out, nparts, strPart(chunk, triple))
                 nparts = nparts + 1
               }
               hasInterp = 1
-              advance(lx)                                      // $
+              advance(lx) // $
               val s0 = lx.pos
               while (isAlnum(cur(lx))) { advance(lx) }
               val name = substr(lx.src, s0, lx.pos - s0)
               out = appendPart(out, nparts, concat("expr(IDENT(", concat(name, "))")))
               nparts = nparts + 1
               chunkStart = lx.pos
-            } else { advance(lx) }                             // literal char
+            } else { advance(lx) } // literal char
           }
         }
       }
@@ -301,7 +308,7 @@ fun readString(lx: Lx): String {
 
 fun readOp(lx: Lx): String {
   val c = cur(lx)
-  advance(lx)                                                  // consume c; cur is now the lookahead
+  advance(lx) // consume c; cur is now the lookahead
   val d = cur(lx)
   if (c == 40) { return "LPAREN" }
   if (c == 41) { return "RPAREN" }
@@ -312,30 +319,30 @@ fun readOp(lx: Lx): String {
   if (c == 44) { return "COMMA" }
   if (c == 59) { return "SEMI" }
   if (c == 64) { return "AT" }
-  if (c == 46) { if (d == 46) { advance(lx) ; return "DOTDOT" } return "DOT" }
-  if (c == 58) { if (d == 58) { advance(lx) ; return "COLONCOLON" } return "COLON" }
+  if (c == 46) { if (d == 46) { advance(lx); return "DOTDOT" } return "DOT" }
+  if (c == 58) { if (d == 58) { advance(lx); return "COLONCOLON" } return "COLON" }
   if (c == 43) { return "PLUS" }
   if (c == 42) { return "STAR" }
   if (c == 47) { return "SLASH" }
   if (c == 37) { return "PERCENT" }
-  if (c == 45) { if (d == 62) { advance(lx) ; return "ARROW" } return "MINUS" }
+  if (c == 45) { if (d == 62) { advance(lx); return "ARROW" } return "MINUS" }
   if (c == 61) {
-    if (d == 61) { advance(lx) ; return "EQ" }
-    if (d == 62) { advance(lx) ; return "FATARROW" }
+    if (d == 61) { advance(lx); return "EQ" }
+    if (d == 62) { advance(lx); return "FATARROW" }
     return "ASSIGN"
   }
   if (c == 33) {
-    if (d == 61) { advance(lx) ; return "NEQ" }
-    if (d == 33) { advance(lx) ; return "BANGBANG" }
+    if (d == 61) { advance(lx); return "NEQ" }
+    if (d == 33) { advance(lx); return "BANGBANG" }
     return "NOT"
   }
-  if (c == 60) { if (d == 61) { advance(lx) ; return "LE" } return "LT" }
-  if (c == 62) { if (d == 61) { advance(lx) ; return "GE" } return "GT" }
-  if (c == 38) { if (d == 38) { advance(lx) ; return "ANDAND" } return "ERR" }
-  if (c == 124) { if (d == 124) { advance(lx) ; return "OROR" } return "PIPE" }
+  if (c == 60) { if (d == 61) { advance(lx); return "LE" } return "LT" }
+  if (c == 62) { if (d == 61) { advance(lx); return "GE" } return "GT" }
+  if (c == 38) { if (d == 38) { advance(lx); return "ANDAND" } return "ERR" }
+  if (c == 124) { if (d == 124) { advance(lx); return "OROR" } return "PIPE" }
   if (c == 63) {
-    if (d == 46) { advance(lx) ; return "QDOT" }
-    if (d == 58) { advance(lx) ; return "ELVIS" }
+    if (d == 46) { advance(lx); return "QDOT" }
+    if (d == 58) { advance(lx); return "ELVIS" }
     return "QUESTION"
   }
   return "ERR"
@@ -345,29 +352,29 @@ fun tokStr(lx: Lx): String {
   val c = cur(lx)
   if (isDigit(c)) { return readNumber(lx) }
   if (isAlpha(c)) { return readIdent(lx) }
-  if (c == 34) { return readString(lx) }                       // "
-  if (c == 39) { return readChar(lx) }                         // '
+  if (c == 34) { return readString(lx) } // "
+  if (c == 39) { return readChar(lx) } // '
   return readOp(lx)
 }
 
 // Main scan loop: mirrors lexer.ml tokenize, including ATI NEWLINE + trailing EOF.
 fun lexAll(src: String): Int {
   val lx = Lx(src, strLen(src), 0)
-  var last = "NEWLINE"                                         // start as if just after a newline
+  var last = "NEWLINE" // start as if just after a newline
   var count = 0
   var go = 1
   while (go == 1) {
     val sawNl = skipTrivia(lx)
-    if (lx.pos >= lx.n) { println("EOF") ; count = count + 1 ; go = 0 }
+    if (lx.pos >= lx.n) { println("EOF"); count = count + 1; go = 0 }
     else {
       var nextCont = 0
       if (cur(lx) == 46) { nextCont = 1 }
       if (cur(lx) == 63 && nxt(lx) == 46) { nextCont = 1 }
       if (sawNl == 1 && canEnd(last) && nextCont == 0) {
-        println("NEWLINE") ; last = "NEWLINE" ; count = count + 1
+        println("NEWLINE"); last = "NEWLINE"; count = count + 1
       } else {
         val t = tokStr(lx)
-        println(t) ; last = t ; count = count + 1
+        println(t); last = t; count = count + 1
       }
     }
   }
@@ -376,7 +383,7 @@ fun lexAll(src: String): Int {
 
 // Reads the source path from argv (macOS entry ABI: argc in x0, argv in x1), so it is parallel-safe.
 fun main(argc: Int, argv: Int): Int {
-  if (argc < 2) { println("usage: klex <file.kite>") ; return 1 }
+  if (argc < 2) { println("usage: klex <file.kite>"); return 1 }
   val src = readFile(__argv(argv, 1))
-  return lexAll(src)                                           // exit code = token count (mod 256)
+  return lexAll(src) // exit code = token count (mod 256)
 }

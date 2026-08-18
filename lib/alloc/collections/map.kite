@@ -1,17 +1,19 @@
 // kite::alloc::collections::map — an Int->Int map on kite::alloc::collections::vec. Method style;
 // its methods call the Vec's methods (self.keys.push / .get / .len) — nested method dispatch.
 import kite::alloc::collections::vec
+
 class IntMap(val keys: Vec, val vals: Vec) {
   fun put(self, k: Int, v: Int): Int {
     var i = 0
-    while (i < self.keys.len()) { if (self.keys.get(i) == k) { self.vals.set(i, v)  return 0 }  i = i + 1 }
-    self.keys.push(k)  self.vals.push(v)  return 0
+    while (i < self.keys.len()) { if (self.keys.get(i) == k) { self.vals.set(i, v) return 0 } i = i + 1 }
+    self.keys.push(k) self.vals.push(v) return 0
   }
   fun get(self, k: Int, dflt: Int): Int {
     var i = 0
-    while (i < self.keys.len()) { if (self.keys.get(i) == k) { return self.vals.get(i) }  i = i + 1 }
+    while (i < self.keys.len()) { if (self.keys.get(i) == k) { return self.vals.get(i) } i = i + 1 }
     return dflt
   }
   fun size(self): Int { return self.keys.len() }
 }
+
 fun mapNew(): IntMap { return IntMap(vecNew(), vecNew()) }

@@ -1,6 +1,7 @@
 import kite::alloc::string::strbuf
+
 fun main(): Int {
   val s = strFrom("abc")
-  s.pushByte(33)                         // '!' -> "abc!"
-  return s.size() + s.byteAt(3)          // 4 + 33 = 37
+  s.pushByte(33) // '!' -> "abc!"
+  return s.size() + s.byteAt(3) // 4 + 33 = 37
 }

@@ -4,11 +4,11 @@
 fun square(n: Int): Int = n * n
 
 fun triangular(n: Int): Int {
-    return n * (n + 1) / 2
+  return n * (n + 1) / 2
 }
 
 fun main(): Int {
-    val a = square(6)        // 36
-    val b = triangular(10)   // 55
-    return b - a + 5         // 24
+  val a = square(6) // 36
+  val b = triangular(10) // 55
+  return b - a + 5 // 24
 }

@@ -1,0 +1,15 @@
+// Phase 0.5 regression: a genuinely UNSUPPORTED construct must HARD-FAIL the build, not silently corrupt
+// the binary. Before Phase 0.5, klower's lowFail printed "unsupported construct" to stdout and RETURNED 0,
+// so lowering continued and emitted a garbage binary that "built" with exit 0. Now lowFail emits an error
+// Diagnostic to stderr and calls __abort() → non-zero exit, no binary written.
+//
+// The construct below — assigning into a String index (`s[i] = v`) — is lowered by klower's lowerAssignInto
+// straight to lowFail("cannot store into an immutable String index"). The gate compiles this with
+// `--no-check` (so it reaches the lowerer, not just the checker) and asserts a non-zero exit + no output
+// binary + a stderr diagnostic. If a future phase makes String index-store supported, swap this fixture for
+// another still-unsupported construct rather than deleting the assertion.
+fun main(): Int {
+  var s = "hello"
+  s[0] = 88
+  return 0
+}

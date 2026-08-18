@@ -1,5 +1,9 @@
 trait Show { fun show(self): Int }
+
 struct A(val x: Int)
+
 impl Show for A { fun show(self): Int = self.x }
-fun describe<T: Show>(x: T): Int = x.show()
+
+fun describe < T: Show > (x: T): Int = x.show()
+
 fun m(): Int { return describe(5) }

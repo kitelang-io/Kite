@@ -1,5 +1,7 @@
 struct Inner(val v: Int)
+
 struct Outer(val a: Inner, val b: Inner)
+
 fun main(): Int {
   val i1 = Inner(5)
   val i2 = Inner(7)

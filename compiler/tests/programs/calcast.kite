@@ -1,0 +1,115 @@
+// stage1/calcast.kite — recursive-descent parser that BUILDS an AST (enum) and a
+// separate evalAst walker that evaluates it via when-pattern-matching.
+// Mirrors a real compiler: parse -> AST -> walk. Written in Kite, compiled by Fledge.
+
+struct P(val src: String, var pos: Int)
+
+enum Ast {
+  Num(Int);
+  Add(Ast, Ast);
+  Sub(Ast, Ast);
+  Mul(Ast, Ast);
+  Div(Ast, Ast)
+}
+
+fun peek(p: P): Int {
+  if (p.pos >= strLen(p.src)) {
+    return 0
+  }
+  return charAt(p.src, p.pos)
+}
+
+fun isDigit(c: Int): Bool {
+  return c >= 48 && c <= 57
+}
+
+fun skipWs(p: P): Int {
+  while (peek(p) == 32) {
+    p.pos = p.pos + 1
+  }
+  return 0
+}
+
+fun parseInt(p: P): Int {
+  var v = 0
+  while (isDigit(peek(p))) {
+    v = v * 10 + (peek(p) - 48)
+    p.pos = p.pos + 1
+  }
+  return v
+}
+
+fun parseFactor(p: P): Ast {
+  skipWs(p)
+  val c = peek(p)
+  if (c == 40) { // '('
+    p.pos = p.pos + 1 // consume '('
+    val v: Ast = parseExpr(p)
+    skipWs(p)
+    p.pos = p.pos + 1 // consume ')'
+    return v
+  }
+  val n = parseInt(p)
+  return Num(n)
+}
+
+fun parseTerm(p: P): Ast {
+  var v: Ast = parseFactor(p)
+  skipWs(p)
+  var op = peek(p)
+  while (op == 42 || op == 47) { // '*' or '/'
+    p.pos = p.pos + 1
+    val rhs: Ast = parseFactor(p)
+    if (op == 42) {
+      v = Mul(v, rhs)
+    } else {
+      v = Div(v, rhs)
+    }
+    skipWs(p)
+    op = peek(p)
+  }
+  return v
+}
+
+fun parseExpr(p: P): Ast {
+  var v: Ast = parseTerm(p)
+  skipWs(p)
+  var op = peek(p)
+  while (op == 43 || op == 45) { // '+' or '-'
+    p.pos = p.pos + 1
+    val rhs: Ast = parseTerm(p)
+    if (op == 43) {
+      v = Add(v, rhs)
+    } else {
+      v = Sub(v, rhs)
+    }
+    skipWs(p)
+    op = peek(p)
+  }
+  return v
+}
+
+fun parse(src: String): Ast {
+  val p = P(src, 0)
+  return parseExpr(p)
+}
+
+fun evalAst(e: Ast): Int {
+  when (e) {
+    Num(n) -> return n;
+    Add(a, b) -> return evalAst(a) + evalAst(b);
+    Sub(a, b) -> return evalAst(a) - evalAst(b);
+    Mul(a, b) -> return evalAst(a) * evalAst(b);
+    Div(a, b) -> return evalAst(a) / evalAst(b);
+    else -> return 0
+  }
+}
+
+fun main(): Int {
+  val a: Ast = parse("(2+3)*4")
+  println(intToStr(evalAst(a))) // 20
+  val b: Ast = parse("2+3*4")
+  println(intToStr(evalAst(b))) // 14
+  val c: Ast = parse("2 * 3 + 4 * 5")
+  return evalAst(c) // 26
+}

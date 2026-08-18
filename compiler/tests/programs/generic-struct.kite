@@ -1,3 +1,5 @@
 struct Box<T>(val v: T)
+
 fun unbox<T>(b: Box<T>): T = b.v
-fun main(): Int { val b = Box(99)  return unbox(b) + b.v }
+
+fun main(): Int { val b = Box(99) return unbox(b) + b.v }

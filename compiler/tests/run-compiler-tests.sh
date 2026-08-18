@@ -28,8 +28,8 @@ check() {
 
 pass=0; fail=0
 TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
-       bootstrap/calc.kite:26 bootstrap/calcast.kite:26 bootstrap/toklist.kite:26
-       bootstrap/letcalc.kite:48 bootstrap/tokenize.kite:13 bootstrap/minikite.kite:30 bootstrap/lex.kite:9
+       compiler/tests/programs/calc.kite:26 compiler/tests/programs/calcast.kite:26 compiler/tests/programs/toklist.kite:26
+       compiler/tests/programs/letcalc.kite:48 compiler/tests/programs/tokenize.kite:13 compiler/tests/programs/minikite.kite:30 compiler/tests/programs/lex.kite:9
        compiler/tests/programs/closures-fold.kite:15 compiler/tests/programs/closures-escape.kite:15
        compiler/tests/programs/closures-nested.kite:6 compiler/tests/programs/closures-foldmul.kite:120
        compiler/tests/programs/for-each.kite:31 compiler/tests/programs/methods.kite:20
@@ -56,7 +56,9 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/break-continue.kite:77 compiler/tests/programs/compound-assign.kite:96 compiler/tests/programs/exclusive-range.kite:57
        compiler/tests/programs/property-getset.kite:53
        compiler/tests/programs/map-class.kite:166
-       compiler/tests/programs/operator-overload.kite:210 compiler/tests/programs/string-methods.kite:114)
+       compiler/tests/programs/operator-overload.kite:210 compiler/tests/programs/string-methods.kite:114
+       compiler/tests/programs/bool-not-call.kite:7
+       compiler/tests/programs/big-frame-later-globals.kite:42)
 for t in $TESTS; do
   if check "${t%:*}" "${t##*:}"; then pass=$((pass+1)); else fail=$((fail+1)); fi
 done
