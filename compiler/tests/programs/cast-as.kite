@@ -1,0 +1,34 @@
+// Phase 3 regression: the `as` cast. Integer width truncation (unsigned masks / signed sign-extends),
+// int<->float conversion. Exit code is a checksum; each passing check adds 1.
+fun main(): Int {
+  var acc = 0
+
+  // Narrowing to unsigned masks (zero-extend). 300 as U8 = 300 & 0xff = 44.
+  if ((300 as U8) == 44) { acc = acc + 1 }             // 1
+  if ((70000 as U16) == 4464) { acc = acc + 1 }        // 2
+  if ((0xDEADBEEF as U32) == 3735928559) { acc = acc + 1 } // 3
+
+  // Narrowing to signed sign-extends. 0xFF as I8 = -1, 0x80 as I8 = -128.
+  if ((0xFF as I8) == (0 - 1)) { acc = acc + 1 }       // 4
+  if ((0x80 as I8) == (0 - 128)) { acc = acc + 1 }     // 5
+  if ((0xFFFF as I16) == (0 - 1)) { acc = acc + 1 }    // 6
+  if ((0x8000 as I16) == (0 - 32768)) { acc = acc + 1 } // 7
+
+  // Widening to the word (U64/Int) is identity for an in-range value.
+  val small: U8 = 200u8
+  if ((small as U64) == 200) { acc = acc + 1 }         // 8
+
+  // int -> float -> int round trip.
+  val f = 7 as Double
+  if ((f as Int) == 7) { acc = acc + 1 }               // 9
+
+  // float truncation toward zero.
+  val g = 3.9
+  if ((g as Int) == 3) { acc = acc + 1 }               // 10
+
+  // cast changes signedness of an operation: (0xFF as U8) as a U8 is 255, unsigned-compared > 1.
+  val b = 0xFF as U8
+  if (b > (1 as U8)) { acc = acc + 1 }                 // 11
+
+  return acc                                            // 11
+}

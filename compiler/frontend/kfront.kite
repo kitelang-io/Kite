@@ -272,6 +272,7 @@ fun kw(w: String): Int {
   if (w == "const") { return 80 }
   if (w == "use") { return 81 }
   if (w == "until") { return 84 }
+  if (w == "as") { return 85 }
   return 1
 }
 
@@ -411,6 +412,7 @@ enum FExpr {
   FESafeField(FExpr, String); FENotNull(FExpr); FEElvis(FExpr, FExpr); FEIndex(FExpr, FExpr); FETypeApp(FExpr, String);
   FEList(List); FEMap(List); FELambda(String, FExpr); FEInterp(List, Int);
   FEBlock(List, FExpr); FEIf(FExpr, FExpr, FExpr); FEWhen(Int, String, FExpr, List);
+  FECast(FExpr, String); // `e as T` — numeric width/sign conversion (Phase 3)
   FERet(FExpr); FEBrk; FECont; FENoRes
 }
 
@@ -913,9 +915,17 @@ fun isAdd(k: Int): Bool { return k == 30 || k == 31 }
 
 fun isRel(k: Int): Bool { return k == 37 || k == 38 || k == 39 || k == 40 }
 
-fun parseMul(p: P): FExpr {
+// `as` binds tighter than the arithmetic operators but looser than unary/postfix (Rust's placement):
+// `x as U8 + 1` parses as `(x as U8) + 1`, `-x as U8` as `(-x) as U8`. Left-associative chain.
+fun parseCast(p: P): FExpr {
   var e = parseUnary(p)
-  while (isMul(pk(p))) { val o = opStr(pk(p)); eat(p); e = FEBin(o, e, parseUnary(p)) }
+  while (pk(p) == 85) { eat(p); e = FECast(e, parseTy(p)) }
+  return e
+}
+
+fun parseMul(p: P): FExpr {
+  var e = parseCast(p)
+  while (isMul(pk(p))) { val o = opStr(pk(p)); eat(p); e = FEBin(o, e, parseCast(p)) }
   return e
 }
 
@@ -1096,6 +1106,7 @@ fun parseStmt(p: P): FStmt {
 
 fun parseParam(p: P): FParam {
   val nm = ptext(p); eat(p)
+  if (pk(p) != 25) { return FParam(nm, "") } // untyped param (no ':') — don't eat the return-type colon
   eat(p) // ':'
   var pre = ""
   if (pk(p) == 71) { eat(p); pre = "inout " }
@@ -1422,6 +1433,7 @@ fun printExpr(ind: Int, e: FExpr): Int {
     FEElvis(a, b) -> printBin2(ind, "elvis ?:", a, b)
     FEIndex(a, ix) -> printBin2(ind, "index", a, ix)
     FETypeApp(x, ta) -> lineThen1(ind, "type-app ::<" + (ta + ">"), x)
+    FECast(x, ty) -> lineThen1(ind, "cast " + ty, x)
     FEList(elems) -> printList(ind, elems)
     FEMap(ents) -> printMap(ind, ents)
     FELambda(params, body) -> printLambda(ind, params, body)

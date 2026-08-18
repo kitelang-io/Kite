@@ -1,0 +1,59 @@
+// Phase 2 regression: sized memory + packed arrays (kite::alloc::bytes) over the 16/32-bit load/store
+// and signed-load intrinsics. Verifies width truncation on store, zero- vs sign-extension on load, and
+// that packed neighbours (stride 1/2/4) do not corrupt each other. Exit code is a checksum of results.
+import kite::alloc::bytes
+
+fun main(): Int {
+  var acc = 0
+
+  // U8Array: stride 1, wraps at 256, zero-extended load.
+  val b = u8Array()
+  b.push(200)
+  b.push(300)       // 300 & 0xff = 44
+  b.push(255)
+  acc = acc + b.get(0)          // 200
+  acc = acc + b.get(1)          // 44
+  acc = acc + b.get(2)          // 255  -> 499
+
+  // U16Array: stride 2, wraps at 65536, zero-extended. Interleaved neighbours must stay independent.
+  val h = u16Array()
+  h.push(0xFFFF)                // 65535
+  h.push(0x0001)               // 1
+  h.push(70000)                // 70000 & 0xffff = 4464
+  if (h.get(0) == 65535) { acc = acc + 1 }    // 500
+  if (h.get(1) == 1) { acc = acc + 1 }        // 501
+  if (h.get(2) == 4464) { acc = acc + 1 }     // 502
+  h.set(1, 42)
+  if (h.get(1) == 42) { acc = acc + 1 }       // 503  (neighbour of a 0xFFFF cell)
+  if (h.get(0) == 65535) { acc = acc + 1 }    // 504  (unchanged after neighbour set)
+
+  // U32Array: stride 4, zero-extended, holds full 32-bit values.
+  val w = u32Array()
+  w.push(0xDEADBEEF)           // 3735928559
+  w.push(0xFFFFFFFF)           // 4294967295
+  if (w.get(0) == 3735928559) { acc = acc + 1 }   // 505
+  if (w.get(1) == 4294967295) { acc = acc + 1 }   // 506
+
+  // I8Array: stride 1, sign-extended load.
+  val sb = i8Array()
+  sb.push(0xFF)                // -1
+  sb.push(0x7F)                // 127
+  sb.push(0x80)                // -128
+  if (sb.get(0) == 0 - 1) { acc = acc + 1 }       // 507
+  if (sb.get(1) == 127) { acc = acc + 1 }         // 508
+  if (sb.get(2) == 0 - 128) { acc = acc + 1 }     // 509
+
+  // I16Array: stride 2, sign-extended load.
+  val sh = i16Array()
+  sh.push(0xFFFF)              // -1
+  sh.push(0x8000)              // -32768
+  if (sh.get(0) == 0 - 1) { acc = acc + 1 }       // 510
+  if (sh.get(1) == 0 - 32768) { acc = acc + 1 }   // 511
+
+  // I32Array: stride 4, sign-extended load.
+  val sw = i32Array()
+  sw.push(0xFFFFFFFF)          // -1
+  if (sw.get(0) == 0 - 1) { acc = acc + 1 }       // 512
+
+  return acc - 500            // 12
+}

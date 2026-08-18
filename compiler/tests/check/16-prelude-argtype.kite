@@ -1,0 +1,6 @@
+// A wrong-typed argument to a PRELUDE/lib function must be rejected, exactly like a user function
+// (toStr expects an Int; a String is passed). Before preludeSigs carried parameter types, prelude
+// calls were name-resolved but NOT arg-type-checked — an unsound gap this probe pins closed.
+fun m() {
+  val s = toStr("not an int")
+}

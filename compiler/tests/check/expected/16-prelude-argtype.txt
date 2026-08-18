@@ -1,0 +1,2 @@
+error: line 4: argument type String is not compatible with parameter Int
+1 error(s)

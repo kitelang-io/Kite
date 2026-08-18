@@ -334,6 +334,7 @@ fun tagOf(lo: Lo, e: FExpr): String {
     FEIdent(nm) -> localTag(lo, nm)
     FEThis -> localTag(lo, "this")
     FEUnary(op, x) -> if (op == "not !") { "Bool" } else { tagOf(lo, x) }
+    FECast(x, ty) -> if (ty == "Double" || ty == "Float") { "Float" } else { ty }
     FEBin(op, a, b) -> tagBin(lo, op, a, b)
     FECall(callee, args) -> callRetTag(lo, callee)
     FEField(a, f) -> fieldTag(lo, a, f)
@@ -478,6 +479,7 @@ fun fvExpr(lo: Lo, bound: List, e: FExpr, out: List): Int {
     FESafeField(a, f) -> fvExpr(lo, bound, a, out)
     FEStatic(a, f) -> fvExpr(lo, bound, a, out)
     FETypeApp(a, t) -> fvExpr(lo, bound, a, out)
+    FECast(a, ty) -> fvExpr(lo, bound, a, out)
     FENotNull(a) -> fvExpr(lo, bound, a, out)
     FEElvis(a, b) -> { fvExpr(lo, bound, a, out); fvExpr(lo, bound, b, out) }
     FEIndex(a, b) -> { fvExpr(lo, bound, a, out); fvExpr(lo, bound, b, out) }
@@ -601,9 +603,9 @@ fun ceFindFunc(funcs: List, nm: String): Int {
 // lists (build a list in a loop, concat strings, ...) and reduce an Int-valued result. FEStr yields the string
 // word; FEList builds a real list by evaluating each element; the string/list builtins run for real.
 fun ceBuildList(names: List, vals: List, kinds: List, funcs: List, es: List): Int {
-  val l = list()
+  val l = ceLNew()
   var i = 0
-  while (i < es.len()) { l.push(ceEval(names, vals, kinds, funcs, es.get(i))); i = i + 1 }
+  while (i < es.len()) { ceLPush(l, ceEval(names, vals, kinds, funcs, es.get(i))); i = i + 1 }
   return l
 }
 
@@ -676,11 +678,12 @@ fun ceEvalBin(names: List, vals: List, kinds: List, funcs: List, op: String, a: 
 }
 
 // comptime string concatenation on the erased words. Mirrors `impl Add for String` (String_add), but is
-// spelled with the raw-memory intrinsics + the free String_len so it resolves as a direct name (the checker
-// does not expose the impl-mangled String_add as a callable free name).
+// spelled with the raw-memory intrinsics + the raw ceSLen so no String-typed value flows through the
+// erased Int word (the checker does not expose the impl-mangled String_add as a callable free name, and
+// arg-type-checks String_len's String parameter).
 fun ceSConcat(a: Int, b: Int): Int {
-  val la = String_len(a)
-  val lb = String_len(b)
+  val la = ceSLen(a)
+  val lb = ceSLen(b)
   val r = __rawAlloc(la + lb + 1)
   var i = 0
   while (i < la) { __rawStoreByte(r, i, __rawLoadByte(a, i)) i = i + 1 }
@@ -713,19 +716,57 @@ fun ceLPush(w: Int, x: Int): Int {
   return 0
 }
 
-// method-call form `recv.m(args)` in comptime code. String methods run the REAL String_* ops on the erased
+// Raw Int-word String helpers for the comptime interpreter — the String counterparts of ceLLen/ceLGet/
+// ceLPush. They compute on the erased word with ONLY the untyped raw-memory intrinsics, so a String-typed
+// value never flows through the universal `Int` word (which the checker, once it arg-type-checks prelude
+// calls, would reject if the erased word were handed to String_len/String_charAt/… directly). Bodies
+// mirror lib/core/string.kite's String_len / String_substr / Int_toStr.
+fun ceSLen(w: Int): Int { var i = 0 while (__rawLoadByte(w, i) != 0) { i = i + 1 } return i }
+
+fun ceSubstr(w: Int, st: Int, len: Int): Int {
+  val r = __rawAlloc(len + 1)
+  var i = 0
+  while (i < len) { __rawStoreByte(r, i, __rawLoadByte(w, st + i)) i = i + 1 }
+  __rawStoreByte(r, len, 0)
+  return r
+}
+
+fun ceIntToStr(n: Int): Int {
+  if (n == 0) { val z = __rawAlloc(2) __rawStoreByte(z, 0, 48) __rawStoreByte(z, 1, 0) return z }
+  var neg = 0
+  var m = n
+  if (n < 0) { neg = 1 m = 0 - n }
+  var digits = 0
+  var t = m
+  while (t > 0) { digits = digits + 1 t = t / 10 }
+  val total = digits + neg
+  val r = __rawAlloc(total + 1)
+  __rawStoreByte(r, total, 0)
+  var pos = total - 1
+  var mm = m
+  while (mm > 0) { val d = mm - (mm / 10) * 10 __rawStoreByte(r, pos, 48 + d) pos = pos - 1 mm = mm / 10 }
+  if (neg == 1) { __rawStoreByte(r, 0, 45) }
+  return r
+}
+
+// A fresh empty comptime List as an erased Int word, laid out {n@0, cap@8, data@16} exactly like list()
+// (lib/alloc/collections/list.kite) so ceLGet/ceLSet/ceLPush/ceLLen operate on it. Header-less (the
+// comptime evaluator never releases these — leak-managed like the rest).
+fun ceLNew(): Int { val w = __rawAlloc(24) __rawStore(w, 0, 0) __rawStore(w, 8, 4) __rawStore(w, 16, __rawAlloc(32)) return w }
+
+// method-call form `recv.m(args)` in comptime code. String methods run the raw-word ops on the erased
 // word; List methods (the [..]/index desugar methods) run the raw-layout ops; `.len()`/`.length` (on both)
 // is routed by the receiver's inferred kind.
 fun ceMethodCall(names: List, vals: List, kinds: List, funcs: List, recv: FExpr, m: String, args: List): Int {
   val r = ceEval(names, vals, kinds, funcs, recv)
-  if (m == "charAt" && args.len() == 1) { return String_charAt(r, ceArg(names, vals, kinds, funcs, args, 0)) }
-  if (m == "substr" && args.len() == 2) { return String_substr(r, ceArg(names, vals, kinds, funcs, args, 0), ceArg(names, vals, kinds, funcs, args, 1)) }
-  if (m == "toStr" && args.len() == 0) { return Int_toStr(r) }
+  if (m == "charAt" && args.len() == 1) { return __rawLoadByte(r, ceArg(names, vals, kinds, funcs, args, 0)) }
+  if (m == "substr" && args.len() == 2) { return ceSubstr(r, ceArg(names, vals, kinds, funcs, args, 0), ceArg(names, vals, kinds, funcs, args, 1)) }
+  if (m == "toStr" && args.len() == 0) { return ceIntToStr(r) }
   if (m == "push" && args.len() == 1) { return ceLPush(r, ceArg(names, vals, kinds, funcs, args, 0)) }
   if (m == "get" && args.len() == 1) { return ceLGet(r, ceArg(names, vals, kinds, funcs, args, 0)) }
   if (m == "set" && args.len() == 2) { return ceLSet(r, ceArg(names, vals, kinds, funcs, args, 0), ceArg(names, vals, kinds, funcs, args, 1)) }
   if ((m == "len" || m == "length") && args.len() == 0) {
-    if (ceKindOf(names, kinds, funcs, recv) == "String") { return String_len(r) }
+    if (ceKindOf(names, kinds, funcs, recv) == "String") { return ceSLen(r) }
     return ceLLen(r)
   }
   return 0
@@ -739,7 +780,7 @@ fun ceCall(names: List, vals: List, kinds: List, funcs: List, callee: FExpr, arg
 }
 
 fun ceFreeCall(names: List, vals: List, kinds: List, funcs: List, fn: String, args: List): Int {
-  if (fn == "list" && args.len() == 0) { return list() }
+  if (fn == "list" && args.len() == 0) { return ceLNew() }
   val idx = ceFindFunc(funcs, fn)
   if (idx < 0) { return 0 }
   val fd: FFunc = funcs.get(idx)
@@ -1002,6 +1043,7 @@ fun lowerExpr(lo: Lo, e: FExpr): Expr {
     FEWhen(hasSubj, bind, subj, arms) -> EWhen(lowerExpr(lo, subj), lowerArms(lo, arms))
     FERet(x) -> ERet(lowerExpr(lo, x))
     FETypeApp(inner, ta) -> lowerExpr(lo, inner) // types erase: x<T> lowers to x
+    FECast(inner, ty) -> ECast(lowerExpr(lo, inner), ty) // `e as T` numeric conversion (Phase 3)
     FESafeField(a, f) -> lowerSafe(lo, a, f)
     FENotNull(a) -> lowerNotNull(lo, a)
     FEElvis(a, b) -> lowerElvis(lo, a, b)
@@ -2059,6 +2101,7 @@ fun renExpr(rc: Ren, bound: List, e: FExpr): FExpr {
     FEElvis(a, b) -> FEElvis(renExpr(rc, bound, a), renExpr(rc, bound, b))
     FEIndex(a, b) -> FEIndex(renExpr(rc, bound, a), renExpr(rc, bound, b))
     FETypeApp(a, t) -> FETypeApp(renExpr(rc, bound, a), t)
+    FECast(a, ty) -> FECast(renExpr(rc, bound, a), ty)
     FEList(es) -> FEList(renExprList(rc, bound, es))
     FEMap(ents) -> FEMap(renMap(rc, bound, ents))
     FELambda(params, body) -> FELambda(params, renExpr(rc, extendB(bound, splitLamNames(params)), body))

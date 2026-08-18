@@ -23,5 +23,9 @@ fun main(argc: Int, argv: Int): Int {
                   else { go = 0 } } } } } } }
     }
   }
-  return count
+  // Return 0 on a clean parse. (Historically this returned `count`, the number of top-level decls, but a
+  // process exit code is a byte: a file with exactly 139 decls — codegen.kite is one — would collide with
+  // 128+SIGSEGV and be misread by the harness as a segfault. Success is 0; a real crash is still 139.)
+  if (count > 0) { return 0 }
+  return 1
 }

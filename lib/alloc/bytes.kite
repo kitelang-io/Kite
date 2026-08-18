@@ -1,0 +1,127 @@
+// lib/alloc/bytes.kite — concrete, non-generic packed arrays over the Phase-2 sized-memory intrinsics
+// (kite::alloc::bytes). These are the interim before the monomorphization keystone (Phase 6): fixed-width
+// element arrays whose storage is PACKED by the element's byte stride — U8Array strides 1, U16Array 2,
+// U32Array 4 — instead of List's one-word-per-element. Six concrete types: unsigned (U8/U16/U32) zero-extend
+// on load, signed (I8/I16/I32) sign-extend on load; a width store truncates to the element width.
+//
+// Each array is a class {n: element count, cap: capacity in elements, data: heap byte-buffer}. Like the
+// language-primitive List, these OWN a heap allocation and are @arc(manual) (leak-managed): the element
+// type is a plain fixed-width scalar with no ARC, and real value-semantics/CoW arrives with the target
+// collections tier (Phase 7). NOT auto-injected — opt in with `import kite::alloc::bytes`.
+//
+// Storage note: `data` points at a raw malloc buffer; element i lives at byte offset i*stride. The sized
+// intrinsics compute the address and issue the width-specific load/store, so packing is exact (no *8 waste).
+
+// ---- U8Array: packed unsigned bytes (stride 1), zero-extended on load ----
+@arc(manual)
+class U8Array(var n: Int, var cap: Int, var data: Int) {
+  fun push(self, x: consuming Int): Int {
+    if (self.n == self.cap) {
+      if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.data = __rawRealloc(self.data, self.cap)
+    }
+    __rawStoreByte(self.data, self.n, x & 0xff)
+    self.n = self.n + 1
+    return 0
+  }
+  fun get(self, i: Int): Int { return __rawLoadByte(self.data, i) }
+  fun set(self, i: Int, x: consuming Int): Int { __rawStoreByte(self.data, i, x & 0xff) return 0 }
+  fun len(self): Int { return self.n }
+}
+
+fun u8Array(): U8Array { return U8Array(0, 4, __rawAlloc(4)) }
+
+// ---- U16Array: packed unsigned halfwords (stride 2), zero-extended on load ----
+@arc(manual)
+class U16Array(var n: Int, var cap: Int, var data: Int) {
+  fun push(self, x: consuming Int): Int {
+    if (self.n == self.cap) {
+      if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.data = __rawRealloc(self.data, self.cap * 2)
+    }
+    __rawStore16(self.data, self.n * 2, x & 0xffff)
+    self.n = self.n + 1
+    return 0
+  }
+  fun get(self, i: Int): Int { return __rawLoad16(self.data, i * 2) }
+  fun set(self, i: Int, x: consuming Int): Int { __rawStore16(self.data, i * 2, x & 0xffff) return 0 }
+  fun len(self): Int { return self.n }
+}
+
+fun u16Array(): U16Array { return U16Array(0, 4, __rawAlloc(4 * 2)) }
+
+// ---- U32Array: packed unsigned words (stride 4), zero-extended on load ----
+@arc(manual)
+class U32Array(var n: Int, var cap: Int, var data: Int) {
+  fun push(self, x: consuming Int): Int {
+    if (self.n == self.cap) {
+      if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.data = __rawRealloc(self.data, self.cap * 4)
+    }
+    __rawStore32(self.data, self.n * 4, x & 0xffffffff)
+    self.n = self.n + 1
+    return 0
+  }
+  fun get(self, i: Int): Int { return __rawLoad32(self.data, i * 4) }
+  fun set(self, i: Int, x: consuming Int): Int { __rawStore32(self.data, i * 4, x & 0xffffffff) return 0 }
+  fun len(self): Int { return self.n }
+}
+
+fun u32Array(): U32Array { return U32Array(0, 4, __rawAlloc(4 * 4)) }
+
+// ---- I8Array: packed signed bytes (stride 1), sign-extended on load ----
+@arc(manual)
+class I8Array(var n: Int, var cap: Int, var data: Int) {
+  fun push(self, x: consuming Int): Int {
+    if (self.n == self.cap) {
+      if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.data = __rawRealloc(self.data, self.cap)
+    }
+    __rawStoreByte(self.data, self.n, x & 0xff)
+    self.n = self.n + 1
+    return 0
+  }
+  fun get(self, i: Int): Int { return __rawLoad8S(self.data, i) }
+  fun set(self, i: Int, x: consuming Int): Int { __rawStoreByte(self.data, i, x & 0xff) return 0 }
+  fun len(self): Int { return self.n }
+}
+
+fun i8Array(): I8Array { return I8Array(0, 4, __rawAlloc(4)) }
+
+// ---- I16Array: packed signed halfwords (stride 2), sign-extended on load ----
+@arc(manual)
+class I16Array(var n: Int, var cap: Int, var data: Int) {
+  fun push(self, x: consuming Int): Int {
+    if (self.n == self.cap) {
+      if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.data = __rawRealloc(self.data, self.cap * 2)
+    }
+    __rawStore16(self.data, self.n * 2, x & 0xffff)
+    self.n = self.n + 1
+    return 0
+  }
+  fun get(self, i: Int): Int { return __rawLoad16S(self.data, i * 2) }
+  fun set(self, i: Int, x: consuming Int): Int { __rawStore16(self.data, i * 2, x & 0xffff) return 0 }
+  fun len(self): Int { return self.n }
+}
+
+fun i16Array(): I16Array { return I16Array(0, 4, __rawAlloc(4 * 2)) }
+
+// ---- I32Array: packed signed words (stride 4), sign-extended on load ----
+@arc(manual)
+class I32Array(var n: Int, var cap: Int, var data: Int) {
+  fun push(self, x: consuming Int): Int {
+    if (self.n == self.cap) {
+      if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.data = __rawRealloc(self.data, self.cap * 4)
+    }
+    __rawStore32(self.data, self.n * 4, x & 0xffffffff)
+    self.n = self.n + 1
+    return 0
+  }
+  fun get(self, i: Int): Int { return __rawLoad32S(self.data, i * 4) }
+  fun set(self, i: Int, x: consuming Int): Int { __rawStore32(self.data, i * 4, x & 0xffffffff) return 0 }
+  fun len(self): Int { return self.n }
+}
+
+fun i32Array(): I32Array { return I32Array(0, 4, __rawAlloc(4 * 4)) }

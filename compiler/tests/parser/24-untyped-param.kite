@@ -1,0 +1,7 @@
+fun add(a: Int, b): Int {
+  return a + b
+}
+
+fun pick(x, y: String): String {
+  return y
+}
