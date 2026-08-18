@@ -1,9 +1,15 @@
 trait Show { fun show(self): Int }
+
 struct A(val x: Int)
+
 struct B(val y: Int)
+
 impl Show for A { fun show(self): Int = self.x * 2 }
+
 impl Show for B { fun show(self): Int = self.y + 100 }
-fun describe<T: Show>(x: T): Int = x.show()
+
+fun describe < T: Show > (x: T): Int = x.show()
+
 fun main(): Int {
   val a = A(7)
   val b = B(5)

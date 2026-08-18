@@ -4,7 +4,7 @@ import kite::core::option
 import kite::alloc::collections
 import "examples/jq/jv.kite"
 
-fun numOf(j: Json): Int { return when (j) { JNum(n) -> n ; else -> 0 } }
+fun numOf(j: Json): Int { return when (j) { JNum(n) -> n; else -> 0 } }
 
 // length: elements of an array, keys of an object, characters of a string, |value| of a number, 0 for null.
 fun lengthOf(j: Json): Int {
@@ -40,7 +40,7 @@ fun keysOf(j: Json): Json {
     JObj(es) -> { for (e in es) { ks.push(entryKey(e)) } }
     else -> 0
   }
-  var i = 1                                         // insertion sort (key sets are small)
+  var i = 1 // insertion sort (key sets are small)
   while (i < ks.len()) {
     val key = ks.get(i)
     var d = i - 1

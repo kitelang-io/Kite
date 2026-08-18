@@ -1,3 +1,4 @@
 // kite::std::io — file I/O over the runtime builtins.
 fun readAll(path: String): String { return readFile(path) }
+
 fun writeAll(path: String, contents: String): Int { return writeFile(path, contents) }

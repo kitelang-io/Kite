@@ -15,6 +15,6 @@
 //                  out.write("(${self.x}, ${self.y})")
 
 impl Display for Point {
-    fun fmt(self, out: mut Formatter): Result<Unit, FmtError> =
-        try out.write("(${self.x}, ${self.y})")
+  fun fmt(self, out: mut Formatter): Result<Unit, FmtError> =
+  try out.write("(${self.x}, ${self.y})")
 }

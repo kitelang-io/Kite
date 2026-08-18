@@ -3,7 +3,7 @@
 // point it at any file and run copies in parallel — no shared /tmp.
 
 fun main(argc: Int, argv: Int): Int {
-  if (argc < 2) { println("usage: kparse <file.kite>") ; return 1 }
+  if (argc < 2) { println("usage: kparse <file.kite>"); return 1 }
   val src = readFile(__argv(argv, 1))
   val p = P(lex(src), 0)
   var count = 0
@@ -13,14 +13,14 @@ fun main(argc: Int, argv: Int): Int {
     else {
       val annos = parseAnnos(p)
       val k = pk(p)
-      if (k == 10) { printFunc(parseFunc(p, annos)) ; count = count + 1 }                  // fun
-      else { if (k == 54) { printTDecl(parseTypeDecl(p, annos, 0)) ; count = count + 1 }    // struct
-      else { if (k == 65) { printTDecl(parseTypeDecl(p, annos, 1)) ; count = count + 1 }    // class
-      else { if (k == 55) { printEDecl(parseEnum(p, annos)) ; count = count + 1 }           // enum
-      else { if (k == 66) { printTrait(parseTrait(p, annos)) ; count = count + 1 }          // trait
-      else { if (k == 67) { printImpl(parseImpl(p, annos)) ; count = count + 1 }            // impl
-      else { if (k == 58) { line(0, concat("import ", parseImport(p))) ; println("") ; count = count + 1 }
-      else { go = 0 } } } } } } }
+      if (k == 10) { printFunc(parseFunc(p, annos)); count = count + 1 } // fun
+      else { if (k == 54) { printTDecl(parseTypeDecl(p, annos, 0)); count = count + 1 } // struct
+        else { if (k == 65) { printTDecl(parseTypeDecl(p, annos, 1)); count = count + 1 } // class
+          else { if (k == 55) { printEDecl(parseEnum(p, annos)); count = count + 1 } // enum
+            else { if (k == 66) { printTrait(parseTrait(p, annos)); count = count + 1 } // trait
+              else { if (k == 67) { printImpl(parseImpl(p, annos)); count = count + 1 } // impl
+                else { if (k == 58) { line(0, concat("import ", parseImport(p))); println(""); count = count + 1 }
+                  else { go = 0 } } } } } } }
     }
   }
   return count

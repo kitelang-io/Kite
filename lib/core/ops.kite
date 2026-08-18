@@ -12,7 +12,11 @@
 // The @lang("op.X") attribute names the desugar role: klower's lowerBin maps a source operator to the
 // trait method's bare name (emitted mangled with the LEFT operand's type at the use site, e.g. V2_add).
 trait Add { @lang("op.+") fun add(self, rhs: Self): Self }
+
 trait Sub { @lang("op.-") fun sub(self, rhs: Self): Self }
+
 trait Mul { @lang("op.*") fun mul(self, rhs: Self): Self }
+
 trait Div { @lang("op./") fun div(self, rhs: Self): Self }
+
 trait Rem { @lang("op.%") fun rem(self, rhs: Self): Self }

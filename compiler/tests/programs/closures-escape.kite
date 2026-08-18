@@ -1,2 +1,3 @@
 fun adder(n: Int): (Int) -> Int { return { x -> x + n } }
-fun main(): Int { val add10 = adder(10)  return add10(5) }
+
+fun main(): Int { val add10 = adder(10) return add10(5) }

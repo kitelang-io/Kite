@@ -34,8 +34,8 @@ fun main(): Int {
   prog.push(IRet)
   val words = assemble(prog)
   val want = list()
-  want.push("a9bf7bfd") ; want.push("910003fd") ; want.push("d2800540")
-  want.push("14000001") ; want.push("a8c17bfd") ; want.push("d65f03c0")
+  want.push("a9bf7bfd"); want.push("910003fd"); want.push("d2800540")
+  want.push("14000001"); want.push("a8c17bfd"); want.push("d65f03c0")
   var j = 0
   while (j < words.len()) {
     val w: Int = words.get(j)
@@ -49,16 +49,16 @@ fun main(): Int {
     splitWords("a9bf7bfd 910003fd d2800540 14000001 a8c17bfd d65f03c0"))
   // P2: fun main(): Int { return 2 + 3 * 4 }
   f = f + checkProg("P2 arith", oneFunc(Func("main", list(), list(),
-      retBody(eb("+", ei("2"), eb("*", ei("3"), ei("4")))))),
+        retBody(eb("+", ei("2"), eb("*", ei("3"), ei("4")))))),
     splitWords("a9bf7bfd 910003fd d2800040 f81f0fe0 d2800060 f81f0fe0 d2800080 aa0003e1 f84107e0 9b017c00 aa0003e1 f84107e0 8b010000 14000001 a8c17bfd d65f03c0"))
   // P3: fun main(): Int { val x = 5 val y = 7 return x + y }
   val p3s = list()
-  p3s.push(SLet("x", ei("5"))) ; p3s.push(SLet("y", ei("7")))
+  p3s.push(SLet("x", ei("5"))); p3s.push(SLet("y", ei("7")))
   p3s.push(SReturnV(eb("+", ev("x"), ev("y"))))
   f = f + checkProg("P3 locals", oneFunc(Func("main", list(), list(), EBlock(p3s, ENoRes))),
     splitWords("a9bf7bfd 910003fd d10043ff d28000a0 f81f83a0 d28000e0 f81f03a0 f85f83a0 f81f0fe0 f85f03a0 aa0003e1 f84107e0 8b010000 14000001 910043ff a8c17bfd d65f03c0"))
   // P4: fun add(a,b): Int { return a+b }  fun main(): Int { return add(2,3) }
-  val p4params = list() ; p4params.push("a") ; p4params.push("b")
+  val p4params = list(); p4params.push("a"); p4params.push("b")
   val p4 = list()
   p4.push(Func("add", p4params, list(), retBody(eb("+", ev("a"), ev("b")))))
   p4.push(Func("main", list(), list(), retBody(ECall("add", args2(ei("2"), ei("3"))))))
@@ -76,13 +76,13 @@ fun main(): Int {
   // P6: fun main(): Int { val x = 5 if (x > 3) { return 1 } return 0 }
   val p6body = list()
   p6body.push(SLet("x", ei("5")))
-  val p6then = list() ; p6then.push(SReturnV(ei("1")))
+  val p6then = list(); p6then.push(SReturnV(ei("1")))
   p6body.push(SExprS(EIf(eb(">", ev("x"), ei("3")), EBlock(p6then, ENoRes), ENoRes)))
   p6body.push(SReturnV(ei("0")))
   f = f + checkProg("P6 if", oneFunc(Func("main", list(), list(), EBlock(p6body, ENoRes))),
     splitWords("a9bf7bfd 910003fd d10043ff d28000a0 f81f83a0 f85f83a0 f81f0fe0 d2800060 aa0003e1 f84107e0 eb01001f 9a9fd7e0 b4000080 d2800020 14000005 14000002 aa1f03e0 d2800000 14000001 910043ff a8c17bfd d65f03c0"))
   // P7: fun main(): Int { println("hi") return 0 }  (string literal + printf, boxed/reloc path)
-  val p7args = list() ; p7args.push(EStr("hi"))
+  val p7args = list(); p7args.push(EStr("hi"))
   val p7body = list()
   p7body.push(SExprS(ECall("println", p7args)))
   p7body.push(SReturnV(ei("0")))
@@ -92,7 +92,7 @@ fun main(): Int {
   val p4instrs = genProgram(p4)
   val p4words = assembleExe(p4instrs)
   val p4entry = entryOffset(p4instrs, "_main")
-  writeBytes("kp4", buildExe(p4words, p4entry, "_main", "kp4"))          // cwd-relative (no shared /tmp)
+  writeBytes("kp4", buildExe(p4words, p4entry, "_main", "kp4")) // cwd-relative (no shared /tmp)
   println(concat("wrote kp4  entry_off=", intToStr(p4entry)))
   println(concat("failures: ", intToStr(f)))
   return f

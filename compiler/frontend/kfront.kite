@@ -24,24 +24,78 @@ struct Tok(val kind: Int, val text: String, val line: Int)
 // 50 if 51 else 52 for 53 in 54 struct 55 enum 56 pub 57 when
 // 82 compound-assign (+= -= *= /= %=, op char in .text)  83 ..< (exclusive range)  84 until (kw -> ..<)
 
+// ==================== Phase 0.5: unified diagnostics substrate ==============
+// ONE Diagnostic type + ONE sink + ONE renderer, shared by lexer/parser/checker/lowerer (redesign §3h).
+// Before this, the checker accumulated pre-formatted strings, klower's lowFail printed to stdout and
+// returned 0 (silent binary corruption), and kfront returned an EOF sentinel — three incompatible paths.
+// A Span is a source location: byte offset + 1-based line/col (off = -1 / line = 0 / col = 0 mean unknown).
+struct Span(val off: Int, val line: Int, val col: Int)
+
+fun spanNone(): Span { return Span(0 - 1, 0, 0) }
+fun spanLine(line: Int): Span { return Span(0 - 1, line, 0) }
+
+// severity: 0 = error, 1 = warning, 2 = note. `code` is an optional short error code ("" = none).
+struct Diagnostic(val severity: Int, val span: Span, val message: String, val code: String)
+
+fun diagError(msg: String): Diagnostic { return Diagnostic(0, spanNone(), msg, "") }
+fun diagErrorAt(line: Int, msg: String): Diagnostic { return Diagnostic(0, spanLine(line), msg, "") }
+
+fun sevLabel(sev: Int): String {
+  if (sev == 1) { return "warning" }
+  if (sev == 2) { return "note" }
+  return "error"
+}
+
+// THE single renderer: a Diagnostic -> its canonical one-line string. FORMAT-PRESERVING — a checker
+// message already carries its own "line N: " position prefix, so this renders exactly the legacy
+// "error: <msg>" wire form and the committed goldens stay byte-valid. A non-empty code renders "[code] ".
+fun renderDiag(d: Diagnostic): String {
+  var s = concat(sevLabel(d.severity), ": ")
+  if (strEq(d.code, "") == false) { s = concat(s, concat("[", concat(d.code, "] "))) }
+  return concat(s, d.message)
+}
+
+// THE single sink: render one Diagnostic and emit it to STDERR (never stdout), so a program's own stdout
+// and the golden-stdout corpus stay clean (redesign §3e/§3g). All producers funnel through here.
+fun emitDiag(d: Diagnostic): Int { eprintln(renderDiag(d)); return 0 }
+
+// Render + emit a whole collected sink (e.g. the checker's accumulated diagnostics), in order, to stderr.
+fun emitDiags(ds: List): Int {
+  var i = 0
+  while (i < ds.len()) { val d: Diagnostic = ds.get(i); emitDiag(d); i = i + 1 }
+  return 0
+}
+
 // ============================ Lexer ========================================
 // line: 1-based source line of the current lex position, bumped by adv() whenever it steps over a '\n'.
 struct Lx(val src: String, val n: Int, var pos: Int, var line: Int)
+
 fun cur(lx: Lx): Int { if (lx.pos < lx.n) { return charAt(lx.src, lx.pos) } return 0 }
+
 fun nxt(lx: Lx): Int { if (lx.pos + 1 < lx.n) { return charAt(lx.src, lx.pos + 1) } return 0 }
+
 fun at(lx: Lx, k: Int): Int { if (lx.pos + k < lx.n) { return charAt(lx.src, lx.pos + k) } return 0 }
-fun adv(lx: Lx): Int { if (lx.pos < lx.n) { if (charAt(lx.src, lx.pos) == 10) { lx.line = lx.line + 1 } } lx.pos = lx.pos + 1 ; return 0 }
+
+fun adv(lx: Lx): Int { if (lx.pos < lx.n) { if (charAt(lx.src, lx.pos) == 10) { lx.line = lx.line + 1 } } lx.pos = lx.pos + 1; return 0 }
+
 fun isDigit(c: Int): Bool { return c >= 48 && c <= 57 }
+
 fun isAlpha(c: Int): Bool { return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c == 95 }
+
 fun isAlnum(c: Int): Bool { return isAlpha(c) || isDigit(c) }
+
 fun isHexD(c: Int): Bool { return isDigit(c) || (c >= 97 && c <= 102) || (c >= 65 && c <= 70) }
+
 fun hexDigitF(c: Int): Int {
   if (c >= 48 && c <= 57) { return c - 48 }
-  if (c >= 97 && c <= 102) { return c - 87 }   // a..f
-  return c - 55                                 // A..F
+  if (c >= 97 && c <= 102) { return c - 87 } // a..f
+  return c - 55 // A..F
 }
+
 fun isOctD(c: Int): Bool { return c >= 48 && c <= 55 }
+
 fun isBinD(c: Int): Bool { return c == 48 || c == 49 }
+
 // ---- integer literal type suffixes (STDLIB-REDESIGN §2a: 42u16, 100i64, 7L, ...) ----
 // The suffix is kept appended to the INT token's decimal text ("300" + "u16" -> "300u16"); litNum/litSuf
 // (below) split it back out so codegen/klower see a pure decimal while the checker reads the type.
@@ -50,112 +104,133 @@ fun peekAlnum(lx: Lx): String {
   while (i < lx.n && isAlnum(charAt(lx.src, i))) { i = i + 1 }
   return substr(lx.src, lx.pos, i - lx.pos)
 }
+
 fun isIntSuffixW(w: String): Bool {
-  return strEq(w,"L") || strEq(w,"i8") || strEq(w,"i16") || strEq(w,"i32") || strEq(w,"i64") ||
-      strEq(w,"u8") || strEq(w,"u16") || strEq(w,"u32") || strEq(w,"u64") || strEq(w,"isize") || strEq(w,"usize")
+  return strEq(w, "L") || strEq(w, "i8") || strEq(w, "i16") || strEq(w, "i32") || strEq(w, "i64") ||
+  strEq(w, "u8") || strEq(w, "u16") || strEq(w, "u32") || strEq(w, "u64") || strEq(w, "isize") || strEq(w, "usize")
 }
+
 // consume + return a trailing integer suffix if one is present; else "" with lx.pos unchanged (so an
 // unrecognized trailing word lexes as its own identifier, exactly as before — purely additive).
 fun readIntSuffix(lx: Lx): String {
   val w = peekAlnum(lx)
-  if (isIntSuffixW(w)) { var k = 0 ; while (k < strLen(w)) { adv(lx) ; k = k + 1 } ; return w }
+  if (isIntSuffixW(w)) { var k = 0; while (k < strLen(w)) { adv(lx); k = k + 1 }; return w }
   return ""
 }
+
 // split a possibly-suffixed INT literal text: litNum("300u16")="300", litSuf("300u16")="u16".
 // Value is pure decimal (optional leading '-'), so the first non-digit begins the suffix.
 fun litNum(s: String): String {
   var i = 0
-  if (strLen(s) >= 1 && charAt(s, 0) == 45) { i = 1 }         // leading '-'
+  if (strLen(s) >= 1 && charAt(s, 0) == 45) { i = 1 } // leading '-'
   while (i < strLen(s) && isDigit(charAt(s, i))) { i = i + 1 }
   return substr(s, 0, i)
 }
+
 fun litSuf(s: String): String {
   val n = strLen(litNum(s))
   return substr(s, n, strLen(s) - n)
 }
+
 // map an integer suffix to its checker primitive-type name ("" -> no suffix).
 fun suffixTyName(suf: String): String {
   if (strEq(suf, "")) { return "" }
   if (strEq(suf, "L")) { return "Long" }
-  if (strEq(suf, "i8")) { return "I8" }      if (strEq(suf, "i16")) { return "I16" }
-  if (strEq(suf, "i32")) { return "I32" }    if (strEq(suf, "i64")) { return "I64" }
-  if (strEq(suf, "u8")) { return "U8" }      if (strEq(suf, "u16")) { return "U16" }
-  if (strEq(suf, "u32")) { return "U32" }    if (strEq(suf, "u64")) { return "U64" }
+  if (strEq(suf, "i8")) { return "I8" } if (strEq(suf, "i16")) { return "I16" }
+  if (strEq(suf, "i32")) { return "I32" } if (strEq(suf, "i64")) { return "I64" }
+  if (strEq(suf, "u8")) { return "U8" } if (strEq(suf, "u16")) { return "U16" }
+  if (strEq(suf, "u32")) { return "U32" } if (strEq(suf, "u64")) { return "U64" }
   if (strEq(suf, "isize")) { return "ISize" }
   if (strEq(suf, "usize")) { return "USize" }
   return ""
 }
+
 // Read one numeric literal starting at cur: base prefixes (0x/0o/0b), digit separators ('_'), a float
 // fractional part and/or exponent, and an integer type suffix. Pushes an INT (kind 2, decimal[+suffix])
 // or FLOAT (kind 3, strtod-valid lexeme) token.
 fun readNum(lx: Lx, toks: List): Int {
   val c = cur(lx)
-  if (c == 48 && (nxt(lx) == 120 || nxt(lx) == 88)) {          // 0x / 0X
-    adv(lx) ; adv(lx)
+  if (c == 48 && (nxt(lx) == 120 || nxt(lx) == 88)) { // 0x / 0X
+    adv(lx); adv(lx)
     var hv = 0
     while (isHexD(cur(lx)) || (cur(lx) == 95 && isHexD(nxt(lx)))) {
-      if (cur(lx) == 95) { adv(lx) } else { hv = hv * 16 + hexDigitF(cur(lx)) ; adv(lx) }
+      if (cur(lx) == 95) { adv(lx) } else { hv = hv * 16 + hexDigitF(cur(lx)); adv(lx) }
     }
     return push2(lx, toks, 2, concat(intToStr(hv), readIntSuffix(lx)))
   }
-  if (c == 48 && (nxt(lx) == 111 || nxt(lx) == 79)) {          // 0o / 0O
-    adv(lx) ; adv(lx)
+  if (c == 48 && (nxt(lx) == 111 || nxt(lx) == 79)) { // 0o / 0O
+    adv(lx); adv(lx)
     var ov = 0
     while (isOctD(cur(lx)) || (cur(lx) == 95 && isOctD(nxt(lx)))) {
-      if (cur(lx) == 95) { adv(lx) } else { ov = ov * 8 + (cur(lx) - 48) ; adv(lx) }
+      if (cur(lx) == 95) { adv(lx) } else { ov = ov * 8 + (cur(lx) - 48); adv(lx) }
     }
     return push2(lx, toks, 2, concat(intToStr(ov), readIntSuffix(lx)))
   }
-  if (c == 48 && (nxt(lx) == 98 || nxt(lx) == 66)) {           // 0b / 0B
-    adv(lx) ; adv(lx)
+  if (c == 48 && (nxt(lx) == 98 || nxt(lx) == 66)) { // 0b / 0B
+    adv(lx); adv(lx)
     var bv = 0
     while (isBinD(cur(lx)) || (cur(lx) == 95 && isBinD(nxt(lx)))) {
-      if (cur(lx) == 95) { adv(lx) } else { bv = bv * 2 + (cur(lx) - 48) ; adv(lx) }
+      if (cur(lx) == 95) { adv(lx) } else { bv = bv * 2 + (cur(lx) - 48); adv(lx) }
     }
     return push2(lx, toks, 2, concat(intToStr(bv), readIntSuffix(lx)))
   }
   var body = ""
   while (isDigit(cur(lx)) || (cur(lx) == 95 && isDigit(nxt(lx)))) {
-    if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)) ; adv(lx) }
+    if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)); adv(lx) }
   }
   var isFloat = 0
-  if (cur(lx) == 46 && isDigit(nxt(lx))) {                     // '.' fractional
+  if (cur(lx) == 46 && isDigit(nxt(lx))) { // '.' fractional
     isFloat = 1
-    body = concat(body, ".") ; adv(lx)
+    body = concat(body, "."); adv(lx)
     while (isDigit(cur(lx)) || (cur(lx) == 95 && isDigit(nxt(lx)))) {
-      if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)) ; adv(lx) }
+      if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)); adv(lx) }
     }
   }
-  if ((cur(lx) == 101 || cur(lx) == 69) && (isDigit(nxt(lx)) || ((nxt(lx) == 43 || nxt(lx) == 45) && isDigit(at(lx, 2))))) {   // exponent e[+/-]d+
+  if ((cur(lx) == 101 || cur(lx) == 69) && (isDigit(nxt(lx)) || ((nxt(lx) == 43 || nxt(lx) == 45) && isDigit(at(lx, 2))))) { // exponent e[+/-]d+
     isFloat = 1
-    body = concat(body, "e") ; adv(lx)
-    if (cur(lx) == 43 || cur(lx) == 45) { body = concat(body, substr(lx.src, lx.pos, 1)) ; adv(lx) }
+    body = concat(body, "e"); adv(lx)
+    if (cur(lx) == 43 || cur(lx) == 45) { body = concat(body, substr(lx.src, lx.pos, 1)); adv(lx) }
     while (isDigit(cur(lx)) || (cur(lx) == 95 && isDigit(nxt(lx)))) {
-      if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)) ; adv(lx) }
+      if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)); adv(lx) }
     }
   }
   if (isFloat == 1) { return push2(lx, toks, 3, body) }
   return push2(lx, toks, 2, concat(body, readIntSuffix(lx)))
 }
 
+// --- comment RECOGNIZERS (shared single source of truth) --------------------
+// Advance the cursor over one comment body, assuming cur is at its opening. These are the ONLY place
+// comment boundaries are decided: skipTrivia (below) calls them to DISCARD comments, and the standalone
+// formatter (compiler/driver/kfmt.kite) calls the SAME functions to CAPTURE each comment verbatim, so
+// the two never drift. A `//` line comment stops AT the terminating newline (not consuming it); a
+// `/* */` block comment consumes its matching (nesting-aware) close, or bails at EOF.
+fun scanLineComment(lx: Lx): Int {
+  while (cur(lx) != 10 && cur(lx) != 0) { adv(lx) }
+  return 0
+}
+
+fun scanBlockComment(lx: Lx): Int {
+  adv(lx); adv(lx) // past the opening /*
+  var d = 1
+  while (d > 0) {
+    val a = cur(lx)
+    val b = nxt(lx)
+    if (a == 0) { d = 0 }
+    else { if (a == 47 && b == 42) { adv(lx); adv(lx); d = d + 1 }
+      else { if (a == 42 && b == 47) { adv(lx); adv(lx); d = d - 1 } else { adv(lx) } } }
+  }
+  return 0
+}
+
 fun skipTrivia(lx: Lx): Int {
   var go = 1
   while (go == 1) {
     val c = cur(lx)
-    if (c == 32 || c == 9 || c == 13 || c == 10 || c == 59) { adv(lx) }   // ws + ';'
+    if (c == 32 || c == 9 || c == 13 || c == 10 || c == 59) { adv(lx) } // ws + ';'
     else {
-      if (c == 47 && nxt(lx) == 47) { while (cur(lx) != 10 && cur(lx) != 0) { adv(lx) } }
-      else { if (c == 47 && nxt(lx) == 42) {
-        adv(lx) ; adv(lx)
-        var d = 1
-        while (d > 0) {
-          val a = cur(lx)
-          val b = nxt(lx)
-          if (a == 0) { d = 0 }
-          else { if (a == 47 && b == 42) { adv(lx) ; adv(lx) ; d = d + 1 }
-          else { if (a == 42 && b == 47) { adv(lx) ; adv(lx) ; d = d - 1 } else { adv(lx) } } }
-        }
-      } else { go = 0 } }
+      if (c == 47 && nxt(lx) == 47) { scanLineComment(lx) }
+      else { if (c == 47 && nxt(lx) == 42) { scanBlockComment(lx) }
+        else { go = 0 } }
     }
   }
   return 0
@@ -198,7 +273,7 @@ fun kw(w: String): Int {
   return 1
 }
 
-fun push2(lx: Lx, toks: List, kind: Int, text: String): Int { toks.push(Tok(kind, text, lx.line)) ; return 0 }
+fun push2(lx: Lx, toks: List, kind: Int, text: String): Int { toks.push(Tok(kind, text, lx.line)); return 0 }
 
 fun lex(src: String): List {
   val toks = list()
@@ -220,7 +295,7 @@ fun lex(src: String): List {
           if (k == 1) { push2(lx, toks, 1, w) } else { push2(lx, toks, k, "") }
         } else {
           if (c == 34) { lexStr(lx, toks) } else {
-            if (c == 39) { lexChar(lx, toks) }         // 'c' char literal -> kind 9 (decimal code)
+            if (c == 39) { lexChar(lx, toks) } // 'c' char literal -> kind 9 (decimal code)
             else { lexOp(lx, toks) }
           }
         }
@@ -232,19 +307,19 @@ fun lex(src: String): List {
 }
 
 fun lexChar(lx: Lx, toks: List): Int {
-  adv(lx)                                        // opening '
+  adv(lx) // opening '
   var code = 0
-  if (cur(lx) == 92) {                           // backslash escape
+  if (cur(lx) == 92) { // backslash escape
     adv(lx)
-    val e = cur(lx) ; adv(lx)
-    if (e == 110) { code = 10 }                  // \n
-    else { if (e == 116) { code = 9 }            // \t
-    else { if (e == 114) { code = 13 }           // \r
-    else { if (e == 92) { code = 92 }            // \\
-    else { if (e == 39) { code = 39 }            // \'
-    else { code = 0 } } } } }                    // \0
-  } else { code = cur(lx) ; adv(lx) }
-  adv(lx)                                        // closing '
+    val e = cur(lx); adv(lx)
+    if (e == 110) { code = 10 } // \n
+    else { if (e == 116) { code = 9 } // \t
+      else { if (e == 114) { code = 13 } // \r
+        else { if (e == 92) { code = 92 } // \\
+          else { if (e == 39) { code = 39 } // \'
+            else { code = 0 } } } } } // \0
+  } else { code = cur(lx); adv(lx) }
+  adv(lx) // closing '
   return push2(lx, toks, 9, intToStr(code))
 }
 
@@ -252,8 +327,8 @@ fun lexChar(lx: Lx, toks: List): Int {
 // kind 15/17 = interpolated (unescaped $ before { or ident). Regular strings track ${...} brace
 // depth so a " nested inside an interpolation expression does not terminate the outer string.
 fun lexStr(lx: Lx, toks: List): Int {
-  if (nxt(lx) == 34 && at(lx, 2) == 34) {              // """ triple-quoted raw string
-    adv(lx) ; adv(lx) ; adv(lx)
+  if (nxt(lx) == 34 && at(lx, 2) == 34) { // """ triple-quoted raw string
+    adv(lx); adv(lx); adv(lx)
     val s = lx.pos
     var hasItp = 0
     var go = 1
@@ -261,17 +336,17 @@ fun lexStr(lx: Lx, toks: List): Int {
       val ch = cur(lx)
       if (ch == 0) { go = 0 }
       else { if (ch == 34 && nxt(lx) == 34 && at(lx, 2) == 34) { go = 0 }
-      else {
-        if (ch == 36 && (nxt(lx) == 123 || isAlpha(nxt(lx)))) { hasItp = 1 }
-        adv(lx)
-      } }
+        else {
+          if (ch == 36 && (nxt(lx) == 123 || isAlpha(nxt(lx)))) { hasItp = 1 }
+          adv(lx)
+        } }
     }
     val content = substr(lx.src, s, lx.pos - s)
-    adv(lx) ; adv(lx) ; adv(lx)                        // closing """
+    adv(lx); adv(lx); adv(lx) // closing """
     if (hasItp == 1) { return push2(lx, toks, 17, content) }
     return push2(lx, toks, 16, content)
   }
-  adv(lx)                                              // opening "
+  adv(lx) // opening "
   val s = lx.pos
   var hasItp = 0
   var depth = 0
@@ -279,21 +354,22 @@ fun lexStr(lx: Lx, toks: List): Int {
   while (go == 1) {
     val ch = cur(lx)
     if (ch == 0) { go = 0 }
-    else { if (ch == 34 && depth == 0) { go = 0 }      // closing quote (only at depth 0)
-    else {
-      if (ch == 92) { adv(lx) ; adv(lx) }              // escaped char
-      else { if (ch == 36 && nxt(lx) == 123) { hasItp = 1 ; adv(lx) ; adv(lx) ; depth = depth + 1 }  // ${
-      else { if (ch == 123 && depth > 0) { depth = depth + 1 ; adv(lx) }
-      else { if (ch == 125 && depth > 0) { depth = depth - 1 ; adv(lx) }
-      else { if (ch == 36 && isAlpha(nxt(lx))) { hasItp = 1 ; adv(lx) }
-      else { adv(lx) } } } } }
-    } }
+    else { if (ch == 34 && depth == 0) { go = 0 } // closing quote (only at depth 0)
+      else {
+        if (ch == 92) { adv(lx); adv(lx) } // escaped char
+        else { if (ch == 36 && nxt(lx) == 123) { hasItp = 1; adv(lx); adv(lx); depth = depth + 1 } // ${
+          else { if (ch == 123 && depth > 0) { depth = depth + 1; adv(lx) }
+            else { if (ch == 125 && depth > 0) { depth = depth - 1; adv(lx) }
+              else { if (ch == 36 && isAlpha(nxt(lx))) { hasItp = 1; adv(lx) }
+                else { adv(lx) } } } } }
+      } }
   }
   val content = substr(lx.src, s, lx.pos - s)
-  adv(lx)                                              // closing "
+  adv(lx) // closing "
   if (hasItp == 1) { return push2(lx, toks, 15, content) }
   return push2(lx, toks, 4, content)
 }
+
 fun lexOp(lx: Lx, toks: List): Int {
   val c = cur(lx)
   adv(lx)
@@ -302,25 +378,25 @@ fun lexOp(lx: Lx, toks: List): Int {
   if (c == 41) { return push2(lx, toks, 21, "") }
   if (c == 123) { return push2(lx, toks, 22, "") }
   if (c == 125) { return push2(lx, toks, 23, "") }
-  if (c == 91) { return push2(lx, toks, 74, "") }    // [
-  if (c == 93) { return push2(lx, toks, 75, "") }    // ]
-  if (c == 64) { return push2(lx, toks, 73, "") }    // @
+  if (c == 91) { return push2(lx, toks, 74, "") } // [
+  if (c == 93) { return push2(lx, toks, 75, "") } // ]
+  if (c == 64) { return push2(lx, toks, 73, "") } // @
   if (c == 44) { return push2(lx, toks, 24, "") }
-  if (c == 58) { if (d == 58) { adv(lx) ; return push2(lx, toks, 26, "") } return push2(lx, toks, 25, "") }
-  if (c == 46) { if (d == 46) { adv(lx) ; if (cur(lx) == 60) { adv(lx) ; return push2(lx, toks, 83, "") } return push2(lx, toks, 28, "") } return push2(lx, toks, 27, "") }  // ..< or .. or .
-  if (c == 43) { if (d == 61) { adv(lx) ; return push2(lx, toks, 82, "+") } return push2(lx, toks, 30, "") }  // += or +
-  if (c == 45) { if (d == 62) { adv(lx) ; return push2(lx, toks, 60, "") } if (d == 61) { adv(lx) ; return push2(lx, toks, 82, "-") } return push2(lx, toks, 31, "") }  // -> or -= or -
-  if (c == 42) { if (d == 61) { adv(lx) ; return push2(lx, toks, 82, "*") } return push2(lx, toks, 32, "") }  // *= or *
-  if (c == 47) { if (d == 61) { adv(lx) ; return push2(lx, toks, 82, "/") } return push2(lx, toks, 33, "") }  // /= or /
-  if (c == 37) { if (d == 61) { adv(lx) ; return push2(lx, toks, 82, "%") } return push2(lx, toks, 34, "") }  // %= or %
-  if (c == 61) { if (d == 61) { adv(lx) ; return push2(lx, toks, 35, "") } return push2(lx, toks, 43, "") }
-  if (c == 33) { if (d == 61) { adv(lx) ; return push2(lx, toks, 36, "") } if (d == 33) { adv(lx) ; return push2(lx, toks, 78, "") } return push2(lx, toks, 44, "") }  // != !! !
-  if (c == 60) { if (d == 61) { adv(lx) ; return push2(lx, toks, 39, "") } if (d == 60) { adv(lx) ; return push2(lx, toks, 48, "") } return push2(lx, toks, 37, "") }  // <= << <
-  if (c == 62) { if (d == 61) { adv(lx) ; return push2(lx, toks, 40, "") } if (d == 62) { adv(lx) ; return push2(lx, toks, 49, "") } return push2(lx, toks, 38, "") }  // >= >> >
-  if (c == 38) { if (d == 38) { adv(lx) ; return push2(lx, toks, 41, "") } return push2(lx, toks, 46, "") }   // && or &
-  if (c == 124) { if (d == 124) { adv(lx) ; return push2(lx, toks, 42, "") } return push2(lx, toks, 61, "") }  // || or |
-  if (c == 94) { return push2(lx, toks, 47, "") }                                                          // ^
-  if (c == 63) { if (d == 46) { adv(lx) ; return push2(lx, toks, 76, "") } if (d == 58) { adv(lx) ; return push2(lx, toks, 77, "") } return push2(lx, toks, 45, "") }  // ?. ?: ?
+  if (c == 58) { if (d == 58) { adv(lx); return push2(lx, toks, 26, "") } return push2(lx, toks, 25, "") }
+  if (c == 46) { if (d == 46) { adv(lx); if (cur(lx) == 60) { adv(lx); return push2(lx, toks, 83, "") } return push2(lx, toks, 28, "") } return push2(lx, toks, 27, "") } // ..< or .. or .
+  if (c == 43) { if (d == 61) { adv(lx); return push2(lx, toks, 82, "+") } return push2(lx, toks, 30, "") } // += or +
+  if (c == 45) { if (d == 62) { adv(lx); return push2(lx, toks, 60, "") } if (d == 61) { adv(lx); return push2(lx, toks, 82, "-") } return push2(lx, toks, 31, "") } // -> or -= or -
+  if (c == 42) { if (d == 61) { adv(lx); return push2(lx, toks, 82, "*") } return push2(lx, toks, 32, "") } // *= or *
+  if (c == 47) { if (d == 61) { adv(lx); return push2(lx, toks, 82, "/") } return push2(lx, toks, 33, "") } // /= or /
+  if (c == 37) { if (d == 61) { adv(lx); return push2(lx, toks, 82, "%") } return push2(lx, toks, 34, "") } // %= or %
+  if (c == 61) { if (d == 61) { adv(lx); return push2(lx, toks, 35, "") } return push2(lx, toks, 43, "") }
+  if (c == 33) { if (d == 61) { adv(lx); return push2(lx, toks, 36, "") } if (d == 33) { adv(lx); return push2(lx, toks, 78, "") } return push2(lx, toks, 44, "") } // != !! !
+  if (c == 60) { if (d == 61) { adv(lx); return push2(lx, toks, 39, "") } if (d == 60) { adv(lx); return push2(lx, toks, 48, "") } return push2(lx, toks, 37, "") } // <= << <
+  if (c == 62) { if (d == 61) { adv(lx); return push2(lx, toks, 40, "") } if (d == 62) { adv(lx); return push2(lx, toks, 49, "") } return push2(lx, toks, 38, "") } // >= >> >
+  if (c == 38) { if (d == 38) { adv(lx); return push2(lx, toks, 41, "") } return push2(lx, toks, 46, "") } // && or &
+  if (c == 124) { if (d == 124) { adv(lx); return push2(lx, toks, 42, "") } return push2(lx, toks, 61, "") } // || or |
+  if (c == 94) { return push2(lx, toks, 47, "") } // ^
+  if (c == 63) { if (d == 46) { adv(lx); return push2(lx, toks, 76, "") } if (d == 58) { adv(lx); return push2(lx, toks, 77, "") } return push2(lx, toks, 45, "") } // ?. ?: ?
   return 0
 }
 
@@ -335,7 +411,9 @@ enum FExpr {
   FEBlock(List, FExpr); FEIf(FExpr, FExpr, FExpr); FEWhen(Int, String, FExpr, List);
   FERet(FExpr); FEBrk; FECont; FENoRes
 }
+
 enum FIPart { FILit(String); FIExpr(FExpr) }
+
 // patterns (printer.ml pp)
 enum FPat {
   FPWild; FPBind(String);
@@ -343,53 +421,76 @@ enum FPat {
   FPPath(String); FPCtor(String, List); FPRecord(String, List, Int);
   FPIsP(String, Int); FPInP(FExpr, Int)
 }
-struct FRFld(val name: String, val hasPat: Int, val pat: FPat)   // hasPat 0 = pun
-struct FRawArg(val tag: Int, val name: String, val pat: FPat)    // tag 0 pos / 1 named / 2 rest
+
+struct FRFld(val name: String, val hasPat: Int, val pat: FPat) // hasPat 0 = pun
+
+struct FRawArg(val tag: Int, val name: String, val pat: FPat) // tag 0 pos / 1 named / 2 rest
+
 // a when arm: kind 0 = cond (lhs is the condition), 1 = else, 2 = patterns.
 // For kind 2: pats holds the or-alternatives, guard is FENoRes if absent.
 struct FArm(val kind: Int, val lhs: FExpr, val pats: List, val guard: FExpr, val body: FExpr)
+
 struct FMapEnt(val k: FExpr, val v: FExpr)
-struct FArg(val name: String, val expr: FExpr)   // name "" => positional
+
+struct FArg(val name: String, val expr: FExpr) // name "" => positional
+
 struct FLamHead(val ok: Int, val params: String)
+
 enum FStmt {
   FSLet(Int, String, String, FExpr); FSReturnV(FExpr); FSReturnU;
   FSExprS(FExpr); FSAssign(FExpr, FExpr); FSWhile(FExpr, FExpr); FSFor(String, FExpr, FExpr)
 }
-struct Anno(val name: String, val args: List)   // args: List<FExpr>
-struct FParam(val name: String, val ty: String)   // mode prefix baked into ty
-struct FFunc(val annos: List, val name: String, val gen: String, val recv: String, val params: List, val ret: String, val whr: String, val body: FExpr)   // body FENoRes = signature-only
+
+struct Anno(val name: String, val args: List) // args: List<FExpr>
+
+struct FParam(val name: String, val ty: String) // mode prefix baked into ty
+
+struct FFunc(val annos: List, val name: String, val gen: String, val recv: String, val params: List, val ret: String, val whr: String, val body: FExpr) // body FENoRes = signature-only
+
 struct FFld(val isPub: Int, val isVar: Int, val name: String, val ty: String)
-struct FTDecl(val annos: List, val kind: Int, val name: String, val gen: String, val fields: List, val whr: String, val dtor: FExpr, val methods: List)   // kind 0 struct / 1 class; dtor = deinit body
-struct FVariant(val name: String, val payKind: Int, val tys: List, val flds: List)   // payKind 0 none / 1 positional / 2 named
+
+struct FTDecl(val annos: List, val kind: Int, val name: String, val gen: String, val fields: List, val whr: String, val dtor: FExpr, val methods: List) // kind 0 struct / 1 class; dtor = deinit body
+
+struct FVariant(val name: String, val payKind: Int, val tys: List, val flds: List) // payKind 0 none / 1 positional / 2 named
+
 struct FEDecl(val annos: List, val name: String, val gen: String, val variants: List)
+
 struct FAssoc(val name: String, val text: String)
+
 struct FTraitDecl(val annos: List, val name: String, val gen: String, val supers: String, val whr: String, val assoc: List, val methods: List)
-struct FImplDecl(val annos: List, val gen: String, val traitName: String, val forTy: String, val whr: String, val assoc: List, val methods: List)   // traitName "" = inherent
+
+struct FImplDecl(val annos: List, val gen: String, val traitName: String, val forTy: String, val whr: String, val assoc: List, val methods: List) // traitName "" = inherent
 
 // ============================ Parser =======================================
 struct P(val toks: List, var pos: Int)
+
 // Current-token accessors. These MUST bounds-check: on malformed input the grammar can advance the
 // cursor past the final EOF token, and an unchecked listGet returns null -> `t.kind` faults at 0x0
 // (a compiler segfault instead of a diagnostic). Past end we return the same sentinels the bounded
 // lookahead helpers use (kind 0 / text ""), so the grammar sees "end of input" and fails its match
 // cleanly rather than crashing. For well-formed input pos never exceeds the token count, so these
 // guards never fire and codegen is byte-identical (self-host fixpoint unaffected).
-fun pk(p: P): Int { if (p.pos < p.toks.len()) { val t: Tok = p.toks.get(p.pos) ; return t.kind } return 0 }
-fun ptext(p: P): String { if (p.pos < p.toks.len()) { val t: Tok = p.toks.get(p.pos) ; return t.text } return "" }
+fun pk(p: P): Int { if (p.pos < p.toks.len()) { val t: Tok = p.toks.get(p.pos); return t.kind } return 0 }
+
+fun ptext(p: P): String { if (p.pos < p.toks.len()) { val t: Tok = p.toks.get(p.pos); return t.text } return "" }
+
 // 1-based source line of the current token — used to attribute diagnostics to a source position.
-fun pline(p: P): Int { if (p.pos < p.toks.len()) { val t: Tok = p.toks.get(p.pos) ; return t.line } return 0 }
-fun eat(p: P): Int { p.pos = p.pos + 1 ; return 0 }
+fun pline(p: P): Int { if (p.pos < p.toks.len()) { val t: Tok = p.toks.get(p.pos); return t.line } return 0 }
+
+fun eat(p: P): Int { p.pos = p.pos + 1; return 0 }
 
 // bounded lookahead (kind 0 / text "" past end) — needed by the full grammar
 fun kindAt(p: P, n: Int): Int {
   val i = p.pos + n
-  if (i < p.toks.len()) { val t: Tok = p.toks.get(i) ; return t.kind }
+  if (i < p.toks.len()) { val t: Tok = p.toks.get(i); return t.kind }
   return 0
 }
+
 fun pk1(p: P): Int { return kindAt(p, 1) }
+
 fun textAt(p: P, n: Int): String {
   val i = p.pos + n
-  if (i < p.toks.len()) { val t: Tok = p.toks.get(i) ; return t.text }
+  if (i < p.toks.len()) { val t: Tok = p.toks.get(i); return t.text }
   return ""
 }
 
@@ -416,57 +517,60 @@ fun opStr(k: Int): String {
 // a type: function type (A, B) -> R, or a path (Seg::Seg) with optional <args>,
 // with any number of trailing '?' — flattened to match printer.ml's string_of_ty.
 fun parseTyBase(p: P): String {
-  if (pk(p) == 20) {                            // '(' -> function type (A, B) -> R
+  if (pk(p) == 20) { // '(' -> function type (A, B) -> R
     eat(p)
     var inner = ""
     if (pk(p) != 21) {
       inner = parseTy(p)
-      while (pk(p) == 24) { eat(p) ; inner = concat(inner, concat(", ", parseTy(p))) }
+      while (pk(p) == 24) { eat(p); inner = concat(inner, concat(", ", parseTy(p))) }
     }
-    eat(p)                                       // ')'
-    eat(p)                                       // '->'
+    eat(p) // ')'
+    eat(p) // '->'
     return concat("(", concat(inner, concat(") -> ", parseTy(p))))
   }
-  var s = ptext(p) ; eat(p)                      // path Seg(::Seg)*
-  while (pk(p) == 26) { eat(p) ; s = concat(s, concat("::", ptext(p))) ; eat(p) }
-  if (pk(p) == 37) {                            // '<' generic args
+  var s = ptext(p); eat(p) // path Seg(::Seg)*
+  while (pk(p) == 26) { eat(p); s = concat(s, concat("::", ptext(p))); eat(p) }
+  if (pk(p) == 37) { // '<' generic args
     eat(p)
     var inner = parseTy(p)
-    while (pk(p) == 24) { eat(p) ; inner = concat(inner, concat(", ", parseTy(p))) }
-    eat(p)                                       // '>'
+    while (pk(p) == 24) { eat(p); inner = concat(inner, concat(", ", parseTy(p))) }
+    eat(p) // '>'
     s = concat(s, concat("<", concat(inner, ">")))
   }
   return s
 }
+
 fun parseTy(p: P): String {
   var s = parseTyBase(p)
-  while (pk(p) == 45) { eat(p) ; s = concat(s, "?") }   // nullable postfix loop
+  while (pk(p) == 45) { eat(p); s = concat(s, "?") } // nullable postfix loop
   return s
 }
 
 // ---- shared declaration infrastructure: generics / where / bounds / annotations ----
-fun parseBoundList(p: P): String {                   // bound (+ bound)*  -> "A + B"
+fun parseBoundList(p: P): String { // bound (+ bound)*  -> "A + B"
   var s = parseTy(p)
-  while (pk(p) == 30) { eat(p) ; s = concat(s, concat(" + ", parseTy(p))) }   // 30 = '+'
+  while (pk(p) == 30) { eat(p); s = concat(s, concat(" + ", parseTy(p))) } // 30 = '+'
   return s
 }
-fun parseGenerics(p: P): String {                    // "" if no '<', else "<...>"
+
+fun parseGenerics(p: P): String { // "" if no '<', else "<...>"
   if (pk(p) != 37) { return "" }
   eat(p)
   var s = "<"
   var first = 1
   var more = 1
   while (more == 1) {
-    var one = ptext(p) ; eat(p)
-    if (pk(p) == 25) { eat(p) ; one = concat(one, concat(": ", parseBoundList(p))) }   // : bounds
-    if (pk(p) == 43) { eat(p) ; one = concat(one, concat(" = ", parseTy(p))) }         // = default
-    if (first == 1) { s = concat(s, one) ; first = 0 } else { s = concat(s, concat(", ", one)) }
+    var one = ptext(p); eat(p)
+    if (pk(p) == 25) { eat(p); one = concat(one, concat(": ", parseBoundList(p))) } // : bounds
+    if (pk(p) == 43) { eat(p); one = concat(one, concat(" = ", parseTy(p))) } // = default
+    if (first == 1) { s = concat(s, one); first = 0 } else { s = concat(s, concat(", ", one)) }
     if (pk(p) == 24) { eat(p) } else { more = 0 }
   }
-  eat(p)                                             // '>'
+  eat(p) // '>'
   return concat(s, ">")
 }
-fun parseWhere(p: P): String {                       // "" if no 'where', else " where ..."
+
+fun parseWhere(p: P): String { // "" if no 'where', else " where ..."
   if (pk(p) != 64) { return "" }
   eat(p)
   var s = " where "
@@ -474,41 +578,43 @@ fun parseWhere(p: P): String {                       // "" if no 'where', else "
   var more = 1
   while (more == 1) {
     var one = parseTy(p)
-    eat(p)                                           // ':'
+    eat(p) // ':'
     one = concat(one, concat(": ", parseBoundList(p)))
-    if (first == 1) { s = concat(s, one) ; first = 0 } else { s = concat(s, concat(", ", one)) }
+    if (first == 1) { s = concat(s, one); first = 0 } else { s = concat(s, concat(", ", one)) }
     if (pk(p) == 24) { eat(p) } else { more = 0 }
   }
   return s
 }
-fun parseAnnos(p: P): List {                         // ('@' ident ['(' expr,* ')'])* -> List<Anno>
+
+fun parseAnnos(p: P): List { // ('@' ident ['(' expr,* ')'])* -> List<Anno>
   val annos = list()
   while (pk(p) == 73) {
     eat(p)
-    val nm = ptext(p) ; eat(p)
+    val nm = ptext(p); eat(p)
     val args = list()
     if (pk(p) == 20) { eat(p)
       if (pk(p) != 21) { var more = 1
-        while (more == 1) { args.push(parseExpr(p)) ; if (pk(p) == 24) { eat(p) } else { more = 0 } } }
-      eat(p) }                                       // ')'
+        while (more == 1) { args.push(parseExpr(p)); if (pk(p) == 24) { eat(p) } else { more = 0 } } }
+      eat(p) } // ')'
     annos.push(Anno(nm, args))
   }
   return annos
 }
 
-fun parseBranch(p: P): FExpr {                    // if/else branch: brace block OR bare expression
+fun parseBranch(p: P): FExpr { // if/else branch: brace block OR bare expression
   if (pk(p) == 22) { return parseBlock(p) }
   return parseExpr(p)
 }
+
 fun parseIf(p: P): FExpr {
-  eat(p)                                         // 'if'
-  eat(p)                                         // '('
+  eat(p) // 'if'
+  eat(p) // '('
   val c = parseExpr(p)
-  eat(p)                                         // ')'
+  eat(p) // ')'
   val thenB = parseBranch(p)
-  if (pk(p) == 51) {                             // else
+  if (pk(p) == 51) { // else
     eat(p)
-    if (pk(p) == 50) { return FEIf(c, thenB, parseIf(p)) }   // else if
+    if (pk(p) == 50) { return FEIf(c, thenB, parseIf(p)) } // else if
     return FEIf(c, thenB, parseBranch(p))
   }
   return FEIf(c, thenB, FENoRes)
@@ -522,71 +628,74 @@ fun isUpper(s: String): Bool {
 
 fun isLower(s: String): Bool {
   if (strLen(s) == 0) { return false }
-  val c = charAt(s, 0) ; return c >= 97 && c <= 122
+  val c = charAt(s, 0); return c >= 97 && c <= 122
 }
-fun bindName(pat: FPat): String { return when (pat) { FPBind(s) -> s ; else -> "" } }
+
+fun bindName(pat: FPat): String { return when (pat) { FPBind(s) -> s; else -> "" } }
 
 fun parsePattern(p: P): FPat {
   val k = pk(p)
-  if (k == 2) { val t = ptext(p) ; eat(p) ; return FPInt(t) }                 // INT
-  if (k == 3) { val t = ptext(p) ; eat(p) ; return FPFloatP(fmtFloat(t)) }    // FLOAT
-  if (k == 31) {                                                             // -INT / -FLOAT
+  if (k == 2) { val t = ptext(p); eat(p); return FPInt(t) } // INT
+  if (k == 3) { val t = ptext(p); eat(p); return FPFloatP(fmtFloat(t)) } // FLOAT
+  if (k == 31) { // -INT / -FLOAT
     eat(p)
-    val nk = pk(p) ; val t = ptext(p) ; eat(p)
+    val nk = pk(p); val t = ptext(p); eat(p)
     if (nk == 3) { return FPFloatP(concat("-", fmtFloat(t))) }
     return FPInt(concat("-", t))
   }
-  if (k == 4) { val t = ptext(p) ; eat(p) ; return FPStr(t) }                 // STRING
-  if (k == 9) { val t = ptext(p) ; eat(p) ; return FPCharP(t) }               // CHAR
-  if (k == 5) { eat(p) ; return FPBoolP("true") }
-  if (k == 6) { eat(p) ; return FPBoolP("false") }
-  if (k == 7) { eat(p) ; return FPNullP }
-  if (k == 59) { eat(p) ; return FPIsP(parseTy(p), 0) }                       // is T
-  if (k == 53) { eat(p) ; return FPInP(parseExpr(p), 0) }                     // in e
-  if (k == 44) {                                                             // !is / !in
+  if (k == 4) { val t = ptext(p); eat(p); return FPStr(t) } // STRING
+  if (k == 9) { val t = ptext(p); eat(p); return FPCharP(t) } // CHAR
+  if (k == 5) { eat(p); return FPBoolP("true") }
+  if (k == 6) { eat(p); return FPBoolP("false") }
+  if (k == 7) { eat(p); return FPNullP }
+  if (k == 59) { eat(p); return FPIsP(parseTy(p), 0) } // is T
+  if (k == 53) { eat(p); return FPInP(parseExpr(p), 0) } // in e
+  if (k == 44) { // !is / !in
     eat(p)
-    if (pk(p) == 59) { eat(p) ; return FPIsP(parseTy(p), 1) }
-    eat(p) ; return FPInP(parseExpr(p), 1)
+    if (pk(p) == 59) { eat(p); return FPIsP(parseTy(p), 1) }
+    eat(p); return FPInP(parseExpr(p), 1)
   }
-  val name = ptext(p) ; eat(p)
+  val name = ptext(p); eat(p)
   if (strEq(name, "_")) { return FPWild }
   if (isUpper(name)) {
     var path = name
-    while (pk(p) == 26) { eat(p) ; path = concat(path, concat("::", ptext(p))) ; eat(p) }
+    while (pk(p) == 26) { eat(p); path = concat(path, concat("::", ptext(p))); eat(p) }
     if (pk(p) == 20) { return parseCtorPat(p, path) }
     return FPPath(path)
   }
   return FPBind(name)
 }
+
 fun parseRawArg(p: P): FRawArg {
-  if (pk(p) == 28) { eat(p) ; return FRawArg(2, "", FPWild) }                  // '..'
+  if (pk(p) == 28) { eat(p); return FRawArg(2, "", FPWild) } // '..'
   if (pk(p) == 1) {
-    if (isLower(ptext(p)) && pk1(p) == 43) {                                 // ident '=' rename
-      val nm = ptext(p) ; eat(p) ; eat(p) ; return FRawArg(1, nm, parsePattern(p))
+    if (isLower(ptext(p)) && pk1(p) == 43) { // ident '=' rename
+      val nm = ptext(p); eat(p); eat(p); return FRawArg(1, nm, parsePattern(p))
     }
   }
   return FRawArg(0, "", parsePattern(p))
 }
+
 fun parseCtorPat(p: P, path: String): FPat {
-  eat(p)                                         // '('
+  eat(p) // '('
   val raws = list()
   if (pk(p) != 21) {
     var more = 1
-    while (more == 1) { raws.push(parseRawArg(p)) ; if (pk(p) == 24) { eat(p) } else { more = 0 } }
+    while (more == 1) { raws.push(parseRawArg(p)); if (pk(p) == 24) { eat(p) } else { more = 0 } }
   }
-  eat(p)                                         // ')'
+  eat(p) // ')'
   var hasRest = 0
   var hasNamed = 0
   var i = 0
   while (i < raws.len()) { val r: FRawArg = raws.get(i)
-    if (r.tag == 2) { hasRest = 1 } ; if (r.tag == 1) { hasNamed = 1 } ; i = i + 1 }
-  if (hasRest == 0 && hasNamed == 0) {                                       // positional
+    if (r.tag == 2) { hasRest = 1 }; if (r.tag == 1) { hasNamed = 1 }; i = i + 1 }
+  if (hasRest == 0 && hasNamed == 0) { // positional
     val pats = list()
     var j = 0
-    while (j < raws.len()) { val r: FRawArg = raws.get(j) ; pats.push(r.pat) ; j = j + 1 }
+    while (j < raws.len()) { val r: FRawArg = raws.get(j); pats.push(r.pat); j = j + 1 }
     return FPCtor(path, pats)
   }
-  val flds = list()                                                       // record
+  val flds = list() // record
   var m = 0
   while (m < raws.len()) { val r: FRawArg = raws.get(m)
     if (r.tag == 1) { flds.push(FRFld(r.name, 1, r.pat)) }
@@ -596,45 +705,45 @@ fun parseCtorPat(p: P, path: String): FPat {
 }
 
 fun parseWhen(p: P): FExpr {
-  eat(p)                                         // 'when'
+  eat(p) // 'when'
   var hasSubj = 0
   var bindStr = ""
   var subj = FENoRes
-  if (pk(p) == 20) {                             // (subject) — subject form
+  if (pk(p) == 20) { // (subject) — subject form
     eat(p)
     hasSubj = 1
-    if (pk(p) == 11) {                           // val name = ...
+    if (pk(p) == 11) { // val name = ...
       eat(p)
-      val bn = ptext(p) ; eat(p)
-      eat(p)                                     // '='
+      val bn = ptext(p); eat(p)
+      eat(p) // '='
       bindStr = concat("val ", concat(bn, " = "))
     }
     subj = parseExpr(p)
-    eat(p)                                       // ')'
+    eat(p) // ')'
   }
-  eat(p)                                         // '{'
+  eat(p) // '{'
   val arms = list()
   while (pk(p) != 23 && pk(p) != 0) {
-    if (pk(p) == 51) {                           // else -> body
-      eat(p) ; eat(p)
+    if (pk(p) == 51) { // else -> body
+      eat(p); eat(p)
       arms.push(FArm(1, FENoRes, list(), FENoRes, parseExpr(p)))
     } else {
-      if (hasSubj == 0) {                        // cond -> body
+      if (hasSubj == 0) { // cond -> body
         val cond = parseExpr(p)
         eat(p)
         arms.push(FArm(0, cond, list(), FENoRes, parseExpr(p)))
-      } else {                                   // pattern [| pattern]* [if guard] -> body
+      } else { // pattern [| pattern]* [if guard] -> body
         val pats = list()
         pats.push(parsePattern(p))
-        while (pk(p) == 61) { eat(p) ; pats.push(parsePattern(p)) }
+        while (pk(p) == 61) { eat(p); pats.push(parsePattern(p)) }
         var guard = FENoRes
-        if (pk(p) == 50) { eat(p) ; guard = parseExpr(p) }    // if guard
-        eat(p)                                   // '->'
+        if (pk(p) == 50) { eat(p); guard = parseExpr(p) } // if guard
+        eat(p) // '->'
         arms.push(FArm(2, FENoRes, pats, guard, parseExpr(p)))
       }
     }
   }
-  eat(p)                                         // '}'
+  eat(p) // '}'
   return FEWhen(hasSubj, bindStr, subj, arms)
 }
 
@@ -648,6 +757,7 @@ fun parseInterpSub(src: String): FExpr {
   val sp = P(lex(src), 0)
   return parseExpr(sp)
 }
+
 fun interpParts(body: String, isRaw: Int): List {
   val parts = list()
   val n = strLen(body)
@@ -655,215 +765,233 @@ fun interpParts(body: String, isRaw: Int): List {
   var lit = ""
   while (i < n) {
     val c = charAt(body, i)
-    if (isRaw == 0 && c == 92 && i + 1 < n) {         // backslash escape: keep both chars literally
-      lit = concat(lit, substr(body, i, 2)) ; i = i + 2
+    if (isRaw == 0 && c == 92 && i + 1 < n) { // backslash escape: keep both chars literally
+      lit = concat(lit, substr(body, i, 2)); i = i + 2
     }
     else { if (c == 36 && i + 1 < n && (charAt(body, i + 1) == 123 || isAlpha(charAt(body, i + 1)))) {
-      if (strEq(lit, "") == false) { parts.push(FILit(lit)) ; lit = "" }
-      i = i + 1
-      if (charAt(body, i) == 123) {                  // ${ expr }
+        if (strEq(lit, "") == false) { parts.push(FILit(lit)); lit = "" }
         i = i + 1
-        val start = i
-        var depth = 1
-        while (i < n && depth > 0) {
-          val d = charAt(body, i)
-          if (d == 123) { depth = depth + 1 } else { if (d == 125) { depth = depth - 1 } }
-          if (depth > 0) { i = i + 1 }
+        if (charAt(body, i) == 123) { // ${ expr }
+          i = i + 1
+          val start = i
+          var depth = 1
+          while (i < n && depth > 0) {
+            val d = charAt(body, i)
+            if (d == 123) { depth = depth + 1 } else { if (d == 125) { depth = depth - 1 } }
+            if (depth > 0) { i = i + 1 }
+          }
+          val code = substr(body, start, i - start)
+          i = i + 1 // skip '}'
+          parts.push(FIExpr(parseInterpSub(code)))
+        } else { // $ident — a plain identifier (no keyword lookup)
+          val start = i
+          while (i < n && isAlnum(charAt(body, i))) { i = i + 1 }
+          parts.push(FIExpr(FEIdent(substr(body, start, i - start))))
         }
-        val code = substr(body, start, i - start)
-        i = i + 1                                     // skip '}'
-        parts.push(FIExpr(parseInterpSub(code)))
-      } else {                                        // $ident — a plain identifier (no keyword lookup)
-        val start = i
-        while (i < n && isAlnum(charAt(body, i))) { i = i + 1 }
-        parts.push(FIExpr(FEIdent(substr(body, start, i - start))))
       }
-    }
-    else { lit = concat(lit, substr(body, i, 1)) ; i = i + 1 } }
+      else { lit = concat(lit, substr(body, i, 1)); i = i + 1 } }
   }
   if (strEq(lit, "") == false) { parts.push(FILit(lit)) }
   return parts
 }
+
 fun parsePrimary(p: P): FExpr {
   val k = pk(p)
   if (k == 50) { return parseIf(p) }
   if (k == 57) { return parseWhen(p) }
-  if (k == 13) { eat(p) ; if (isRetStop(pk(p))) { return FERet(FENoRes) } return FERet(parseExpr(p)) }
-  if (k == 62) { eat(p) ; return FEBrk }
-  if (k == 63) { eat(p) ; return FECont }
-  if (k == 22) {                                                         // { lambda } or { block }
+  if (k == 13) { eat(p); if (isRetStop(pk(p))) { return FERet(FENoRes) } return FERet(parseExpr(p)) }
+  if (k == 62) { eat(p); return FEBrk }
+  if (k == 63) { eat(p); return FECont }
+  if (k == 22) { // { lambda } or { block }
     eat(p)
     val lh = tryLambdaParams(p)
     if (lh.ok == 1) { return FELambda(lh.params, parseBlockBody(p)) }
-    return parseBlockBody(p)                                             // plain block (incl. `{ it }`)
+    return parseBlockBody(p) // plain block (incl. `{ it }`)
   }
-  if (k == 20) { eat(p) ; val e = parseExpr(p) ; eat(p) ; return e }      // ( expr )
-  if (k == 74) { return parseListOrMap(p) }                              // [ list | map ]
-  if (k == 2) { val t = ptext(p) ; eat(p) ; return FEInt(t) }
-  if (k == 3) { val t = ptext(p) ; eat(p) ; return FEFloat(t) }
-  if (k == 9) { val t = ptext(p) ; eat(p) ; return FEChar(t) }
-  if (k == 4) { val t = ptext(p) ; eat(p) ; return FEStr(t, 0) }
-  if (k == 16) { val t = ptext(p) ; eat(p) ; return FEStr(t, 1) }                          // triple-quoted raw
-  if (k == 15) { val t = ptext(p) ; eat(p) ; return FEInterp(interpParts(t, 0), 0) }
-  if (k == 17) { val t = ptext(p) ; eat(p) ; return FEInterp(interpParts(t, 1), 1) }       // triple interp
-  if (k == 5) { eat(p) ; return FEBool("true") }
-  if (k == 6) { eat(p) ; return FEBool("false") }
-  if (k == 7) { eat(p) ; return FENull }
-  if (k == 8) { eat(p) ; return FEThis }
-  if (k == 69) { eat(p) ; return FEThis }                                 // self (prints "this")
-  val name = ptext(p) ; eat(p) ; return FEIdent(name)
+  if (k == 20) { eat(p); val e = parseExpr(p); eat(p); return e } // ( expr )
+  if (k == 74) { return parseListOrMap(p) } // [ list | map ]
+  if (k == 2) { val t = ptext(p); eat(p); return FEInt(t) }
+  if (k == 3) { val t = ptext(p); eat(p); return FEFloat(t) }
+  if (k == 9) { val t = ptext(p); eat(p); return FEChar(t) }
+  if (k == 4) { val t = ptext(p); eat(p); return FEStr(t, 0) }
+  if (k == 16) { val t = ptext(p); eat(p); return FEStr(t, 1) } // triple-quoted raw
+  if (k == 15) { val t = ptext(p); eat(p); return FEInterp(interpParts(t, 0), 0) }
+  if (k == 17) { val t = ptext(p); eat(p); return FEInterp(interpParts(t, 1), 1) } // triple interp
+  if (k == 5) { eat(p); return FEBool("true") }
+  if (k == 6) { eat(p); return FEBool("false") }
+  if (k == 7) { eat(p); return FENull }
+  if (k == 8) { eat(p); return FEThis }
+  if (k == 69) { eat(p); return FEThis } // self (prints "this")
+  val name = ptext(p); eat(p); return FEIdent(name)
 }
 
 // after '[': empty -> list; parse first expr; if next is ':' -> map (k: v pairs) else list.
 fun parseListOrMap(p: P): FExpr {
-  eat(p)                                             // '['
-  if (pk(p) == 75) { eat(p) ; return FEList(list()) }          // empty list
+  eat(p) // '['
+  if (pk(p) == 75) { eat(p); return FEList(list()) } // empty list
   val first = parseExpr(p)
-  if (pk(p) == 25) {                                             // ':' => map
+  if (pk(p) == 25) { // ':' => map
     eat(p)
     val ents = list()
     ents.push(FMapEnt(first, parseExpr(p)))
     while (pk(p) == 24) {
       eat(p)
-      if (pk(p) != 75) { val kk = parseExpr(p) ; eat(p) ; ents.push(FMapEnt(kk, parseExpr(p))) }
+      if (pk(p) != 75) { val kk = parseExpr(p); eat(p); ents.push(FMapEnt(kk, parseExpr(p))) }
     }
-    eat(p)                                                       // ']'
+    eat(p) // ']'
     return FEMap(ents)
   }
-  val elems = list()                                          // list
+  val elems = list() // list
   elems.push(first)
-  while (pk(p) == 24) { eat(p) ; if (pk(p) != 75) { elems.push(parseExpr(p)) } }
-  eat(p)                                                         // ']'
+  while (pk(p) == 24) { eat(p); if (pk(p) != 75) { elems.push(parseExpr(p)) } }
+  eat(p) // ']'
   return FEList(elems)
 }
 
 fun parseArg(p: P): FArg {
-  if (pk(p) == 1 && pk1(p) == 43) {              // IDENT '=' => named
-    val nm = ptext(p) ; eat(p) ; eat(p)
+  if (pk(p) == 1 && pk1(p) == 43) { // IDENT '=' => named
+    val nm = ptext(p); eat(p); eat(p)
     return FArg(nm, parseExpr(p))
   }
   return FArg("", parseExpr(p))
 }
+
 fun parseArgs(p: P): List {
   val args = list()
   if (pk(p) != 21) {
     var more = 1
-    while (more == 1) { args.push(parseArg(p)) ; if (pk(p) == 24) { eat(p) ; if (pk(p) == 21) { more = 0 } } else { more = 0 } }
+    while (more == 1) { args.push(parseArg(p)); if (pk(p) == 24) { eat(p); if (pk(p) == 21) { more = 0 } } else { more = 0 } }
   }
-  eat(p)                                         // consume ')'
+  eat(p) // consume ')'
   return args
 }
 
-fun parseTypeArgs(p: P): String {                    // at '<' — turbofish / generic arg list
+fun parseTypeArgs(p: P): String { // at '<' — turbofish / generic arg list
   eat(p)
   var s = parseTy(p)
-  while (pk(p) == 24) { eat(p) ; s = concat(s, concat(", ", parseTy(p))) }
-  eat(p)                                             // '>'
+  while (pk(p) == 24) { eat(p); s = concat(s, concat(", ", parseTy(p))) }
+  eat(p) // '>'
   return s
 }
+
 fun parseColonColon(p: P, e: FExpr): FExpr {
-  eat(p)                                             // '::'
-  if (pk(p) == 37) { return FETypeApp(e, parseTypeArgs(p)) }   // '<' turbofish
-  val nm = ptext(p) ; eat(p)
+  eat(p) // '::'
+  if (pk(p) == 37) { return FETypeApp(e, parseTypeArgs(p)) } // '<' turbofish
+  val nm = ptext(p); eat(p)
   return FEStatic(e, nm)
 }
+
 fun parsePostfix(p: P): FExpr {
   var e = parsePrimary(p)
   var go = 1
   while (go == 1) {
     val k = pk(p)
-    if (k == 27) { eat(p) ; val nm = ptext(p) ; eat(p) ; e = FEField(e, nm) }             // .name
-    else { if (k == 76) { eat(p) ; val nm = ptext(p) ; eat(p) ; e = FESafeField(e, nm) }  // ?.name
-    else { if (k == 26) { e = parseColonColon(p, e) }                                    // :: or ::<>
-    else { if (k == 78) { eat(p) ; e = FENotNull(e) }                                     // !!
-    else { if (k == 20) { eat(p) ; e = FECall(e, parseArgs(p)) }                          // ( args )
-    else { if (k == 74) { eat(p) ; val ix = parseExpr(p) ; eat(p) ; e = FEIndex(e, ix) }  // [ i ]
-    else { if (k == 22) { e = trailingLambda(p, e) }                                     // trailing { lambda }
-    else { go = 0 } } } } } } }
+    if (k == 27) { eat(p); val nm = ptext(p); eat(p); e = FEField(e, nm) } // .name
+    else { if (k == 76) { eat(p); val nm = ptext(p); eat(p); e = FESafeField(e, nm) } // ?.name
+      else { if (k == 26) { e = parseColonColon(p, e) } // :: or ::<>
+        else { if (k == 78) { eat(p); e = FENotNull(e) } // !!
+          else { if (k == 20) { eat(p); e = FECall(e, parseArgs(p)) } // ( args )
+            else { if (k == 74) { eat(p); val ix = parseExpr(p); eat(p); e = FEIndex(e, ix) } // [ i ]
+              else { if (k == 22) { e = trailingLambda(p, e) } // trailing { lambda }
+                else { go = 0 } } } } } } }
   }
   return e
 }
 
 fun parseUnary(p: P): FExpr {
   val k = pk(p)
-  if (k == 31) { eat(p) ; return FEUnary("neg -", parseUnary(p)) }
-  if (k == 44) { eat(p) ; return FEUnary("not !", parseUnary(p)) }
+  if (k == 31) { eat(p); return FEUnary("neg -", parseUnary(p)) }
+  if (k == 44) { eat(p); return FEUnary("not !", parseUnary(p)) }
   return parsePostfix(p)
 }
 
 fun isMul(k: Int): Bool { return k == 32 || k == 33 || k == 34 }
+
 fun isAdd(k: Int): Bool { return k == 30 || k == 31 }
+
 fun isRel(k: Int): Bool { return k == 37 || k == 38 || k == 39 || k == 40 }
 
 fun parseMul(p: P): FExpr {
   var e = parseUnary(p)
-  while (isMul(pk(p))) { val o = opStr(pk(p)) ; eat(p) ; e = FEBin(o, e, parseUnary(p)) }
+  while (isMul(pk(p))) { val o = opStr(pk(p)); eat(p); e = FEBin(o, e, parseUnary(p)) }
   return e
 }
+
 fun parseAdd(p: P): FExpr {
   var e = parseMul(p)
-  while (isAdd(pk(p))) { val o = opStr(pk(p)) ; eat(p) ; e = FEBin(o, e, parseMul(p)) }
+  while (isAdd(pk(p))) { val o = opStr(pk(p)); eat(p); e = FEBin(o, e, parseMul(p)) }
   return e
 }
+
 fun parseRange(p: P): FExpr {
   var e = parseAdd(p)
-  while (pk(p) == 28 || pk(p) == 83 || pk(p) == 84) {    // ..  ..<  until   (84 `until` and 83 `..<` are exclusive)
+  while (pk(p) == 28 || pk(p) == 83 || pk(p) == 84) { // ..  ..<  until   (84 `until` and 83 `..<` are exclusive)
     val op = if (pk(p) == 28) { ".." } else { "..<" }
     eat(p)
     e = FEBin(op, e, parseAdd(p))
   }
   return e
 }
-fun parseShift(p: P): FExpr {                          // << >>  (bp 15, between rel and range)
+
+fun parseShift(p: P): FExpr { // << >>  (bp 15, between rel and range)
   var e = parseRange(p)
-  while (pk(p) == 48 || pk(p) == 49) { val o = opStr(pk(p)) ; eat(p) ; e = FEBin(o, e, parseRange(p)) }
+  while (pk(p) == 48 || pk(p) == 49) { val o = opStr(pk(p)); eat(p); e = FEBin(o, e, parseRange(p)) }
   return e
 }
+
 fun parseRel(p: P): FExpr {
   var e = parseShift(p)
-  while (isRel(pk(p))) { val o = opStr(pk(p)) ; eat(p) ; e = FEBin(o, e, parseShift(p)) }
+  while (isRel(pk(p))) { val o = opStr(pk(p)); eat(p); e = FEBin(o, e, parseShift(p)) }
   return e
 }
+
 fun parseEq(p: P): FExpr {
   var e = parseRel(p)
-  while (pk(p) == 35 || pk(p) == 36) { val o = opStr(pk(p)) ; eat(p) ; e = FEBin(o, e, parseRel(p)) }
+  while (pk(p) == 35 || pk(p) == 36) { val o = opStr(pk(p)); eat(p); e = FEBin(o, e, parseRel(p)) }
   return e
 }
-fun parseBitAnd(p: P): FExpr {                         // &  (bp 9, tighter than ^)
+
+fun parseBitAnd(p: P): FExpr { // &  (bp 9, tighter than ^)
   var e = parseEq(p)
-  while (pk(p) == 46) { eat(p) ; e = FEBin("&", e, parseEq(p)) }
+  while (pk(p) == 46) { eat(p); e = FEBin("&", e, parseEq(p)) }
   return e
 }
-fun parseBitXor(p: P): FExpr {                         // ^  (bp 7)
+
+fun parseBitXor(p: P): FExpr { // ^  (bp 7)
   var e = parseBitAnd(p)
-  while (pk(p) == 47) { eat(p) ; e = FEBin("^", e, parseBitAnd(p)) }
+  while (pk(p) == 47) { eat(p); e = FEBin("^", e, parseBitAnd(p)) }
   return e
 }
-fun parseBitOr(p: P): FExpr {                          // |  (bp 5, loosest bitwise)
+
+fun parseBitOr(p: P): FExpr { // |  (bp 5, loosest bitwise)
   var e = parseBitXor(p)
-  while (pk(p) == 61) { eat(p) ; e = FEBin("|", e, parseBitXor(p)) }
+  while (pk(p) == 61) { eat(p); e = FEBin("|", e, parseBitXor(p)) }
   return e
 }
+
 fun parseAnd(p: P): FExpr {
   var e = parseBitOr(p)
-  while (pk(p) == 41) { eat(p) ; e = FEBin("&&", e, parseBitOr(p)) }
+  while (pk(p) == 41) { eat(p); e = FEBin("&&", e, parseBitOr(p)) }
   return e
 }
+
 fun parseOr(p: P): FExpr {
   var e = parseAnd(p)
-  while (pk(p) == 42) { eat(p) ; e = FEBin("||", e, parseAnd(p)) }
+  while (pk(p) == 42) { eat(p); e = FEBin("||", e, parseAnd(p)) }
   return e
 }
+
 fun parseExpr(p: P): FExpr {
   var e = parseOr(p)
-  while (pk(p) == 77) { eat(p) ; e = FEElvis(e, parseOr(p)) }   // ?:  loosest, left-assoc
+  while (pk(p) == 77) { eat(p); e = FEElvis(e, parseOr(p)) } // ?:  loosest, left-assoc
   return e
 }
 
 fun isStmtStart(k: Int): Bool { return k == 11 || k == 12 || k == 13 || k == 14 || k == 52 }
 
-fun parseBlock(p: P): FExpr { eat(p) ; return parseBlockBody(p) }   // eats '{'
-fun parseBlockBody(p: P): FExpr {                                   // '{' already consumed
+fun parseBlock(p: P): FExpr { eat(p); return parseBlockBody(p) } // eats '{'
+
+fun parseBlockBody(p: P): FExpr { // '{' already consumed
   val stmts = list()
   var res = FENoRes
   var go = 1
@@ -874,45 +1002,50 @@ fun parseBlockBody(p: P): FExpr {                                   // '{' alrea
       if (isStmtStart(k)) { stmts.push(parseStmt(p)) }
       else {
         val e = parseExpr(p)
-        if (pk(p) == 43) { eat(p) ; stmts.push(FSAssign(e, parseExpr(p))) }
-        else { if (pk(p) == 82) { val op = ptext(p) ; eat(p) ; stmts.push(FSAssign(e, FEBin(op, e, parseExpr(p)))) }   // x op= v  =>  x = x op v
-        else { if (pk(p) == 23) { res = e } else { stmts.push(FSExprS(e)) } } }
+        if (pk(p) == 43) { eat(p); stmts.push(FSAssign(e, parseExpr(p))) }
+        else { if (pk(p) == 82) { val op = ptext(p); eat(p); stmts.push(FSAssign(e, FEBin(op, e, parseExpr(p)))) } // x op= v  =>  x = x op v
+          else { if (pk(p) == 23) { res = e } else { stmts.push(FSExprS(e)) } } }
       }
     }
   }
-  eat(p)                                         // consume '}'
+  eat(p) // consume '}'
   return FEBlock(stmts, res)
 }
+
 // '{' already consumed; if the head looks like `params ->` it's a lambda (ok=1), else restore.
 fun tryLambdaParams(p: P): FLamHead {
   val saved = p.pos
-  if (pk(p) == 60) { eat(p) ; return FLamHead(1, "") }            // bare '->'
+  if (pk(p) == 60) { eat(p); return FLamHead(1, "") } // bare '->'
   if (pk(p) != 1) { return FLamHead(0, "") }
   var s = ""
   var ok = 1
   var more = 1
   while (more == 1) {
-    if (pk(p) != 1) { ok = 0 ; more = 0 }
+    if (pk(p) != 1) { ok = 0; more = 0 }
     else {
-      var one = ptext(p) ; eat(p)
-      if (pk(p) == 25) { eat(p) ; one = concat(one, concat(": ", parseTy(p))) }
+      var one = ptext(p); eat(p)
+      if (pk(p) == 25) { eat(p); one = concat(one, concat(": ", parseTy(p))) }
       if (strEq(s, "")) { s = one } else { s = concat(s, concat(", ", one)) }
       if (pk(p) == 24) { eat(p) } else { more = 0 }
     }
   }
-  if (ok == 1 && pk(p) == 60) { eat(p) ; return FLamHead(1, s) }
+  if (ok == 1 && pk(p) == 60) { eat(p); return FLamHead(1, s) }
   p.pos = saved
   return FLamHead(0, "")
 }
-fun parseTrailingLam(p: P): FExpr {                 // sees '{'
+
+fun parseTrailingLam(p: P): FExpr { // sees '{'
   eat(p)
   val lh = tryLambdaParams(p)
   var params = ""
   if (lh.ok == 1) { params = lh.params }
-  return FELambda(params, parseBlockBody(p))        // implicit-it => params ""
+  return FELambda(params, parseBlockBody(p)) // implicit-it => params ""
 }
-fun callAppend(f: FExpr, args: List, larg: FArg): FExpr { args.push(larg) ; return FECall(f, args) }
-fun callNew(e: FExpr, larg: FArg): FExpr { val a = list() ; a.push(larg) ; return FECall(e, a) }
+
+fun callAppend(f: FExpr, args: List, larg: FArg): FExpr { args.push(larg); return FECall(f, args) }
+
+fun callNew(e: FExpr, larg: FArg): FExpr { val a = list(); a.push(larg); return FECall(e, a) }
+
 fun trailingLambda(p: P, e: FExpr): FExpr {
   val larg = FArg("", parseTrailingLam(p))
   return when (e) {
@@ -923,217 +1056,224 @@ fun trailingLambda(p: P, e: FExpr): FExpr {
 
 fun parseStmt(p: P): FStmt {
   val k = pk(p)
-  if (k == 11 || k == 12) {                      // val / var
+  if (k == 11 || k == 12) { // val / var
     val isVar = if (k == 12) { 1 } else { 0 }
     eat(p)
-    val name = ptext(p) ; eat(p)
+    val name = ptext(p); eat(p)
     var ty = ""
-    if (pk(p) == 25) { eat(p) ; ty = parseTy(p) }
-    eat(p)                                        // consume '='
+    if (pk(p) == 25) { eat(p); ty = parseTy(p) }
+    eat(p) // consume '='
     return FSLet(isVar, name, ty, parseExpr(p))
   }
-  if (k == 13) {                                 // return
+  if (k == 13) { // return
     eat(p)
     if (isRetStop(pk(p))) { return FSReturnU }
     return FSReturnV(parseExpr(p))
   }
-  if (k == 14) {                                 // while (cond) { body }
+  if (k == 14) { // while (cond) { body }
     eat(p)
-    eat(p)                                        // '('
+    eat(p) // '('
     val c = parseExpr(p)
-    eat(p)                                        // ')'
+    eat(p) // ')'
     return FSWhile(c, parseBlock(p))
   }
-  if (k == 52) {                                 // for (v in iter) { body }
+  if (k == 52) { // for (v in iter) { body }
     eat(p)
-    eat(p)                                        // '('
-    val v = ptext(p) ; eat(p)
-    eat(p)                                        // 'in'
+    eat(p) // '('
+    val v = ptext(p); eat(p)
+    eat(p) // 'in'
     val it = parseExpr(p)
-    eat(p)                                        // ')'
+    eat(p) // ')'
     return FSFor(v, it, parseBlock(p))
   }
   val e = parseExpr(p)
-  if (pk(p) == 43) { eat(p) ; return FSAssign(e, parseExpr(p)) }
-  if (pk(p) == 82) { val op = ptext(p) ; eat(p) ; return FSAssign(e, FEBin(op, e, parseExpr(p))) }   // x op= v  =>  x = x op v
+  if (pk(p) == 43) { eat(p); return FSAssign(e, parseExpr(p)) }
+  if (pk(p) == 82) { val op = ptext(p); eat(p); return FSAssign(e, FEBin(op, e, parseExpr(p))) } // x op= v  =>  x = x op v
   return FSExprS(e)
 }
 
 fun parseParam(p: P): FParam {
-  val nm = ptext(p) ; eat(p)
-  eat(p)                                          // ':'
+  val nm = ptext(p); eat(p)
+  eat(p) // ':'
   var pre = ""
-  if (pk(p) == 71) { eat(p) ; pre = "inout " }
-  else { if (pk(p) == 72) { eat(p) ; pre = "consuming " } }
+  if (pk(p) == 71) { eat(p); pre = "inout " }
+  else { if (pk(p) == 72) { eat(p); pre = "consuming " } }
   return FParam(nm, concat(pre, parseTy(p)))
 }
+
 fun parseRecv(p: P): String {
   val k = pk(p)
-  if (k == 69) { eat(p) ; return "self" }
-  if (k == 70 && pk1(p) == 69) { eat(p) ; eat(p) ; return "mut self" }
-  if (k == 72 && pk1(p) == 69) { eat(p) ; eat(p) ; return "consuming self" }
+  if (k == 69) { eat(p); return "self" }
+  if (k == 70 && pk1(p) == 69) { eat(p); eat(p); return "mut self" }
+  if (k == 72 && pk1(p) == 69) { eat(p); eat(p); return "consuming self" }
   return ""
 }
+
 fun parseFunc(p: P, annos: List): FFunc {
-  eat(p)                                          // 'fun'
-  var gen = parseGenerics(p)                       // free-fn: fun <T> name
-  val name = ptext(p) ; eat(p)
-  if (strEq(gen, "")) { gen = parseGenerics(p) }   // method: fun name<T>
-  eat(p)                                           // '('
+  eat(p) // 'fun'
+  var gen = parseGenerics(p) // free-fn: fun <T> name
+  val name = ptext(p); eat(p)
+  if (strEq(gen, "")) { gen = parseGenerics(p) } // method: fun name<T>
+  eat(p) // '('
   val recv = parseRecv(p)
   val params = list()
   var need = 0
   if (strEq(recv, "")) { if (pk(p) != 21) { need = 1 } }
-  else { if (pk(p) == 24) { eat(p) ; need = 1 } }
+  else { if (pk(p) == 24) { eat(p); need = 1 } }
   if (need == 1) { var more = 1
-    while (more == 1) { params.push(parseParam(p)) ; if (pk(p) == 24) { eat(p) } else { more = 0 } } }
-  eat(p)                                           // ')'
+    while (more == 1) { params.push(parseParam(p)); if (pk(p) == 24) { eat(p) } else { more = 0 } } }
+  eat(p) // ')'
   var ret = ""
-  if (pk(p) == 25) { eat(p) ; ret = parseTy(p) }
-  val whr = parseWhere(p)                           // where AFTER ret
+  if (pk(p) == 25) { eat(p); ret = parseTy(p) }
+  val whr = parseWhere(p) // where AFTER ret
   var body = FENoRes
-  if (pk(p) == 43) { eat(p) ; body = parseExpr(p) }
-  else { if (pk(p) == 22) { body = parseBlock(p) } }   // else signature-only
+  if (pk(p) == 43) { eat(p); body = parseExpr(p) }
+  else { if (pk(p) == 22) { body = parseBlock(p) } } // else signature-only
   return FFunc(annos, name, gen, recv, params, ret, whr, body)
 }
 
 // import a::b::c  ->  the "::"-joined path string
 fun parseImport(p: P): String {
-  eat(p)                                         // 'import'
-  var s = ptext(p) ; eat(p)
-  while (pk(p) == 26) { eat(p) ; s = concat(s, concat("::", ptext(p))) ; eat(p) }
+  eat(p) // 'import'
+  var s = ptext(p); eat(p)
+  while (pk(p) == 26) { eat(p); s = concat(s, concat("::", ptext(p))); eat(p) }
   return s
 }
 
 // use mod::name  ->  aliases bare `name` to the module-mangled item in the importing scope
 struct FUse(val mod: String, val name: String)
+
 fun parseUse(p: P): FUse {
-  eat(p)                                         // 'use'
-  val m = ptext(p) ; eat(p)                      // module ident
-  eat(p)                                         // '::' (token 26)
-  val nm = ptext(p) ; eat(p)                     // item ident
+  eat(p) // 'use'
+  val m = ptext(p); eat(p) // module ident
+  eat(p) // '::' (token 26)
+  val nm = ptext(p); eat(p) // item ident
   return FUse(m, nm)
 }
 
 // const NAME [: Ty] = <constant expression>
 struct FConstDecl(val name: String, val expr: FExpr)
+
 fun parseConst(p: P): FConstDecl {
-  eat(p)                                         // 'const'
-  val name = ptext(p) ; eat(p)
-  if (pk(p) == 25) { eat(p) ; parseTy(p) }       // optional ': Ty' (ignored — consts are integers)
-  eat(p)                                         // '='
+  eat(p) // 'const'
+  val name = ptext(p); eat(p)
+  if (pk(p) == 25) { eat(p); parseTy(p) } // optional ': Ty' (ignored — consts are integers)
+  eat(p) // '='
   return FConstDecl(name, parseExpr(p))
 }
 
 fun parseTypeDecl(p: P, annos: List, kind: Int): FTDecl {
-  eat(p)                                          // 'struct' | 'class'
-  val name = ptext(p) ; eat(p)
+  eat(p) // 'struct' | 'class'
+  val name = ptext(p); eat(p)
   val gen = parseGenerics(p)
   val fields = list()
   if (pk(p) == 20) { eat(p)
     if (pk(p) != 21) { var more = 1
       while (more == 1) {
         var isPub = 0
-        if (pk(p) == 56) { isPub = 1 ; eat(p) }
+        if (pk(p) == 56) { isPub = 1; eat(p) }
         val isVar = if (pk(p) == 12) { 1 } else { 0 }
-        eat(p)                                     // val / var
-        val fn = ptext(p) ; eat(p)
-        eat(p)                                     // ':'
+        eat(p) // val / var
+        val fn = ptext(p); eat(p)
+        eat(p) // ':'
         fields.push(FFld(isPub, isVar, fn, parseTy(p)))
         if (pk(p) == 24) { eat(p) } else { more = 0 }
       } }
-    eat(p) }                                       // ')'
+    eat(p) } // ')'
   val whr = parseWhere(p)
   var dtor = FENoRes
   val methods = list()
   if (pk(p) == 22) { eat(p)
     while (pk(p) != 23 && pk(p) != 0) {
       val manns = parseAnnos(p)
-      if (pk(p) == 68) { eat(p) ; dtor = parseBlock(p) }        // deinit { ... }
+      if (pk(p) == 68) { eat(p); dtor = parseBlock(p) } // deinit { ... }
       else { methods.push(parseFunc(p, manns)) }
     }
-    eat(p) }                                       // '}'
+    eat(p) } // '}'
   return FTDecl(annos, kind, name, gen, fields, whr, dtor, methods)
 }
 
 fun parseVariant(p: P): FVariant {
-  val vn = ptext(p) ; eat(p)
+  val vn = ptext(p); eat(p)
   if (pk(p) != 20) { return FVariant(vn, 0, list(), list()) }
-  eat(p)                                          // '('
-  if (pk(p) == 21) { eat(p) ; return FVariant(vn, 0, list(), list()) }   // '()'
-  val named = if (pk(p) == 1 && pk1(p) == 25) { 1 } else { 0 }                // IDENT ':' ?
+  eat(p) // '('
+  if (pk(p) == 21) { eat(p); return FVariant(vn, 0, list(), list()) } // '()'
+  val named = if (pk(p) == 1 && pk1(p) == 25) { 1 } else { 0 } // IDENT ':' ?
   if (named == 1) {
     val flds = list()
     var more = 1
     while (more == 1) {
-      val fn = ptext(p) ; eat(p)
-      eat(p)                                       // ':'
+      val fn = ptext(p); eat(p)
+      eat(p) // ':'
       flds.push(FFld(0, 0, fn, parseTy(p)))
       if (pk(p) == 24) { eat(p) } else { more = 0 }
     }
-    eat(p)                                         // ')'
+    eat(p) // ')'
     return FVariant(vn, 2, list(), flds)
   }
   val tys = list()
   var more2 = 1
-  while (more2 == 1) { tys.push(parseTy(p)) ; if (pk(p) == 24) { eat(p) } else { more2 = 0 } }
-  eat(p)                                           // ')'
+  while (more2 == 1) { tys.push(parseTy(p)); if (pk(p) == 24) { eat(p) } else { more2 = 0 } }
+  eat(p) // ')'
   return FVariant(vn, 1, tys, list())
 }
+
 fun parseEnum(p: P, annos: List): FEDecl {
-  eat(p)                                          // 'enum'
-  val name = ptext(p) ; eat(p)
+  eat(p) // 'enum'
+  val name = ptext(p); eat(p)
   val gen = parseGenerics(p)
-  eat(p)                                           // '{'
+  eat(p) // '{'
   val variants = list()
   while (pk(p) != 23 && pk(p) != 0) { variants.push(parseVariant(p)) }
-  eat(p)                                           // '}'
+  eat(p) // '}'
   return FEDecl(annos, name, gen, variants)
 }
+
 fun parseTrait(p: P, annos: List): FTraitDecl {
-  eat(p)                                          // 'trait'
-  val name = ptext(p) ; eat(p)
+  eat(p) // 'trait'
+  val name = ptext(p); eat(p)
   val gen = parseGenerics(p)
   var supers = ""
-  if (pk(p) == 25) { eat(p) ; supers = concat(" : ", parseBoundList(p)) }    // ' : ' supers
+  if (pk(p) == 25) { eat(p); supers = concat(" : ", parseBoundList(p)) } // ' : ' supers
   val whr = parseWhere(p)
-  eat(p)                                           // '{'
+  eat(p) // '{'
   val assoc = list()
   val methods = list()
   while (pk(p) != 23 && pk(p) != 0) {
     val manns = parseAnnos(p)
-    if (pk(p) == 1 && strEq(ptext(p), "type")) {    // associated type
+    if (pk(p) == 1 && strEq(ptext(p), "type")) { // associated type
       eat(p)
-      val an = ptext(p) ; eat(p)
+      val an = ptext(p); eat(p)
       var text = ""
-      if (pk(p) == 25) { eat(p) ; text = concat(" : ", parseBoundList(p)) }
+      if (pk(p) == 25) { eat(p); text = concat(" : ", parseBoundList(p)) }
       assoc.push(FAssoc(an, text))
     } else { methods.push(parseFunc(p, manns)) }
   }
-  eat(p)                                           // '}'
+  eat(p) // '}'
   return FTraitDecl(annos, name, gen, supers, whr, assoc, methods)
 }
+
 fun parseImpl(p: P, annos: List): FImplDecl {
-  eat(p)                                          // 'impl'
+  eat(p) // 'impl'
   val gen = parseGenerics(p)
   val first = parseTy(p)
   var traitName = ""
   var forTy = first
-  if (pk(p) == 52) { eat(p) ; traitName = first ; forTy = parseTy(p) }   // 'for'
+  if (pk(p) == 52) { eat(p); traitName = first; forTy = parseTy(p) } // 'for'
   val whr = parseWhere(p)
-  eat(p)                                           // '{'
+  eat(p) // '{'
   val assoc = list()
   val methods = list()
   while (pk(p) != 23 && pk(p) != 0) {
     val manns = parseAnnos(p)
-    if (pk(p) == 1 && strEq(ptext(p), "type")) {    // associated-type binding
+    if (pk(p) == 1 && strEq(ptext(p), "type")) { // associated-type binding
       eat(p)
-      val an = ptext(p) ; eat(p)
-      eat(p)                                        // '='
+      val an = ptext(p); eat(p)
+      eat(p) // '='
       assoc.push(FAssoc(an, concat(" = ", parseTy(p))))
     } else { methods.push(parseFunc(p, manns)) }
   }
-  eat(p)                                           // '}'
+  eat(p) // '}'
   return FImplDecl(annos, gen, traitName, forTy, whr, assoc, methods)
 }
 
@@ -1145,6 +1285,7 @@ fun pad3(n: Int): String {
   while (strLen(s) < 3) { s = concat("0", s) }
   return s
 }
+
 fun escByte(out: String, b: Int, srcChar: String): String {
   if (b == 34) { return concat(out, "\\\"") }
   if (b == 92) { return concat(out, "\\\\") }
@@ -1155,102 +1296,110 @@ fun escByte(out: String, b: Int, srcChar: String): String {
   if (b < 32 || b > 126) { return concat(out, concat("\\", pad3(b))) }
   return concat(out, srcChar)
 }
+
 fun escStr(raw: String, isRaw: Int): String {
   var out = ""
   val n = strLen(raw)
   var i = 0
   while (i < n) {
     val c = charAt(raw, i)
-    if (isRaw == 0 && c == 92 && i + 1 < n) {          // decode one source escape
+    if (isRaw == 0 && c == 92 && i + 1 < n) { // decode one source escape
       val e = charAt(raw, i + 1)
       var b = e
       if (e == 110) { b = 10 } else { if (e == 116) { b = 9 } else { if (e == 114) { b = 13 }
-      else { if (e == 92) { b = 92 } else { if (e == 34) { b = 34 } else { if (e == 48) { b = 0 }
-      else { b = e } } } } } }                          // \$ -> $ ; unknown -> the char itself
+          else { if (e == 92) { b = 92 } else { if (e == 34) { b = 34 } else { if (e == 48) { b = 0 }
+                else { b = e } } } } } } // \$ -> $ ; unknown -> the char itself
       out = escByte(out, b, substr(raw, i + 1, 1))
       i = i + 2
     }
-    else { out = escByte(out, c, substr(raw, i, 1)) ; i = i + 1 }
+    else { out = escByte(out, c, substr(raw, i, 1)); i = i + 1 }
   }
   return out
 }
-fun stripZeros(s: String): String {         // strip trailing '0' from a fractional digit string
+
+fun stripZeros(s: String): String { // strip trailing '0' from a fractional digit string
   var e = strLen(s)
   while (e > 0 && charAt(s, e - 1) == 48) { e = e - 1 }
   return substr(s, 0, e)
 }
-fun zeros(k: Int): String { var s = "" ; var i = 0 ; while (i < k) { s = concat(s, "0") ; i = i + 1 } ; return s }
-fun incDigits(s: String): String {          // s all-digits; return s+1 (may grow one digit)
+
+fun zeros(k: Int): String { var s = ""; var i = 0; while (i < k) { s = concat(s, "0"); i = i + 1 }; return s }
+
+fun incDigits(s: String): String { // s all-digits; return s+1 (may grow one digit)
   var i = strLen(s) - 1
   var carry = 1
   var out = ""
   while (i >= 0) {
     var d = charAt(s, i) - 48 + carry
-    if (d >= 10) { d = d - 10 ; carry = 1 } else { carry = 0 }
+    if (d >= 10) { d = d - 10; carry = 1 } else { carry = 0 }
     out = concat(intToStr(d), out)
     i = i - 1
   }
   if (carry == 1) { out = concat("1", out) }
   return out
 }
-fun expStr(e: Int): String {                 // "e+06" / "e-05" (exponent >= 2 digits)
+
+fun expStr(e: Int): String { // "e+06" / "e-05" (exponent >= 2 digits)
   var sign = "+"
   var m = e
-  if (e < 0) { sign = "-" ; m = 0 - e }
+  if (e < 0) { sign = "-"; m = 0 - e }
   var ds = intToStr(m)
   if (strLen(ds) < 2) { ds = concat("0", ds) }
   return concat("e", concat(sign, ds))
 }
+
 // reproduce OCaml default float printing (%g, precision 6): 1.0->"1", 0.5->"0.5", 100.0->"100",
 // 1000000.0->"1e+06", 1.2345678->"1.23457". Input is a d+.d+ decimal lexeme.
 fun fmtFloat(raw: String): String {
   // Exponent lexemes (1.5e3, 2e-4, 1e9) are already normalized enough; emit them verbatim rather than
   // running them through the fixed-notation %g emulator (which assumes a plain d+.d+ lexeme).
   var xi = 0
-  while (xi < strLen(raw)) { val xc = charAt(raw, xi) ; if (xc == 101 || xc == 69) { return raw } ; xi = xi + 1 }
+  while (xi < strLen(raw)) { val xc = charAt(raw, xi); if (xc == 101 || xc == 69) { return raw }; xi = xi + 1 }
   var dot = 0 - 1
   var i = 0
-  while (i < strLen(raw)) { if (charAt(raw, i) == 46) { dot = i } ; i = i + 1 }
+  while (i < strLen(raw)) { if (charAt(raw, i) == 46) { dot = i }; i = i + 1 }
   if (dot < 0) { return raw }
   val intPart = substr(raw, 0, dot)
   val allDigits = concat(intPart, substr(raw, dot + 1, strLen(raw) - dot - 1))
   var fnz = 0
   while (fnz < strLen(allDigits) && charAt(allDigits, fnz) == 48) { fnz = fnz + 1 }
-  if (fnz >= strLen(allDigits)) { return "0" }              // value is zero
+  if (fnz >= strLen(allDigits)) { return "0" } // value is zero
   var e = strLen(intPart) - 1 - fnz
   var sig = substr(allDigits, fnz, strLen(allDigits) - fnz)
   val P = 6
-  if (strLen(sig) > P) {                                    // round to 6 significant figures
+  if (strLen(sig) > P) { // round to 6 significant figures
     val nxtd = charAt(sig, P)
     var head = substr(sig, 0, P)
-    if (nxtd >= 53) { head = incDigits(head) ; if (strLen(head) > P) { head = substr(head, 0, P) ; e = e + 1 } }
+    if (nxtd >= 53) { head = incDigits(head); if (strLen(head) > P) { head = substr(head, 0, P); e = e + 1 } }
     sig = head
   }
-  if (e < 0 - 4 || e >= P) {                                // scientific
+  if (e < 0 - 4 || e >= P) { // scientific
     val rest = stripZeros(substr(sig, 1, strLen(sig) - 1))
     if (strEq(rest, "")) { return concat(substr(sig, 0, 1), expStr(e)) }
     return concat(substr(sig, 0, 1), concat(".", concat(rest, expStr(e))))
   }
-  if (e >= 0) {                                             // fixed, integer part present
+  if (e >= 0) { // fixed, integer part present
     var ip = ""
     var fp = ""
-    if (strLen(sig) > e + 1) { ip = substr(sig, 0, e + 1) ; fp = substr(sig, e + 1, strLen(sig) - e - 1) }
+    if (strLen(sig) > e + 1) { ip = substr(sig, 0, e + 1); fp = substr(sig, e + 1, strLen(sig) - e - 1) }
     else { ip = concat(sig, zeros(e + 1 - strLen(sig))) }
     fp = stripZeros(fp)
     if (strEq(fp, "")) { return ip }
     return concat(ip, concat(".", fp))
   }
-  return concat("0.", stripZeros(concat(zeros(0 - e - 1), sig)))   // 0 < value < 1
+  return concat("0.", stripZeros(concat(zeros(0 - e - 1), sig))) // 0 < value < 1
 }
+
 fun pad(ind: Int): String {
   var s = ""
   var i = 0
-  while (i < ind) { s = concat(s, "  ") ; i = i + 1 }
+  while (i < ind) { s = concat(s, "  "); i = i + 1 }
   return s
 }
-fun line(ind: Int, s: String): Int { println(concat(pad(ind), s)) ; return 0 }
 
-fun isNoResF(e: FExpr): Bool { return when (e) { FENoRes -> true ; else -> false } }
+fun line(ind: Int, s: String): Int { println(concat(pad(ind), s)); return 0 }
+
+fun isNoResF(e: FExpr): Bool { return when (e) { FENoRes -> true; else -> false } }
 
 fun printExpr(ind: Int, e: FExpr): Int {
   return when (e) {
@@ -1285,10 +1434,12 @@ fun printExpr(ind: Int, e: FExpr): Int {
     else -> 0
   }
 }
+
 fun printRet(ind: Int, e: FExpr): Int {
   if (isNoResF(e)) { return line(ind, "return") }
   return lineThen1(ind, "return", e)
 }
+
 fun printPat(ind: Int, pat: FPat): Int {
   return when (pat) {
     FPWild -> line(ind, "_")
@@ -1307,58 +1458,67 @@ fun printPat(ind: Int, pat: FPat): Int {
     else -> 0
   }
 }
+
 fun negMark(neg: Int): String { if (neg == 1) { return "!" } return "" }
+
 fun printCtor(ind: Int, pth: String, subs: List): Int {
   line(ind, concat("ctor ", pth))
   var i = 0
-  while (i < subs.len()) { val s: FPat = subs.get(i) ; printPat(ind + 1, s) ; i = i + 1 }
+  while (i < subs.len()) { val s: FPat = subs.get(i); printPat(ind + 1, s); i = i + 1 }
   return 0
 }
+
 fun printIn(ind: Int, mark: String, e: FExpr): Int {
-  line(ind, concat(mark, "in")) ; printExpr(ind + 1, e) ; return 0
+  line(ind, concat(mark, "in")); printExpr(ind + 1, e); return 0
 }
+
 fun printRecord(ind: Int, pth: String, flds: List, hasRest: Int): Int {
   line(ind, concat("ctor ", pth))
   var i = 0
   while (i < flds.len()) { val f: FRFld = flds.get(i)
-    if (f.hasPat == 1) { line(ind + 1, concat("field ", concat(f.name, " ="))) ; printPat(ind + 2, f.pat) }
+    if (f.hasPat == 1) { line(ind + 1, concat("field ", concat(f.name, " ="))); printPat(ind + 2, f.pat) }
     else { line(ind + 1, concat("field ", concat(f.name, " (pun)"))) }
     i = i + 1 }
   if (hasRest == 1) { line(ind + 1, "..") }
   return 0
 }
+
 fun printWhen(ind: Int, hasSubj: Int, bindStr: String, subj: FExpr, arms: List): Int {
   line(ind, "when")
-  if (hasSubj == 1) { line(ind + 1, concat("subject ", bindStr)) ; printExpr(ind + 2, subj) }
+  if (hasSubj == 1) { line(ind + 1, concat("subject ", bindStr)); printExpr(ind + 2, subj) }
   var i = 0
   while (i < arms.len()) {
     val a: FArm = arms.get(i)
     if (a.kind == 1) { line(ind + 1, "else") }
-    else { if (a.kind == 0) { line(ind + 1, "cond") ; printExpr(ind + 2, a.lhs) }
-    else {
-      line(ind + 1, "patterns")
-      var j = 0
-      while (j < a.pats.len()) { val pp: FPat = a.pats.get(j) ; printPat(ind + 2, pp) ; j = j + 1 }
-      if (isNoResF(a.guard) == false) { line(ind + 1, "guard") ; printExpr(ind + 2, a.guard) }
-    } }
+    else { if (a.kind == 0) { line(ind + 1, "cond"); printExpr(ind + 2, a.lhs) }
+      else {
+        line(ind + 1, "patterns")
+        var j = 0
+        while (j < a.pats.len()) { val pp: FPat = a.pats.get(j); printPat(ind + 2, pp); j = j + 1 }
+        if (isNoResF(a.guard) == false) { line(ind + 1, "guard"); printExpr(ind + 2, a.guard) }
+      } }
     line(ind + 1, "->")
     printExpr(ind + 2, a.body)
     i = i + 1
   }
   return 0
 }
-fun lineThen1(ind: Int, s: String, x: FExpr): Int { line(ind, s) ; printExpr(ind + 1, x) ; return 0 }
+
+fun lineThen1(ind: Int, s: String, x: FExpr): Int { line(ind, s); printExpr(ind + 1, x); return 0 }
+
 fun printBin(ind: Int, o: String, l: FExpr, r: FExpr): Int {
-  line(ind, concat("binary ", o)) ; printExpr(ind + 1, l) ; printExpr(ind + 1, r) ; return 0
+  line(ind, concat("binary ", o)); printExpr(ind + 1, l); printExpr(ind + 1, r); return 0
 }
-fun printInterpExpr(ind: Int, e: FExpr): Int { line(ind + 1, "expr") ; printExpr(ind + 2, e) ; return 0 }
+
+fun printInterpExpr(ind: Int, e: FExpr): Int { line(ind + 1, "expr"); printExpr(ind + 2, e); return 0 }
+
 fun printInterp(ind: Int, parts: List, isRaw: Int): Int {
   line(ind, "interp")
   var i = 0
   while (i < parts.len()) {
     val pt: FIPart = parts.get(i)
     when (pt) {
-      FILit(s)  -> line(ind + 1, concat("lit \"", concat(escStr(s, isRaw), "\"")))
+      FILit(s) -> line(ind + 1, concat("lit \"", concat(escStr(s, isRaw), "\"")))
       FIExpr(e) -> printInterpExpr(ind, e)
       else -> 0
     }
@@ -1366,17 +1526,20 @@ fun printInterp(ind: Int, parts: List, isRaw: Int): Int {
   }
   return 0
 }
+
 fun printLambda(ind: Int, params: String, body: FExpr): Int {
   line(ind, concat("lambda (", concat(params, ")")))
   printExpr(ind + 1, body)
   return 0
 }
+
 fun printList(ind: Int, elems: List): Int {
   line(ind, "list")
   var i = 0
-  while (i < elems.len()) { val e: FExpr = elems.get(i) ; printExpr(ind + 1, e) ; i = i + 1 }
+  while (i < elems.len()) { val e: FExpr = elems.get(i); printExpr(ind + 1, e); i = i + 1 }
   return 0
 }
+
 fun printMap(ind: Int, ents: List): Int {
   line(ind, "map")
   var i = 0
@@ -1389,6 +1552,7 @@ fun printMap(ind: Int, ents: List): Int {
   }
   return 0
 }
+
 fun printCall(ind: Int, f: FExpr, args: List): Int {
   line(ind, "call")
   printExpr(ind + 1, f)
@@ -1398,27 +1562,30 @@ fun printCall(ind: Int, f: FExpr, args: List): Int {
     while (i < args.len()) {
       val a: FArg = args.get(i)
       if (strEq(a.name, "")) { printExpr(ind + 2, a.expr) }
-      else { line(ind + 2, concat(a.name, " =")) ; printExpr(ind + 3, a.expr) }
+      else { line(ind + 2, concat(a.name, " =")); printExpr(ind + 3, a.expr) }
       i = i + 1
     }
   }
   return 0
 }
+
 fun printBlock(ind: Int, stmts: List, res: FExpr): Int {
   line(ind, "block")
   var i = 0
-  while (i < stmts.len()) { val s: FStmt = stmts.get(i) ; printStmt(ind + 1, s) ; i = i + 1 }
-  if (isNoResF(res) == false) { line(ind + 1, "result") ; printExpr(ind + 2, res) }
+  while (i < stmts.len()) { val s: FStmt = stmts.get(i); printStmt(ind + 1, s); i = i + 1 }
+  if (isNoResF(res) == false) { line(ind + 1, "result"); printExpr(ind + 2, res) }
   return 0
 }
+
 fun printIf(ind: Int, c: FExpr, t: FExpr, el: FExpr): Int {
   line(ind, "if")
   printExpr(ind + 1, c)
   line(ind + 1, "then")
   printExpr(ind + 2, t)
-  if (isNoResF(el) == false) { line(ind + 1, "else") ; printExpr(ind + 2, el) }
+  if (isNoResF(el) == false) { line(ind + 1, "else"); printExpr(ind + 2, el) }
   return 0
 }
+
 fun printStmt(ind: Int, s: FStmt): Int {
   return when (s) {
     FSLet(isVar, name, ty, init) -> printLet(ind, isVar, name, ty, init)
@@ -1431,15 +1598,18 @@ fun printStmt(ind: Int, s: FStmt): Int {
     else -> 0
   }
 }
+
 fun printBin2(ind: Int, s: String, l: FExpr, r: FExpr): Int {
-  line(ind, s) ; printExpr(ind + 1, l) ; printExpr(ind + 1, r) ; return 0
+  line(ind, s); printExpr(ind + 1, l); printExpr(ind + 1, r); return 0
 }
+
 fun printFor(ind: Int, v: String, it: FExpr, b: FExpr): Int {
   line(ind, concat("for ", concat(v, " in")))
   printExpr(ind + 1, it)
   printExpr(ind + 1, b)
   return 0
 }
+
 fun printLet(ind: Int, isVar: Int, name: String, ty: String, init: FExpr): Int {
   val kwName = if (isVar == 1) { "var " } else { "val " }
   var head = concat(kwName, name)
@@ -1460,6 +1630,7 @@ fun paramStr(params: List): String {
   }
   return s
 }
+
 fun printAnnos(ind: Int, annos: List): Int {
   var i = 0
   while (i < annos.len()) {
@@ -1467,45 +1638,51 @@ fun printAnnos(ind: Int, annos: List): Int {
     if (a.args.len() == 0) { line(ind, concat("@", a.name)) }
     else { line(ind, concat("@", concat(a.name, "(...)")))
       var j = 0
-      while (j < a.args.len()) { val e: FExpr = a.args.get(j) ; printExpr(ind + 1, e) ; j = j + 1 } }
+      while (j < a.args.len()) { val e: FExpr = a.args.get(j); printExpr(ind + 1, e); j = j + 1 } }
     i = i + 1
   }
   return 0
 }
+
 fun funcHead(fd: FFunc): String {
   var recvp = ""
   if (strEq(fd.recv, "") == false) {
     if (fd.params.len() == 0) { recvp = fd.recv } else { recvp = concat(fd.recv, ", ") }
   }
   var head = concat("fun ", concat(fd.name, concat(fd.gen,
-             concat("(", concat(recvp, concat(paramStr(fd.params), ")"))))))
+        concat("(", concat(recvp, concat(paramStr(fd.params), ")"))))))
   if (strEq(fd.ret, "") == false) { head = concat(head, concat(" : ", fd.ret)) }
   return concat(head, fd.whr)
 }
-fun printFuncAt(ind: Int, fd: FFunc): Int {          // members use ind 1; NO trailing blank line
+
+fun printFuncAt(ind: Int, fd: FFunc): Int { // members use ind 1; NO trailing blank line
   printAnnos(ind, fd.annos)
   line(ind, funcHead(fd))
   if (isNoResF(fd.body)) { line(ind + 1, "(signature)") } else { printExpr(ind + 1, fd.body) }
   return 0
 }
-fun printFunc(fd: FFunc): Int { printFuncAt(0, fd) ; println("") ; return 0 }
-fun fldStr(f: FFld): String {                        // "pub val x : Int"
+
+fun printFunc(fd: FFunc): Int { printFuncAt(0, fd); println(""); return 0 }
+
+fun fldStr(f: FFld): String { // "pub val x : Int"
   val pubs = if (f.isPub == 1) { "pub " } else { "" }
   val kw = if (f.isVar == 1) { "var" } else { "val" }
   return concat(pubs, concat(kw, concat(" ", concat(f.name, concat(" : ", f.ty)))))
 }
+
 fun printTDecl(td: FTDecl): Int {
   printAnnos(0, td.annos)
   val kw = if (td.kind == 1) { "class " } else { "struct " }
   line(0, concat(kw, concat(td.name, concat(td.gen, td.whr))))
   var i = 0
-  while (i < td.fields.len()) { val f: FFld = td.fields.get(i) ; line(1, fldStr(f)) ; i = i + 1 }
-  if (isNoResF(td.dtor) == false) { line(1, "deinit") ; printExpr(2, td.dtor) }
+  while (i < td.fields.len()) { val f: FFld = td.fields.get(i); line(1, fldStr(f)); i = i + 1 }
+  if (isNoResF(td.dtor) == false) { line(1, "deinit"); printExpr(2, td.dtor) }
   var j = 0
-  while (j < td.methods.len()) { val m: FFunc = td.methods.get(j) ; printFuncAt(1, m) ; j = j + 1 }
+  while (j < td.methods.len()) { val m: FFunc = td.methods.get(j); printFuncAt(1, m); j = j + 1 }
   println("")
   return 0
 }
+
 fun tyList(tys: List): String {
   var s = ""
   var i = 0
@@ -1516,18 +1693,21 @@ fun tyList(tys: List): String {
   }
   return s
 }
-fun fldList(flds: List): String {                   // "val w : Int, val h : Int"
+
+fun fldList(flds: List): String { // "val w : Int, val h : Int"
   var s = ""
   var i = 0
   while (i < flds.len()) { val f: FFld = flds.get(i)
-    if (i == 0) { s = fldStr(f) } else { s = concat(s, concat(", ", fldStr(f))) } ; i = i + 1 }
+    if (i == 0) { s = fldStr(f) } else { s = concat(s, concat(", ", fldStr(f))) }; i = i + 1 }
   return s
 }
+
 fun variantStr(v: FVariant): String {
   if (v.payKind == 0) { return v.name }
   if (v.payKind == 1) { return concat(v.name, concat("(", concat(tyList(v.tys), ")"))) }
   return concat(v.name, concat("(", concat(fldList(v.flds), ")")))
 }
+
 fun printEDecl(ed: FEDecl): Int {
   printAnnos(0, ed.annos)
   line(0, concat("enum ", concat(ed.name, ed.gen)))
@@ -1540,35 +1720,38 @@ fun printEDecl(ed: FEDecl): Int {
   println("")
   return 0
 }
-fun printAssoc(assoc: List): Int {                  // shared trait/impl (impl text = " = Ty")
+
+fun printAssoc(assoc: List): Int { // shared trait/impl (impl text = " = Ty")
   var i = 0
   while (i < assoc.len()) { val a: FAssoc = assoc.get(i)
-    line(1, concat("type ", concat(a.name, a.text))) ; i = i + 1 }
+    line(1, concat("type ", concat(a.name, a.text))); i = i + 1 }
   return 0
 }
+
 fun printTrait(tr: FTraitDecl): Int {
   printAnnos(0, tr.annos)
   line(0, concat("trait ", concat(tr.name, concat(tr.gen, concat(tr.supers, tr.whr)))))
   printAssoc(tr.assoc)
   var j = 0
-  while (j < tr.methods.len()) { val m: FFunc = tr.methods.get(j) ; printFuncAt(1, m) ; j = j + 1 }
+  while (j < tr.methods.len()) { val m: FFunc = tr.methods.get(j); printFuncAt(1, m); j = j + 1 }
   println("")
   return 0
 }
+
 fun implHead(im: FImplDecl): String {
   if (strEq(im.traitName, "")) {
     return concat("impl", concat(im.gen, concat(" ", concat(im.forTy, im.whr))))
   }
   return concat("impl", concat(im.gen, concat(" ",
-         concat(im.traitName, concat(" for ", concat(im.forTy, im.whr))))))
+        concat(im.traitName, concat(" for ", concat(im.forTy, im.whr))))))
 }
+
 fun printImpl(im: FImplDecl): Int {
   printAnnos(0, im.annos)
   line(0, implHead(im))
   printAssoc(im.assoc)
   var j = 0
-  while (j < im.methods.len()) { val m: FFunc = im.methods.get(j) ; printFuncAt(1, m) ; j = j + 1 }
+  while (j < im.methods.len()) { val m: FFunc = im.methods.get(j); printFuncAt(1, m); j = j + 1 }
   println("")
   return 0
 }
-

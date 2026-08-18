@@ -1,7 +1,12 @@
 // kite::core::math — integer math. No allocation, no OS.
 fun absI(x: Int): Int { if (x < 0) { return 0 - x } return x }
+
 fun maxI(a: Int, b: Int): Int { if (a > b) { return a } return b }
+
 fun minI(a: Int, b: Int): Int { if (a < b) { return a } return b }
+
 fun clampI(x: Int, lo: Int, hi: Int): Int { return maxI(lo, minI(x, hi)) }
-fun powI(base: Int, exp: Int): Int { var r = 1  var i = 0  while (i < exp) { r = r * base  i = i + 1 }  return r }
-fun gcdI(a: Int, b: Int): Int { var x = absI(a)  var y = absI(b)  while (y != 0) { val t = y  y = x % y  x = t }  return x }
+
+fun powI(base: Int, exp: Int): Int { var r = 1 var i = 0 while (i < exp) { r = r * base i = i + 1 } return r }
+
+fun gcdI(a: Int, b: Int): Int { var x = absI(a) var y = absI(b) while (y != 0) { val t = y y = x % y x = t } return x }

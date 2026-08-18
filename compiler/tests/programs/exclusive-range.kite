@@ -1,22 +1,25 @@
 // exclusive ranges: `a until b` (Kotlin-style keyword) and `a..<b` (operator), both half-open [a,b).
 // Contrast with the inclusive `a..b`. Also exercises `break`/`continue` over an exclusive range.
 // Expected exit code: 57
-fun untilSum(): Int {          // 0 until 5 -> 0+1+2+3+4 = 10
+fun untilSum(): Int { // 0 until 5 -> 0+1+2+3+4 = 10
   var s = 0
   for (i in 0 until 5) { s = s + i }
   return s
 }
-fun dotSum(): Int {            // 0..<5 -> 10
+
+fun dotSum(): Int { // 0..<5 -> 10
   var s = 0
   for (i in 0..<5) { s = s + i }
   return s
 }
-fun inclSum(): Int {          // 0..5 inclusive -> 0+1+2+3+4+5 = 15
+
+fun inclSum(): Int { // 0..5 inclusive -> 0+1+2+3+4+5 = 15
   var s = 0
   for (i in 0..5) { s = s + i }
   return s
 }
-fun exclContinue(): Int {     // 1..<11, skip evens -> 1+3+5+7+9 = 25
+
+fun exclContinue(): Int { // 1..<11, skip evens -> 1+3+5+7+9 = 25
   var s = 0
   for (i in 1..<11) {
     if (i % 2 == 0) { continue }
@@ -24,7 +27,8 @@ fun exclContinue(): Int {     // 1..<11, skip evens -> 1+3+5+7+9 = 25
   }
   return s
 }
-fun exclBreak(): Int {        // 0 until 100, break at 3 -> 0+1+2 = 3
+
+fun exclBreak(): Int { // 0 until 100, break at 3 -> 0+1+2 = 3
   var s = 0
   for (i in 0 until 100) {
     if (i == 3) { break }
@@ -32,6 +36,7 @@ fun exclBreak(): Int {        // 0 until 100, break at 3 -> 0+1+2 = 3
   }
   return s
 }
+
 fun main(): Int {
-  return untilSum() + dotSum() + inclSum() + exclContinue() - exclBreak()   // 10+10+15+25-3 = 57
+  return untilSum() + dotSum() + inclSum() + exclContinue() - exclBreak() // 10+10+15+25-3 = 57
 }

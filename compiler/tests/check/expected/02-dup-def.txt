@@ -1,2 +1,2 @@
-error: line 2: duplicate top-level definition: f
+error: line 3: duplicate top-level definition: f
 1 semantic error(s)

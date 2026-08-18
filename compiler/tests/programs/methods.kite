@@ -3,6 +3,7 @@ struct Vec(val x: Int, val y: Int) {
   fun add(self, o: Vec): Vec = Vec(self.x + o.x, self.y + o.y)
   fun scaled(self, k: Int): Vec = Vec(self.x * k, self.y * k)
 }
+
 fun main(): Int {
   val a = Vec(1, 2)
   val b = Vec(3, 4)

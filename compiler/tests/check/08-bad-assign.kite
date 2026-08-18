@@ -1,1 +1,1 @@
-fun m(): Int { val x: Int = "hi"  return 0 }
+fun m(): Int { val x: Int = "hi" return 0 }

@@ -1,4 +1,5 @@
 const HLEN = strLen("hello")
+
 fun main(): Int {
   val a = comptime(strLen("hi") + strLen("world"))
   val b = comptime(charAt("ABC", 1))

@@ -1,0 +1,45 @@
+// stage1/lex.kite — a tiny lexer WRITTEN IN KITE, compiled by Fledge (stage-0).
+// Tokenizes an arithmetic expression (integers and + - * / ( ) ) and prints the
+// token stream. This is the first module of the self-hosting compiler.
+
+fun isDigit(c: Int): Bool {
+  return c >= 48 && c <= 57
+}
+
+fun isSpace(c: Int): Bool {
+  return c == 32 || c == 10 || c == 9
+}
+
+fun lex(src: String): Int {
+  val n = strLen(src)
+  var i = 0
+  var count = 0
+  while (i < n) {
+    val c = charAt(src, i)
+    if (isSpace(c)) {
+      i = i + 1
+    } else {
+      if (isDigit(c)) {
+        var v = 0
+        while (i < n && isDigit(charAt(src, i))) {
+          v = v * 10 + (charAt(src, i) - 48)
+          i = i + 1
+        }
+        print("NUM ")
+        println(intToStr(v))
+        count = count + 1
+      } else {
+        print("OP ")
+        println(substr(src, i, 1))
+        i = i + 1
+        count = count + 1
+      }
+    }
+  }
+  println("END")
+  return count
+}
+
+fun main(): Int {
+  return lex("12 + 34 * (5 - 6)")
+}

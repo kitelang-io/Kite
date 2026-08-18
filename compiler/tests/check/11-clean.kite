@@ -1,4 +1,7 @@
 enum E { A(Int); B }
+
 struct P(val x: Int, val y: Int)
+
 fun dist(p: P): Int = p.x + p.y
-fun classify(e: E): Int { return when (e) { A(n) -> n  B -> 0 } }
+
+fun classify(e: E): Int { return when (e) { A(n) -> n B -> 0 } }

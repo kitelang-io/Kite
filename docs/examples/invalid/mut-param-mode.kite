@@ -15,17 +15,17 @@
 //   (ii) make these receivers. Do NOT blindly rewrite `mut I` to `inout I`.
 
 trait Iterator {
-    type Item
-    fun next(mut self): Item?
+  type Item
+  fun next(mut self): Item?
 }
 
-fun count<I: Iterator>(it: mut I): Int {           // `mut I` param: illegal mode
-    var n = 0
-    while true { val x = it.next() ?: break; n = n + 1 }
-    return n
+fun count < I: Iterator > (it: mut I): Int { // `mut I` param: illegal mode
+  var n = 0
+  while true { val x = it.next() ?: break; n = n + 1 }
+  return n
 }
 
 impl Display for Point {
-    fun fmt(self, out: mut Formatter): Result<Unit, FmtError> = // `mut Formatter` param: illegal mode
-        out.write("(${self.x}, ${self.y})")
+  fun fmt(self, out: mut Formatter): Result<Unit, FmtError> = // `mut Formatter` param: illegal mode
+  out.write("(${self.x}, ${self.y})")
 }

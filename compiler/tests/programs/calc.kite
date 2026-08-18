@@ -1,0 +1,94 @@
+// stage1/calc.kite — recursive-descent arithmetic evaluator WRITTEN IN KITE.
+// Evaluates + - * / with correct precedence, parentheses, multi-digit ints, spaces.
+// Uses a mutable parser struct threaded (by pointer) through the parse functions.
+
+struct P(val src: String, var pos: Int)
+
+fun peek(p: P): Int {
+  if (p.pos >= strLen(p.src)) {
+    return 0
+  }
+  return charAt(p.src, p.pos)
+}
+
+fun isDigit(c: Int): Bool {
+  return c >= 48 && c <= 57
+}
+
+fun skipWs(p: P): Int {
+  while (peek(p) == 32) {
+    p.pos = p.pos + 1
+  }
+  return 0
+}
+
+fun parseInt(p: P): Int {
+  var v = 0
+  while (isDigit(peek(p))) {
+    v = v * 10 + (peek(p) - 48)
+    p.pos = p.pos + 1
+  }
+  return v
+}
+
+fun parseFactor(p: P): Int {
+  skipWs(p)
+  val c = peek(p)
+  if (c == 40) { // '('
+    p.pos = p.pos + 1 // consume '('
+    val v = parseExpr(p)
+    skipWs(p)
+    p.pos = p.pos + 1 // consume ')'
+    return v
+  }
+  val n = parseInt(p)
+  return n
+}
+
+fun parseTerm(p: P): Int {
+  var v = parseFactor(p)
+  skipWs(p)
+  var op = peek(p)
+  while (op == 42 || op == 47) { // '*' or '/'
+    p.pos = p.pos + 1
+    val rhs = parseFactor(p)
+    if (op == 42) {
+      v = v * rhs
+    } else {
+      v = v / rhs
+    }
+    skipWs(p)
+    op = peek(p)
+  }
+  return v
+}
+
+fun parseExpr(p: P): Int {
+  var v = parseTerm(p)
+  skipWs(p)
+  var op = peek(p)
+  while (op == 43 || op == 45) { // '+' or '-'
+    p.pos = p.pos + 1
+    val rhs = parseTerm(p)
+    if (op == 43) {
+      v = v + rhs
+    } else {
+      v = v - rhs
+    }
+    skipWs(p)
+    op = peek(p)
+  }
+  return v
+}
+
+fun eval(src: String): Int {
+  val p = P(src, 0)
+  return parseExpr(p)
+}
+
+fun main(): Int {
+  println(intToStr(eval("(2 + 3) * 4")))
+  println(intToStr(eval("2 + 3 * 4")))
+  println(intToStr(eval("100 - 7 * (3 + 4)")))
+  return eval("2 * 3 + 4 * 5")
+}

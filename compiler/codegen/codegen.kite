@@ -22,19 +22,22 @@ enum Instr {
   IShl(Int, Int, Int); IShr(Int, Int, Int);
   INeg(Int, Int); IMov(Int, Int); IZero(Int);
   IAddImm(Int, Int, Int); ISubImm(Int, Int, Int); IStackFree(Int); IStackAlloc(Int);
+  ISpSubReg(Int); ISpAddReg(Int); // sub/add sp, sp, Xm (extended-reg form: reg 31 == SP) — large frames
   ILoadLocal(Int, Int); IStoreLocal(Int, Int); ILoadOff(Int, Int, Int); IStoreOff(Int, Int, Int);
   ILoadByte(Int, Int, Int); IStoreByte(Int, Int, Int); ILoadTop(Int); IStoreTop(Int);
   IPush(Int); IPop(Int); ICmp(Int, Int); ICset(Int, String);
   IJmp(Int); IJmpCond(String, Int); IJmpZero(Int, Int);
+
   // structural / label-relative (resolved by the two-pass assembler below)
   ILabel(String); ICallL(String); IJmpCondL(String, String); IJmpZeroL(Int, String);
-  ICallSym(String);                  // bl to an external symbol: 0x94000000 + reloc (linker fills)
-  ISymHi(Int, String); ISymLo(Int, Int, String);   // adrp/add to a symbol (PAGE21/PAGEOFF12 reloc)
-  IFuncAddr(Int, String); ICallReg(Int);                   // adr Rd,<local fn label> (offset-delta) ; blr Xn (indirect call)
+  ICallSym(String); // bl to an external symbol: 0x94000000 + reloc (linker fills)
+  ISymHi(Int, String); ISymLo(Int, Int, String); // adrp/add to a symbol (PAGE21/PAGEOFF12 reloc)
+  IFuncAddr(Int, String); ICallReg(Int); // adr Rd,<local fn label> (offset-delta) ; blr Xn (indirect call)
+
   // floating point (scalar double, FP registers d0..): a Float value is a heap word holding the IEEE-754 double
   IFAdd(Int, Int, Int); IFSub(Int, Int, Int); IFMul(Int, Int, Int); IFDiv(Int, Int, Int);
-  IFLoadD(Int, Int, Int); IFStoreD(Int, Int, Int);         // ldr/str Dt, [Xn, #off]  (unbox / box a double)
-  IFCmp(Int, Int); IFToInt(Int, Int)                       // fcmp Dn,Dm ; fcvtzs Xd, Dn (truncate to int)
+  IFLoadD(Int, Int, Int); IFStoreD(Int, Int, Int); // ldr/str Dt, [Xn, #off]  (unbox / box a double)
+  IFCmp(Int, Int); IFToInt(Int, Int) // fcmp Dn,Dm ; fcvtzs Xd, Dn (truncate to int)
 }
 
 // ============================================================================
@@ -44,41 +47,49 @@ enum Instr {
 // enums so the real parser can feed this later.
 enum Expr {
   EInt(String); EIdent(String); EStr(String);
-  EFLit(String); EFBin(String, Expr, Expr);                 // float literal ; float binary op (arith or compare)
+  EFLit(String); EFBin(String, Expr, Expr); // float literal ; float binary op (arith or compare)
   EUnary(String, Expr); EBin(String, Expr, Expr);
   ECall(String, List); EField(Expr, String); EWhen(Expr, List);
   EBlock(List, Expr); EIf(Expr, Expr, Expr); ERet(Expr); EBrk; ECont; ENoRes
 }
+
 enum Stmt {
   SLet(String, Expr); SLetT(String, String, Expr); SReturnV(Expr); SReturnU; SExprS(Expr);
   SAssign(String, Expr); SAssignF(Expr, String, Expr); SWhile(Expr, Expr); SLoop(Expr, Expr, Stmt)
 }
-struct Func(val name: String, val params: List, val paramTys: List, val body: Expr)  // params/paramTys = List<String>
+
+struct Func(val name: String, val params: List, val paramTys: List, val body: Expr) // params/paramTys = List<String>
+
 enum Pat { PWild; PBindP(String); PIntP(String); PVarP(String); PCtorP(String, List) }
+
 struct Arm(val isElse: Int, val pat: Pat, val body: Expr)
 
-fun isNoRes(e: Expr): Bool { return when (e) { ENoRes -> true ; else -> false } }
+fun isNoRes(e: Expr): Bool { return when (e) { ENoRes -> true; else -> false } }
+
 fun parseIntK(s: String): Int {
   if (strLen(s) >= 1 && charAt(s, 0) == 45) { return 0 - parseIntK(substr(s, 1, strLen(s) - 1)) }
   if (strLen(s) >= 2 && charAt(s, 0) == 48 && (charAt(s, 1) == 120 || charAt(s, 1) == 88)) {
     var v = 0
     var i = 2
-    while (i < strLen(s)) { v = (v << 4) | hexVal(charAt(s, i)) ; i = i + 1 }
+    while (i < strLen(s)) { v = (v << 4) | hexVal(charAt(s, i)); i = i + 1 }
     return v
   }
   var v = 0
   var i = 0
-  while (i < strLen(s)) { v = v * 10 + (charAt(s, i) - 48) ; i = i + 1 }
+  while (i < strLen(s)) { v = v * 10 + (charAt(s, i) - 48); i = i + 1 }
   return v
 }
+
 fun align16(x: Int): Int { return ((x + 15) / 16) * 16 }
+
 fun containsStr(l: List, s: String): Bool {
   var i = 0
-  while (i < l.len()) { val e: String = l.get(i) ; if (strEq(e, s)) { return true } ; i = i + 1 }
+  while (i < l.len()) { val e: String = l.get(i); if (strEq(e, s)) { return true }; i = i + 1 }
   return false
 }
 
 struct Gen(val code: List, var ctr: Int, val cstrN: List, val cstrV: List, var cctr: Int, val structN: List, val structF: List, val structFT: List, val variantN: List, val variantTag: List, val variantTys: List, val funN: List, val funRet: List, val arcE: List)
+
 struct Ctx(val gen: Gen, val names: List, val offs: List, val epi: String, val strLocals: List, val ltyN: List, val ltyV: List, val brkL: List, val contL: List, var loopDepth: Int)
 
 // intern a string literal into the cstring table -> its label (Lstr_N)
@@ -91,12 +102,14 @@ fun internStr(ctx: Ctx, s: String): String {
   }
   ctx.gen.cctr = ctx.gen.cctr + 1
   val lab = concat("Lstr_", intToStr(ctx.gen.cctr))
-  ctx.gen.cstrN.push(lab) ; ctx.gen.cstrV.push(s)
+  ctx.gen.cstrN.push(lab); ctx.gen.cstrV.push(s)
   return lab
 }
 
-fun emit(ctx: Ctx, i: Instr): Int { ctx.gen.code.push(i) ; return 0 }
-fun fresh(ctx: Ctx): Int { ctx.gen.ctr = ctx.gen.ctr + 1 ; return ctx.gen.ctr }
+fun emit(ctx: Ctx, i: Instr): Int { ctx.gen.code.push(i); return 0 }
+
+fun fresh(ctx: Ctx): Int { ctx.gen.ctr = ctx.gen.ctr + 1; return ctx.gen.ctr }
+
 fun slotOf(ctx: Ctx, name: String): Int {
   var i = 0
   while (i < ctx.names.len()) {
@@ -106,26 +119,53 @@ fun slotOf(ctx: Ctx, name: String): Int {
   }
   return 0
 }
+
+// put (fp - off) into scratch x16. The immediate SUB is 12-bit (<=4095); a larger frame
+// materializes off in x17 and subtracts register-wise, so deep frames stay addressable.
+fun fpAddr16(ctx: Ctx, off: Int): Int {
+  if (off <= 4095) { emit(ctx, ISubImm(16, 29, off)) }
+  else { loadImm(ctx, 17, off); emit(ctx, ISub(16, 29, 17)) }
+  return 0
+}
+
 // fp store/load with large-offset spill via scratch x16 (mirrors st_fp/ld_fp)
 fun stFp(ctx: Ctx, t: Int, off: Int): Int {
   if (off <= 256) { emit(ctx, IStoreLocal(t, off)) }
-  else { emit(ctx, ISubImm(16, 29, off)) ; emit(ctx, IStoreOff(t, 16, 0)) }
+  else { fpAddr16(ctx, off); emit(ctx, IStoreOff(t, 16, 0)) }
   return 0
 }
+
 fun ldFp(ctx: Ctx, t: Int, off: Int): Int {
   if (off <= 256) { emit(ctx, ILoadLocal(t, off)) }
-  else { emit(ctx, ISubImm(16, 29, off)) ; emit(ctx, ILoadOff(t, 16, 0)) }
+  else { fpAddr16(ctx, off); emit(ctx, ILoadOff(t, 16, 0)) }
   return 0
 }
+
+// prologue/epilogue stack move. The immediate sub/add is 12-bit (<=4095); a larger frame
+// materializes the size in x16 and moves sp register-wise (x16/x17 are call scratch, and at
+// entry the params live in x0.. while at exit the result lives in x0, so this clobbers neither).
+fun emitStackAlloc(ctx: Ctx, frame: Int): Int {
+  if (frame <= 4095) { emit(ctx, IStackAlloc(frame)) }
+  else { loadImm(ctx, 16, frame); emit(ctx, ISpSubReg(16)) }
+  return 0
+}
+
+fun emitStackFree(ctx: Ctx, frame: Int): Int {
+  if (frame <= 4095) { emit(ctx, IStackFree(frame)) }
+  else { loadImm(ctx, 16, frame); emit(ctx, ISpAddReg(16)) }
+  return 0
+}
+
 fun loadChunk(ctx: Ctx, reg: Int, n: Int, sh: Int): Int {
   val c = (n >> sh) & 0xffff
   if (c != 0) { emit(ctx, IMovImmK(reg, c, sh)) }
   return 0
 }
+
 fun loadImm(ctx: Ctx, reg: Int, n: Int): Int {
-  if (n < 0) { loadImm(ctx, reg, 0 - n) ; emit(ctx, INeg(reg, reg)) ; return 0 }
+  if (n < 0) { loadImm(ctx, reg, 0 - n); emit(ctx, INeg(reg, reg)); return 0 }
   emit(ctx, IMovImm(reg, n & 0xffff))
-  loadChunk(ctx, reg, n, 16) ; loadChunk(ctx, reg, n, 32) ; loadChunk(ctx, reg, n, 48)
+  loadChunk(ctx, reg, n, 16); loadChunk(ctx, reg, n, 32); loadChunk(ctx, reg, n, 48)
   return 0
 }
 
@@ -134,13 +174,13 @@ fun opInstr(ctx: Ctx, op: String): Int {
   if (strEq(op, "-")) { return emit(ctx, ISub(0, 0, 1)) }
   if (strEq(op, "*")) { return emit(ctx, IMul(0, 0, 1)) }
   if (strEq(op, "/")) { return emit(ctx, IDiv(0, 0, 1)) }
-  if (strEq(op, "%")) { emit(ctx, IDiv(2, 0, 1)) ; return emit(ctx, IMulSub(0, 2, 1, 0)) }
-  if (strEq(op, "==")) { emit(ctx, ICmp(0, 1)) ; return emit(ctx, ICset(0, "eq")) }
-  if (strEq(op, "!=")) { emit(ctx, ICmp(0, 1)) ; return emit(ctx, ICset(0, "ne")) }
-  if (strEq(op, "<")) { emit(ctx, ICmp(0, 1)) ; return emit(ctx, ICset(0, "lt")) }
-  if (strEq(op, ">")) { emit(ctx, ICmp(0, 1)) ; return emit(ctx, ICset(0, "gt")) }
-  if (strEq(op, "<=")) { emit(ctx, ICmp(0, 1)) ; return emit(ctx, ICset(0, "le")) }
-  if (strEq(op, ">=")) { emit(ctx, ICmp(0, 1)) ; return emit(ctx, ICset(0, "ge")) }
+  if (strEq(op, "%")) { emit(ctx, IDiv(2, 0, 1)); return emit(ctx, IMulSub(0, 2, 1, 0)) }
+  if (strEq(op, "==")) { emit(ctx, ICmp(0, 1)); return emit(ctx, ICset(0, "eq")) }
+  if (strEq(op, "!=")) { emit(ctx, ICmp(0, 1)); return emit(ctx, ICset(0, "ne")) }
+  if (strEq(op, "<")) { emit(ctx, ICmp(0, 1)); return emit(ctx, ICset(0, "lt")) }
+  if (strEq(op, ">")) { emit(ctx, ICmp(0, 1)); return emit(ctx, ICset(0, "gt")) }
+  if (strEq(op, "<=")) { emit(ctx, ICmp(0, 1)); return emit(ctx, ICset(0, "le")) }
+  if (strEq(op, ">=")) { emit(ctx, ICmp(0, 1)); return emit(ctx, ICset(0, "ge")) }
   if (strEq(op, "&")) { return emit(ctx, IAnd(0, 0, 1)) }
   if (strEq(op, "|")) { return emit(ctx, IOr(0, 0, 1)) }
   if (strEq(op, "^")) { return emit(ctx, IXor(0, 0, 1)) }
@@ -157,48 +197,54 @@ fun genAnd(ctx: Ctx, a: Expr, b: Expr): Int {
   val l = fresh(ctx)
   val lfalse = concat("Land0_", intToStr(l))
   val lend = concat("Land1_", intToStr(l))
-  genExpr(ctx, a)                          // r0 = a
-  emit(ctx, IJmpZeroL(0, lfalse))          // a is false -> result false, skip b
-  genExpr(ctx, b)                          // r0 = b (the result)
+  genExpr(ctx, a) // r0 = a
+  emit(ctx, IJmpZeroL(0, lfalse)) // a is false -> result false, skip b
+  genExpr(ctx, b) // r0 = b (the result)
   emit(ctx, ICallL(lend))
   emit(ctx, ILabel(lfalse))
-  emit(ctx, IZero(0))                      // result 0
+  emit(ctx, IZero(0)) // result 0
   return emit(ctx, ILabel(lend))
 }
+
 fun genOr(ctx: Ctx, a: Expr, b: Expr): Int {
   val l = fresh(ctx)
   val levalb = concat("Lor0_", intToStr(l))
   val lend = concat("Lor1_", intToStr(l))
-  genExpr(ctx, a)                          // r0 = a
-  emit(ctx, IJmpZeroL(0, levalb))          // a is false -> result is b
-  loadImm(ctx, 0, 1)                       // a is true -> result 1, skip b
+  genExpr(ctx, a) // r0 = a
+  emit(ctx, IJmpZeroL(0, levalb)) // a is false -> result is b
+  loadImm(ctx, 0, 1) // a is true -> result 1, skip b
   emit(ctx, ICallL(lend))
   emit(ctx, ILabel(levalb))
-  genExpr(ctx, b)                          // r0 = b (the result)
+  genExpr(ctx, b) // r0 = b (the result)
   return emit(ctx, ILabel(lend))
 }
+
 fun genBinary(ctx: Ctx, op: String, a: Expr, b: Expr): Int {
   if (strEq(op, "&&")) { return genAnd(ctx, a, b) }
   if (strEq(op, "||")) { return genOr(ctx, a, b) }
   // String `+` (concatenation) is desugared upstream in klower's lowerBin to the String_add operator
   // method (impl Add for String) before it reaches codegen, so a raw EBin("+") here is always a numeric
   // add. No String special-case is needed. (The compiler's own sources only ever `+` integers.)
-  genExpr(ctx, a) ; emit(ctx, IPush(0))
-  genExpr(ctx, b) ; emit(ctx, IMov(1, 0)) ; emit(ctx, IPop(0))
+  genExpr(ctx, a); emit(ctx, IPush(0))
+  genExpr(ctx, b); emit(ctx, IMov(1, 0)); emit(ctx, IPop(0))
   return opInstr(ctx, op)
 }
+
 // ---- struct type table + boxed struct codegen -----------------------------
 fun structIdx(gen: Gen, name: String): Int {
   var i = 0
-  while (i < gen.structN.len()) { val n: String = gen.structN.get(i) ; if (strEq(n, name)) { return i } ; i = i + 1 }
+  while (i < gen.structN.len()) { val n: String = gen.structN.get(i); if (strEq(n, name)) { return i }; i = i + 1 }
   return 0 - 1
 }
+
 fun isStructName(gen: Gen, name: String): Bool { return structIdx(gen, name) >= 0 }
+
 fun funRetOf(gen: Gen, name: String): String {
   var i = 0
-  while (i < gen.funN.len()) { val n: String = gen.funN.get(i) ; if (strEq(n, name)) { return gen.funRet.get(i) } ; i = i + 1 }
+  while (i < gen.funN.len()) { val n: String = gen.funN.get(i); if (strEq(n, name)) { return gen.funRet.get(i) }; i = i + 1 }
   return ""
 }
+
 fun structSize(gen: Gen, name: String): Int {
   val idx = structIdx(gen, name)
   if (idx < 0) { return 8 }
@@ -206,55 +252,63 @@ fun structSize(gen: Gen, name: String): Int {
   if (fields.len() <= 0) { return 8 }
   return 8 * fields.len()
 }
+
 fun fieldOff(gen: Gen, name: String, field: String): Int {
   val idx = structIdx(gen, name)
   if (idx < 0) { return 0 }
   val fields: List = gen.structF.get(idx)
   var i = 0
-  while (i < fields.len()) { val fn: String = fields.get(i) ; if (strEq(fn, field)) { return 8 * i } ; i = i + 1 }
+  while (i < fields.len()) { val fn: String = fields.get(i); if (strEq(fn, field)) { return 8 * i }; i = i + 1 }
   return 0
 }
-fun setLty(ctx: Ctx, name: String, ty: String): Int { ctx.ltyN.push(name) ; ctx.ltyV.push(ty) ; return 0 }
+
+fun setLty(ctx: Ctx, name: String, ty: String): Int { ctx.ltyN.push(name); ctx.ltyV.push(ty); return 0 }
+
 fun getLty(ctx: Ctx, name: String): String {
   var i = ctx.ltyN.len() - 1
-  while (i >= 0) { val n: String = ctx.ltyN.get(i) ; if (strEq(n, name)) { return ctx.ltyV.get(i) } ; i = i - 1 }
+  while (i >= 0) { val n: String = ctx.ltyN.get(i); if (strEq(n, name)) { return ctx.ltyV.get(i) }; i = i - 1 }
   return ""
 }
+
 fun typeNameOf(ctx: Ctx, e: Expr): String {
   return when (e) {
     EIdent(n) -> getLty(ctx, n)
     EStr(s) -> "String"
     ECall(nm, aa) -> {
       if (isStructName(ctx.gen, nm)) { nm }
-      else { val ft = floorRetTag(nm) ; if (strEq(ft, "") == false) { ft } else { funRetOf(ctx.gen, nm) } }
+      else { val ft = floorRetTag(nm); if (strEq(ft, "") == false) { ft } else { funRetOf(ctx.gen, nm) } }
     }
     EField(b, f) -> fieldTypeOf(ctx.gen, typeNameOf(ctx, b), f)
     else -> ""
   }
 }
+
 fun fieldTypeOf(gen: Gen, st: String, field: String): String {
   if (isStructName(gen, st) == false) { return "" }
   val idx = structIdx(gen, st)
   val fields: List = gen.structF.get(idx)
   val ftys: List = gen.structFT.get(idx)
   var i = 0
-  while (i < fields.len()) { val fn: String = fields.get(i) ; if (strEq(fn, field)) { return ftys.get(i) } ; i = i + 1 }
+  while (i < fields.len()) { val fn: String = fields.get(i); if (strEq(fn, field)) { return ftys.get(i) }; i = i + 1 }
   return ""
 }
+
 fun genStructNew(ctx: Ctx, name: String, args: List): Int {
-  loadImm(ctx, 0, structSize(ctx.gen, name)) ; genAllocHdr(ctx, structIdx(ctx.gen, name)) ; emit(ctx, IPush(0))
+  loadImm(ctx, 0, structSize(ctx.gen, name)); genAllocHdr(ctx, structIdx(ctx.gen, name)); emit(ctx, IPush(0))
   var i = 0
   while (i < args.len()) {
     val a: Expr = args.get(i)
-    genExpr(ctx, a) ; emit(ctx, ILoadTop(1)) ; emit(ctx, IStoreOff(0, 1, 8 * i))
+    genExpr(ctx, a); emit(ctx, ILoadTop(1)); emit(ctx, IStoreOff(0, 1, 8 * i))
     i = i + 1
   }
   return emit(ctx, IPop(0))
 }
+
 fun genField(ctx: Ctx, b: Expr, f: String): Int {
   genExpr(ctx, b)
   return emit(ctx, ILoadOff(0, 0, fieldOff(ctx.gen, typeNameOf(ctx, b), f)))
 }
+
 fun inferLty(ctx: Ctx, nm: String, init: Expr): Int {
   val t = typeNameOf(ctx, init)
   if (strEq(t, "") == false) { setLty(ctx, nm, t) }
@@ -264,73 +318,82 @@ fun inferLty(ctx: Ctx, nm: String, init: Expr): Int {
 // ---- enums: boxed {tag@0, payload@8+8j} + when pattern matching ------------
 fun variantIdx(gen: Gen, name: String): Int {
   var i = 0
-  while (i < gen.variantN.len()) { val n: String = gen.variantN.get(i) ; if (strEq(n, name)) { return i } ; i = i + 1 }
+  while (i < gen.variantN.len()) { val n: String = gen.variantN.get(i); if (strEq(n, name)) { return i }; i = i + 1 }
   return 0 - 1
 }
+
 fun isVariantName(gen: Gen, name: String): Bool { return variantIdx(gen, name) >= 0 }
+
 fun variantTag(gen: Gen, name: String): Int { return gen.variantTag.get(variantIdx(gen, name)) }
+
 // payload type-strings of a variant (parallel to its positional payloads); empty if the variant is unknown.
 fun variantTysOf(gen: Gen, name: String): List {
   val idx = variantIdx(gen, name)
   if (idx < 0) { return list() }
   return gen.variantTys.get(idx)
 }
+
 fun genVariantNew(ctx: Ctx, variant: String, args: List): Int {
   val n = args.len()
-  loadImm(ctx, 0, 8 + n * 8) ; genAllocHdr(ctx, 0 - 1) ; emit(ctx, IPush(0))
-  loadImm(ctx, 0, variantTag(ctx.gen, variant)) ; emit(ctx, ILoadTop(1)) ; emit(ctx, IStoreOff(0, 1, 0))
+  loadImm(ctx, 0, 8 + n * 8); genAllocHdr(ctx, 0 - 1); emit(ctx, IPush(0))
+  loadImm(ctx, 0, variantTag(ctx.gen, variant)); emit(ctx, ILoadTop(1)); emit(ctx, IStoreOff(0, 1, 0))
   var j = 0
-  while (j < n) { val a: Expr = args.get(j) ; genExpr(ctx, a) ; emit(ctx, ILoadTop(1)) ; emit(ctx, IStoreOff(0, 1, 8 + j * 8)) ; j = j + 1 }
+  while (j < n) { val a: Expr = args.get(j); genExpr(ctx, a); emit(ctx, ILoadTop(1)); emit(ctx, IStoreOff(0, 1, 8 + j * 8)); j = j + 1 }
   return emit(ctx, IPop(0))
 }
+
 fun genCtorPat(ctx: Ctx, v: String, subs: List, fail: String): Int {
-  emit(ctx, ILoadTop(0)) ; emit(ctx, ILoadOff(1, 0, 0)) ; loadImm(ctx, 2, variantTag(ctx.gen, v))
-  emit(ctx, ICmp(1, 2)) ; emit(ctx, IJmpCondL("ne", fail))
+  emit(ctx, ILoadTop(0)); emit(ctx, ILoadOff(1, 0, 0)); loadImm(ctx, 2, variantTag(ctx.gen, v))
+  emit(ctx, ICmp(1, 2)); emit(ctx, IJmpCondL("ne", fail))
   var j = 0
   while (j < subs.len()) {
     val sp: Pat = subs.get(j)
     // bind the payload slot AND record its static type, so field access on it resolves the right offset
     // (without this, an enum-payload struct var had type "" → fieldOff fell back to offset 0).
-    when (sp) { PBindP(name) -> { emit(ctx, ILoadOff(1, 0, 8 + j * 8)) ; stFp(ctx, 1, slotOf(ctx, name)) ; val ptys = variantTysOf(ctx.gen, v) ; if (j < ptys.len()) { setLty(ctx, name, ptys.get(j)) } ; 0 } else -> 0 }
+    when (sp) { PBindP(name) -> { emit(ctx, ILoadOff(1, 0, 8 + j * 8)); stFp(ctx, 1, slotOf(ctx, name)); val ptys = variantTysOf(ctx.gen, v); if (j < ptys.len()) { setLty(ctx, name, ptys.get(j)) }; 0 } else -> 0 }
     j = j + 1
   }
   return 0
 }
+
 fun testAndBind(ctx: Ctx, pat: Pat, fail: String): Int {
   return when (pat) {
     PWild -> 0
-    PBindP(name) -> { emit(ctx, ILoadTop(0)) ; stFp(ctx, 0, slotOf(ctx, name)) }
-    PIntP(t) -> { emit(ctx, ILoadTop(0)) ; loadImm(ctx, 1, parseIntK(t)) ; emit(ctx, ICmp(0, 1)) ; emit(ctx, IJmpCondL("ne", fail)) }
-    PVarP(v) -> { emit(ctx, ILoadTop(0)) ; emit(ctx, ILoadOff(0, 0, 0)) ; loadImm(ctx, 1, variantTag(ctx.gen, v)) ; emit(ctx, ICmp(0, 1)) ; emit(ctx, IJmpCondL("ne", fail)) }
+    PBindP(name) -> { emit(ctx, ILoadTop(0)); stFp(ctx, 0, slotOf(ctx, name)) }
+    PIntP(t) -> { emit(ctx, ILoadTop(0)); loadImm(ctx, 1, parseIntK(t)); emit(ctx, ICmp(0, 1)); emit(ctx, IJmpCondL("ne", fail)) }
+    PVarP(v) -> { emit(ctx, ILoadTop(0)); emit(ctx, ILoadOff(0, 0, 0)); loadImm(ctx, 1, variantTag(ctx.gen, v)); emit(ctx, ICmp(0, 1)); emit(ctx, IJmpCondL("ne", fail)) }
     PCtorP(v, subs) -> genCtorPat(ctx, v, subs, fail)
     else -> 0
   }
 }
+
 fun genWhenE(ctx: Ctx, subj: Expr, arms: List): Int {
   val l = fresh(ctx)
   val lend = concat("Lwend_", intToStr(l))
-  genExpr(ctx, subj) ; emit(ctx, IPush(0))
+  genExpr(ctx, subj); emit(ctx, IPush(0))
   var i = 0
   while (i < arms.len()) {
     val arm: Arm = arms.get(i)
     val lnext = concat("Lwn_", concat(intToStr(l), concat("_", intToStr(i))))
     if (arm.isElse == 0) { testAndBind(ctx, arm.pat, lnext) }
-    emit(ctx, IStackFree(16)) ; genExpr(ctx, arm.body) ; emit(ctx, ICallL(lend)) ; emit(ctx, ILabel(lnext))
+    emit(ctx, IStackFree(16)); genExpr(ctx, arm.body); emit(ctx, ICallL(lend)); emit(ctx, ILabel(lnext))
     i = i + 1
   }
-  emit(ctx, IStackFree(16)) ; emit(ctx, IZero(0)) ; return emit(ctx, ILabel(lend))
+  emit(ctx, IStackFree(16)); emit(ctx, IZero(0)); return emit(ctx, ILabel(lend))
 }
+
 fun collectPat(acc: List, pat: Pat): Int {
   when (pat) {
-    PBindP(name) -> { acc.push(name) ; 0 }
-    PCtorP(v, subs) -> { var j = 0 ; while (j < subs.len()) { collectPat(acc, subs.get(j)) ; j = j + 1 } ; 0 }
+    PBindP(name) -> { acc.push(name); 0 }
+    PCtorP(v, subs) -> { var j = 0; while (j < subs.len()) { collectPat(acc, subs.get(j)); j = j + 1 }; 0 }
     else -> 0
   }
   return 0
 }
+
 fun genFieldAssign(ctx: Ctx, base: Expr, f: String, rhs: Expr): Int {
-  genExpr(ctx, rhs) ; emit(ctx, IPush(0))
-  genExpr(ctx, base) ; emit(ctx, IMov(1, 0)) ; emit(ctx, IPop(0))
+  genExpr(ctx, rhs); emit(ctx, IPush(0))
+  genExpr(ctx, base); emit(ctx, IMov(1, 0)); emit(ctx, IPop(0))
   return emit(ctx, IStoreOff(0, 1, fieldOff(ctx.gen, typeNameOf(ctx, base), f)))
 }
 
@@ -339,8 +402,8 @@ fun genFieldAssign(ctx: Ctx, base: Expr, f: String, rhs: Expr): Int {
 // in genCall; genIntToStr was the sole consumer of the Lfmt_ld "%ld" cstring, also removed). ----------
 fun genReadFile(ctx: Ctx, path: Expr): Int {
   genExpr(ctx, path)
-  val lr = internStr(ctx, "r") ; emit(ctx, ISymHi(1, lr)) ; emit(ctx, ISymLo(1, 1, lr))
-  emit(ctx, ICallSym("_fopen")) ; emit(ctx, IPush(0))
+  val lr = internStr(ctx, "r"); emit(ctx, ISymHi(1, lr)); emit(ctx, ISymLo(1, 1, lr))
+  emit(ctx, ICallSym("_fopen")); emit(ctx, IPush(0))
   // ROBUSTNESS: fopen returns NULL for a missing/unreadable file; feeding NULL into fseek/ftell/fread
   // faults inside libc (flockfile(NULL)). Guard it: on NULL, free the fp slot and return an empty string
   // (malloc(1) + terminator) so a missing module/import path yields a graceful "unresolved name"
@@ -349,65 +412,72 @@ fun genReadFile(ctx: Ctx, path: Expr): Int {
   val g = fresh(ctx)
   val lnull = concat("Lrdnull_", intToStr(g))
   val lend = concat("Lrdend_", intToStr(g))
-  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, IJmpZeroL(0, lnull))
-  emit(ctx, ILoadOff(0, 31, 0)) ; loadImm(ctx, 1, 0) ; loadImm(ctx, 2, 2) ; emit(ctx, ICallSym("_fseek"))
-  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, ICallSym("_ftell")) ; emit(ctx, IPush(0))
-  emit(ctx, ILoadOff(0, 31, 16)) ; loadImm(ctx, 1, 0) ; loadImm(ctx, 2, 0) ; emit(ctx, ICallSym("_fseek"))
-  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, IAddImm(0, 0, 1)) ; emit(ctx, ICallSym("_malloc")) ; emit(ctx, IPush(0))
-  emit(ctx, ILoadOff(0, 31, 0)) ; loadImm(ctx, 1, 1) ; emit(ctx, ILoadOff(2, 31, 16)) ; emit(ctx, ILoadOff(3, 31, 32)) ; emit(ctx, ICallSym("_fread"))
-  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, ILoadOff(1, 31, 16)) ; emit(ctx, IAdd(0, 0, 1)) ; emit(ctx, IStoreByte(31, 0, 0))
-  emit(ctx, ILoadOff(0, 31, 32)) ; emit(ctx, ICallSym("_fclose"))
-  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, IStackFree(48)) ; emit(ctx, ICallL(lend))
+  emit(ctx, ILoadOff(0, 31, 0)); emit(ctx, IJmpZeroL(0, lnull))
+  emit(ctx, ILoadOff(0, 31, 0)); loadImm(ctx, 1, 0); loadImm(ctx, 2, 2); emit(ctx, ICallSym("_fseek"))
+  emit(ctx, ILoadOff(0, 31, 0)); emit(ctx, ICallSym("_ftell")); emit(ctx, IPush(0))
+  emit(ctx, ILoadOff(0, 31, 16)); loadImm(ctx, 1, 0); loadImm(ctx, 2, 0); emit(ctx, ICallSym("_fseek"))
+  emit(ctx, ILoadOff(0, 31, 0)); emit(ctx, IAddImm(0, 0, 1)); emit(ctx, ICallSym("_malloc")); emit(ctx, IPush(0))
+  emit(ctx, ILoadOff(0, 31, 0)); loadImm(ctx, 1, 1); emit(ctx, ILoadOff(2, 31, 16)); emit(ctx, ILoadOff(3, 31, 32)); emit(ctx, ICallSym("_fread"))
+  emit(ctx, ILoadOff(0, 31, 0)); emit(ctx, ILoadOff(1, 31, 16)); emit(ctx, IAdd(0, 0, 1)); emit(ctx, IStoreByte(31, 0, 0))
+  emit(ctx, ILoadOff(0, 31, 32)); emit(ctx, ICallSym("_fclose"))
+  emit(ctx, ILoadOff(0, 31, 0)); emit(ctx, IStackFree(48)); emit(ctx, ICallL(lend))
   emit(ctx, ILabel(lnull))
-  emit(ctx, IStackFree(16)) ; loadImm(ctx, 0, 1) ; emit(ctx, ICallSym("_malloc")) ; emit(ctx, IStoreByte(31, 0, 0))
+  emit(ctx, IStackFree(16)); loadImm(ctx, 0, 1); emit(ctx, ICallSym("_malloc")); emit(ctx, IStoreByte(31, 0, 0))
   return emit(ctx, ILabel(lend))
 }
+
 fun genWriteFile(ctx: Ctx, path: Expr, contents: Expr): Int {
-  genExpr(ctx, path) ; emit(ctx, IPush(0)) ; genExpr(ctx, contents) ; emit(ctx, IPush(0))
+  genExpr(ctx, path); emit(ctx, IPush(0)); genExpr(ctx, contents); emit(ctx, IPush(0))
   emit(ctx, ILoadOff(0, 31, 16))
-  val lw = internStr(ctx, "w") ; emit(ctx, ISymHi(1, lw)) ; emit(ctx, ISymLo(1, 1, lw))
-  emit(ctx, ICallSym("_fopen")) ; emit(ctx, IPush(0))
-  emit(ctx, ILoadOff(0, 31, 16)) ; emit(ctx, ICallSym("_strlen")) ; emit(ctx, IPush(0))
-  emit(ctx, ILoadOff(0, 31, 32)) ; loadImm(ctx, 1, 1) ; emit(ctx, ILoadOff(2, 31, 0)) ; emit(ctx, ILoadOff(3, 31, 16)) ; emit(ctx, ICallSym("_fwrite"))
-  emit(ctx, ILoadOff(0, 31, 16)) ; emit(ctx, ICallSym("_fclose"))
-  emit(ctx, ILoadOff(0, 31, 0)) ; return emit(ctx, IStackFree(64))
+  val lw = internStr(ctx, "w"); emit(ctx, ISymHi(1, lw)); emit(ctx, ISymLo(1, 1, lw))
+  emit(ctx, ICallSym("_fopen")); emit(ctx, IPush(0))
+  emit(ctx, ILoadOff(0, 31, 16)); emit(ctx, ICallSym("_strlen")); emit(ctx, IPush(0))
+  emit(ctx, ILoadOff(0, 31, 32)); loadImm(ctx, 1, 1); emit(ctx, ILoadOff(2, 31, 0)); emit(ctx, ILoadOff(3, 31, 16)); emit(ctx, ICallSym("_fwrite"))
+  emit(ctx, ILoadOff(0, 31, 16)); emit(ctx, ICallSym("_fclose"))
+  emit(ctx, ILoadOff(0, 31, 0)); return emit(ctx, IStackFree(64))
 }
+
 fun genFopenW(ctx: Ctx, path: Expr): Int {
   genExpr(ctx, path)
-  val lw = internStr(ctx, "w") ; emit(ctx, ISymHi(1, lw)) ; emit(ctx, ISymLo(1, 1, lw))
+  val lw = internStr(ctx, "w"); emit(ctx, ISymHi(1, lw)); emit(ctx, ISymLo(1, 1, lw))
   return emit(ctx, ICallSym("_fopen"))
 }
+
 fun genFputByte(ctx: Ctx, byte: Expr, fp: Expr): Int {
-  genExpr(ctx, byte) ; emit(ctx, IPush(0)) ; genExpr(ctx, fp) ; emit(ctx, IMov(1, 0)) ; emit(ctx, IPop(0))
+  genExpr(ctx, byte); emit(ctx, IPush(0)); genExpr(ctx, fp); emit(ctx, IMov(1, 0)); emit(ctx, IPop(0))
   return emit(ctx, ICallSym("_fputc"))
 }
-fun genFcloseF(ctx: Ctx, fp: Expr): Int { genExpr(ctx, fp) ; return emit(ctx, ICallSym("_fclose")) }
+
+fun genFcloseF(ctx: Ctx, fp: Expr): Int { genExpr(ctx, fp); return emit(ctx, ICallSym("_fclose")) }
 
 // gen_print_str: printf("%s\n", strPtr) with the Darwin stack-vararg convention
 fun genPrintStr(ctx: Ctx, strLab: String, fmtLab: String): Int {
   emit(ctx, IStackAlloc(16))
-  emit(ctx, ISymHi(0, strLab)) ; emit(ctx, ISymLo(0, 0, strLab))
+  emit(ctx, ISymHi(0, strLab)); emit(ctx, ISymLo(0, 0, strLab))
   emit(ctx, IStoreTop(0))
-  emit(ctx, ISymHi(0, fmtLab)) ; emit(ctx, ISymLo(0, 0, fmtLab))
+  emit(ctx, ISymHi(0, fmtLab)); emit(ctx, ISymLo(0, 0, fmtLab))
   emit(ctx, ICallSym("_printf"))
   emit(ctx, IStackFree(16))
   return emit(ctx, IZero(0))
 }
+
 // printf(fmt, <value>) where value is evaluated (string ptr or Int) into the vararg
 fun genPrintVal(ctx: Ctx, e: Expr, fmtLab: String): Int {
   genExpr(ctx, e)
-  emit(ctx, IStackAlloc(16)) ; emit(ctx, IStoreTop(0))
-  emit(ctx, ISymHi(0, fmtLab)) ; emit(ctx, ISymLo(0, 0, fmtLab)) ; emit(ctx, ICallSym("_printf"))
-  emit(ctx, IStackFree(16)) ; return emit(ctx, IZero(0))
+  emit(ctx, IStackAlloc(16)); emit(ctx, IStoreTop(0))
+  emit(ctx, ISymHi(0, fmtLab)); emit(ctx, ISymLo(0, 0, fmtLab)); emit(ctx, ICallSym("_printf"))
+  emit(ctx, IStackFree(16)); return emit(ctx, IZero(0))
 }
+
 // print a boxed Float with %g: unbox the double, store it as the (stack-passed, Apple variadic ABI)
 // vararg, then printf(fmt). d0 holds the double; the stack slot is where printf reads the %g arg.
 fun genPrintFloat(ctx: Ctx, e: Expr, fmtLab: String): Int {
-  genExpr(ctx, e) ; emit(ctx, IFLoadD(0, 0, 0))
-  emit(ctx, IStackAlloc(16)) ; emit(ctx, IFStoreD(0, 31, 0))
-  emit(ctx, ISymHi(0, fmtLab)) ; emit(ctx, ISymLo(0, 0, fmtLab)) ; emit(ctx, ICallSym("_printf"))
-  emit(ctx, IStackFree(16)) ; return emit(ctx, IZero(0))
+  genExpr(ctx, e); emit(ctx, IFLoadD(0, 0, 0))
+  emit(ctx, IStackAlloc(16)); emit(ctx, IFStoreD(0, 31, 0))
+  emit(ctx, ISymHi(0, fmtLab)); emit(ctx, ISymLo(0, 0, fmtLab)); emit(ctx, ICallSym("_printf"))
+  emit(ctx, IStackFree(16)); return emit(ctx, IZero(0))
 }
+
 fun isStrExpr(ctx: Ctx, e: Expr): Bool {
   return when (e) {
     EStr(s) -> true
@@ -419,60 +489,94 @@ fun isStrExpr(ctx: Ctx, e: Expr): Bool {
     else -> false
   }
 }
+
 fun genPrintln(ctx: Ctx, a0: Expr, fmtS: String, fmtI: String): Int {
   val handled = when (a0) {
-    EStr(s) -> { genPrintStr(ctx, internStr(ctx, s), fmtS) ; 1 }
-    else -> { if (isStrExpr(ctx, a0)) { genPrintVal(ctx, a0, fmtS) } else { genPrintVal(ctx, a0, fmtI) } ; 1 }
+    EStr(s) -> { genPrintStr(ctx, internStr(ctx, s), fmtS); 1 }
+    else -> { if (isStrExpr(ctx, a0)) { genPrintVal(ctx, a0, fmtS) } else { genPrintVal(ctx, a0, fmtI) }; 1 }
   }
   return handled
 }
-fun aAt(args: List, i: Int): Expr { val e: Expr = args.get(i) ; return e }
+
+// STDERR output (the diagnostics floor, redesign §3g/§3h). eprint(s)/eprintln(s) write the NUL-terminated
+// String `s` to file descriptor 2 via write(2, s, strlen(s)) — a generic stderr write, so no Darwin
+// __stderrp data-symbol / GOT machinery is needed (write/strlen are ordinary libc calls, bound like any
+// other external). Keeping diagnostics off stdout is what lets a program's own stdout / the golden-stdout
+// corpus stay clean. eprintln appends a trailing newline with a second write(2, "\n", 1).
+fun genEStderr(ctx: Ctx, e: Expr, nl: Int): Int {
+  genExpr(ctx, e)                       // x0 = str ptr
+  emit(ctx, IPush(0))                   // save ptr (16-byte aligned push, call-safe)
+  emit(ctx, ICallSym("_strlen"))        // x0 = strlen(ptr)  (arg already in x0)
+  emit(ctx, IMov(2, 0))                 // x2 = len
+  emit(ctx, IPop(1))                    // x1 = ptr
+  loadImm(ctx, 0, 2)                    // x0 = 2 (stderr fd)
+  emit(ctx, ICallSym("_write"))
+  if (nl == 1) {
+    val lab = internStr(ctx, "\n")
+    emit(ctx, ISymHi(1, lab)); emit(ctx, ISymLo(1, 1, lab)) // x1 = &"\n"
+    loadImm(ctx, 2, 1)                  // x2 = 1
+    loadImm(ctx, 0, 2)                  // x0 = 2
+    emit(ctx, ICallSym("_write"))
+  }
+  return emit(ctx, IZero(0))
+}
+
+fun aAt(args: List, i: Int): Expr { val e: Expr = args.get(i); return e }
+
 // ---- closures (defunctionalized via real indirect calls) ----
 // closure value = heap block { fn_ptr@0, cap0@8, cap1@16, ... }.  Lifted fn __lam_N(env, params)
 // reads captures via __closGet(env, i).  A call site does __closCall(env, args) = blr [env+0].
-fun strOfExpr(e: Expr): String { return when (e) { EStr(s) -> s ; else -> "" } }
-fun intOfExpr(e: Expr): Int { return when (e) { EInt(s) -> parseIntK(s) ; else -> 0 } }
+fun strOfExpr(e: Expr): String { return when (e) { EStr(s) -> s; else -> "" } }
+
+fun intOfExpr(e: Expr): Int { return when (e) { EInt(s) -> parseIntK(s); else -> 0 } }
+
 fun genFuncAddr(ctx: Ctx, nameE: Expr): Int { return emit(ctx, IFuncAddr(0, concat("_", strOfExpr(nameE)))) }
+
 fun genClosGet(ctx: Ctx, env: Expr, idxE: Expr): Int {
   genExpr(ctx, env)
   return emit(ctx, ILoadOff(0, 0, 8 * (intOfExpr(idxE) + 1)))
 }
+
 fun genClosNew(ctx: Ctx, args: List): Int {
   val fn = strOfExpr(aAt(args, 0))
   val ncaps = args.len() - 1
-  loadImm(ctx, 0, 8 * (1 + ncaps)) ; genAllocHdr(ctx, 0 - 1) ; emit(ctx, IPush(0))
-  emit(ctx, IFuncAddr(0, concat("_", fn))) ; emit(ctx, ILoadTop(1)) ; emit(ctx, IStoreOff(0, 1, 0))
+  loadImm(ctx, 0, 8 * (1 + ncaps)); genAllocHdr(ctx, 0 - 1); emit(ctx, IPush(0))
+  emit(ctx, IFuncAddr(0, concat("_", fn))); emit(ctx, ILoadTop(1)); emit(ctx, IStoreOff(0, 1, 0))
   var i = 1
   while (i <= ncaps) {
     genExpr(ctx, aAt(args, i))
-    emit(ctx, IMov(2, 0)) ; emit(ctx, ILoadTop(1)) ; emit(ctx, IStoreOff(2, 1, 8 * i))
+    emit(ctx, IMov(2, 0)); emit(ctx, ILoadTop(1)); emit(ctx, IStoreOff(2, 1, 8 * i))
     i = i + 1
   }
   emit(ctx, IPop(0))
   return 0
 }
+
 fun genClosCall(ctx: Ctx, args: List): Int {
   var i = 0
-  while (i < args.len()) { genExpr(ctx, aAt(args, i)) ; emit(ctx, IPush(0)) ; i = i + 1 }
+  while (i < args.len()) { genExpr(ctx, aAt(args, i)); emit(ctx, IPush(0)); i = i + 1 }
   var j = args.len() - 1
-  while (j >= 0) { emit(ctx, IPop(j)) ; j = j - 1 }
+  while (j >= 0) { emit(ctx, IPop(j)); j = j - 1 }
   emit(ctx, ILoadOff(16, 0, 0))
   return emit(ctx, ICallReg(16))
 }
+
 // ---- floats (boxed IEEE-754 double; d0 = accumulator FP register) ----
-fun genBoxDouble(ctx: Ctx): Int {                // d0 holds a double -> x0 = a fresh heap word holding it
-  emit(ctx, IStackAlloc(16)) ; emit(ctx, IFStoreD(0, 31, 0))    // spill d0 (survives the malloc call)
-  loadImm(ctx, 0, 8) ; genAllocHdr(ctx, 0 - 1)                  // x0 = ref-counted 8-byte box
-  emit(ctx, IFLoadD(0, 31, 0)) ; emit(ctx, IStackFree(16))      // reload d0
-  emit(ctx, IFStoreD(0, 0, 0))                                  // *ptr = d0
+fun genBoxDouble(ctx: Ctx): Int { // d0 holds a double -> x0 = a fresh heap word holding it
+  emit(ctx, IStackAlloc(16)); emit(ctx, IFStoreD(0, 31, 0)) // spill d0 (survives the malloc call)
+  loadImm(ctx, 0, 8); genAllocHdr(ctx, 0 - 1) // x0 = ref-counted 8-byte box
+  emit(ctx, IFLoadD(0, 31, 0)); emit(ctx, IStackFree(16)) // reload d0
+  emit(ctx, IFStoreD(0, 0, 0)) // *ptr = d0
   return 0
 }
-fun genFLit(ctx: Ctx, t: String): Int {          // "3.14" -> strtod -> box
+
+fun genFLit(ctx: Ctx, t: String): Int { // "3.14" -> strtod -> box
   val lab = internStr(ctx, t)
-  emit(ctx, ISymHi(0, lab)) ; emit(ctx, ISymLo(0, 0, lab)) ; emit(ctx, IZero(1))
+  emit(ctx, ISymHi(0, lab)); emit(ctx, ISymLo(0, 0, lab)); emit(ctx, IZero(1))
   emit(ctx, ICallSym("_strtod"))
   return genBoxDouble(ctx)
 }
+
 fun fcond(op: String): String {
   if (strEq(op, "<")) { return "lt" }
   if (strEq(op, ">")) { return "gt" }
@@ -481,21 +585,24 @@ fun fcond(op: String): String {
   if (strEq(op, "==")) { return "eq" }
   return "ne"
 }
+
 fun genFBin(ctx: Ctx, op: String, a: Expr, b: Expr): Int {
-  genExpr(ctx, a) ; emit(ctx, IPush(0))
-  genExpr(ctx, b) ; emit(ctx, IPush(0))
-  emit(ctx, IPop(1)) ; emit(ctx, IPop(0))                        // x0 = a_ptr, x1 = b_ptr
-  emit(ctx, IFLoadD(0, 0, 0)) ; emit(ctx, IFLoadD(1, 1, 0))      // d0 = *a, d1 = *b
-  if (strEq(op, "+")) { emit(ctx, IFAdd(0, 0, 1)) ; return genBoxDouble(ctx) }
-  if (strEq(op, "-")) { emit(ctx, IFSub(0, 0, 1)) ; return genBoxDouble(ctx) }
-  if (strEq(op, "*")) { emit(ctx, IFMul(0, 0, 1)) ; return genBoxDouble(ctx) }
-  if (strEq(op, "/")) { emit(ctx, IFDiv(0, 0, 1)) ; return genBoxDouble(ctx) }
-  emit(ctx, IFCmp(0, 1))                                         // comparison -> Int 0/1
+  genExpr(ctx, a); emit(ctx, IPush(0))
+  genExpr(ctx, b); emit(ctx, IPush(0))
+  emit(ctx, IPop(1)); emit(ctx, IPop(0)) // x0 = a_ptr, x1 = b_ptr
+  emit(ctx, IFLoadD(0, 0, 0)); emit(ctx, IFLoadD(1, 1, 0)) // d0 = *a, d1 = *b
+  if (strEq(op, "+")) { emit(ctx, IFAdd(0, 0, 1)); return genBoxDouble(ctx) }
+  if (strEq(op, "-")) { emit(ctx, IFSub(0, 0, 1)); return genBoxDouble(ctx) }
+  if (strEq(op, "*")) { emit(ctx, IFMul(0, 0, 1)); return genBoxDouble(ctx) }
+  if (strEq(op, "/")) { emit(ctx, IFDiv(0, 0, 1)); return genBoxDouble(ctx) }
+  emit(ctx, IFCmp(0, 1)) // comparison -> Int 0/1
   return emit(ctx, ICset(0, fcond(op)))
 }
-fun genFToInt(ctx: Ctx, a: Expr): Int {          // toInt(float) : unbox + truncate
-  genExpr(ctx, a) ; emit(ctx, IFLoadD(0, 0, 0)) ; return emit(ctx, IFToInt(0, 0))
+
+fun genFToInt(ctx: Ctx, a: Expr): Int { // toInt(float) : unbox + truncate
+  genExpr(ctx, a); emit(ctx, IFLoadD(0, 0, 0)); return emit(ctx, IFToInt(0, 0))
 }
+
 // ---- ARC runtime primitives (refcount stored in a hidden header word at [obj-8]) ----
 // genAllocHdr: precondition x0 = object size in bytes. Allocates malloc(size+16) with a 16-byte
 // hidden header: refcount at [base+0] (= [obj-16]) and a runtime TYPE-ID at [base+8] (= [obj-8]).
@@ -503,103 +610,119 @@ fun genFToInt(ctx: Ctx, a: Expr): Int {          // toInt(float) : unbox + trunc
 // they are unchanged. This single funnel makes every heap object uniformly ref-countable AND carries
 // its concrete type for dynamic trait dispatch (the type-id is a struct's index, or -1 for non-structs).
 fun genAllocHdr(ctx: Ctx, typeId: Int): Int {
-  emit(ctx, IAddImm(0, 0, 16)) ; emit(ctx, ICallSym("_malloc"))
-  loadImm(ctx, 1, 1) ; emit(ctx, IStoreOff(1, 0, 0))
-  loadImm(ctx, 1, typeId) ; emit(ctx, IStoreOff(1, 0, 8))
+  emit(ctx, IAddImm(0, 0, 16)); emit(ctx, ICallSym("_malloc"))
+  loadImm(ctx, 1, 1); emit(ctx, IStoreOff(1, 0, 0))
+  loadImm(ctx, 1, typeId); emit(ctx, IStoreOff(1, 0, 8))
   return emit(ctx, IAddImm(0, 0, 16))
 }
+
 // __allocRC(size) : the explicit-ARC surface builtin — evaluate the size expr, then header-alloc.
 fun genAllocRC(ctx: Ctx, sizeE: Expr): Int {
-  genExpr(ctx, sizeE) ; return genAllocHdr(ctx, 0 - 1)
+  genExpr(ctx, sizeE); return genAllocHdr(ctx, 0 - 1)
 }
+
 // __typeId(p): read the runtime type-id from the header at [obj-8].
 fun genTypeId(ctx: Ctx, p: Expr): Int {
-  genExpr(ctx, p) ; emit(ctx, ISubImm(0, 0, 8)) ; return emit(ctx, ILoadOff(0, 0, 0))
+  genExpr(ctx, p); emit(ctx, ISubImm(0, 0, 8)); return emit(ctx, ILoadOff(0, 0, 0))
 }
+
 // ---- raw memory primitives (for writing containers in pure Kite; no ARC header, caller owns) ----
 // __rawAlloc(nbytes) -> malloc(nbytes)   ;   __rawFree(p) -> free(p)   ;   __rawRealloc(p,nbytes)
 // __rawLoad(p, off)  -> *(p+off)  (word) ;   __rawStore(p, off, val)  -> *(p+off) = val
 // Sub-expressions are spilled to the stack before any register shuffling (genExpr may clobber x1/x2).
-fun genRawAlloc(ctx: Ctx, nE: Expr): Int { genExpr(ctx, nE) ; return emit(ctx, ICallSym("_malloc")) }
-fun genRawFree(ctx: Ctx, pE: Expr): Int { genExpr(ctx, pE) ; return emit(ctx, ICallSym("_free")) }
+fun genRawAlloc(ctx: Ctx, nE: Expr): Int { genExpr(ctx, nE); return emit(ctx, ICallSym("_malloc")) }
+
+fun genRawFree(ctx: Ctx, pE: Expr): Int { genExpr(ctx, pE); return emit(ctx, ICallSym("_free")) }
+
 fun genRawRealloc(ctx: Ctx, pE: Expr, nE: Expr): Int {
-  genExpr(ctx, pE) ; emit(ctx, IPush(0))
-  genExpr(ctx, nE) ; emit(ctx, IMov(1, 0)) ; emit(ctx, IPop(0))     // x0=p, x1=nbytes
+  genExpr(ctx, pE); emit(ctx, IPush(0))
+  genExpr(ctx, nE); emit(ctx, IMov(1, 0)); emit(ctx, IPop(0)) // x0=p, x1=nbytes
   return emit(ctx, ICallSym("_realloc"))
 }
+
 fun genRawLoad(ctx: Ctx, pE: Expr, offE: Expr): Int {
-  genExpr(ctx, pE) ; emit(ctx, IPush(0))
-  genExpr(ctx, offE) ; emit(ctx, IPop(1)) ; emit(ctx, IAdd(0, 1, 0))  // x0 = p + off
+  genExpr(ctx, pE); emit(ctx, IPush(0))
+  genExpr(ctx, offE); emit(ctx, IPop(1)); emit(ctx, IAdd(0, 1, 0)) // x0 = p + off
   return emit(ctx, ILoadOff(0, 0, 0))
 }
+
 fun genRawStore(ctx: Ctx, pE: Expr, offE: Expr, valE: Expr): Int {
-  genExpr(ctx, pE) ; emit(ctx, IPush(0))
-  genExpr(ctx, offE) ; emit(ctx, IPush(0))
-  genExpr(ctx, valE) ; emit(ctx, IPush(0))
-  emit(ctx, IPop(0)) ; emit(ctx, IPop(1)) ; emit(ctx, IPop(2))        // x0=val, x1=off, x2=p
-  emit(ctx, IAdd(1, 2, 1)) ; emit(ctx, IStoreOff(0, 1, 0))            // *(p+off) = val
+  genExpr(ctx, pE); emit(ctx, IPush(0))
+  genExpr(ctx, offE); emit(ctx, IPush(0))
+  genExpr(ctx, valE); emit(ctx, IPush(0))
+  emit(ctx, IPop(0)); emit(ctx, IPop(1)); emit(ctx, IPop(2)) // x0=val, x1=off, x2=p
+  emit(ctx, IAdd(1, 2, 1)); emit(ctx, IStoreOff(0, 1, 0)) // *(p+off) = val
   return emit(ctx, IZero(0))
 }
+
 // byte-level access (for pure-Kite strings). __rawLoadByte(p,off) -> zero-extended byte at p+off.
 fun genRawLoadByte(ctx: Ctx, pE: Expr, offE: Expr): Int {
-  genExpr(ctx, pE) ; emit(ctx, IPush(0))
-  genExpr(ctx, offE) ; emit(ctx, IPop(1)) ; emit(ctx, IAdd(0, 1, 0))  // x0 = p + off
+  genExpr(ctx, pE); emit(ctx, IPush(0))
+  genExpr(ctx, offE); emit(ctx, IPop(1)); emit(ctx, IAdd(0, 1, 0)) // x0 = p + off
   return emit(ctx, ILoadByte(0, 0, 0))
 }
+
 // __argv(argv, i) -> argv[i] as a String (C char*). main receives argv (char**) in x1 per the entry ABI;
 // this reads [argv + i*8]. Typed String (see typeNameOf) so it flows into readFile/strEq directly.
 fun genArgv(ctx: Ctx, argvE: Expr, iE: Expr): Int {
-  genExpr(ctx, argvE) ; emit(ctx, IPush(0))
-  genExpr(ctx, iE) ; loadImm(ctx, 1, 3) ; emit(ctx, IShl(0, 0, 1))   // i << 3 = i*8
-  emit(ctx, IPop(1)) ; emit(ctx, IAdd(0, 1, 0))                       // argv + i*8
+  genExpr(ctx, argvE); emit(ctx, IPush(0))
+  genExpr(ctx, iE); loadImm(ctx, 1, 3); emit(ctx, IShl(0, 0, 1)) // i << 3 = i*8
+  emit(ctx, IPop(1)); emit(ctx, IAdd(0, 1, 0)) // argv + i*8
   return emit(ctx, ILoadOff(0, 0, 0))
 }
+
 fun genRawStoreByte(ctx: Ctx, pE: Expr, offE: Expr, valE: Expr): Int {
-  genExpr(ctx, pE) ; emit(ctx, IPush(0))
-  genExpr(ctx, offE) ; emit(ctx, IPush(0))
-  genExpr(ctx, valE) ; emit(ctx, IPush(0))
-  emit(ctx, IPop(0)) ; emit(ctx, IPop(1)) ; emit(ctx, IPop(2))        // x0=val, x1=off, x2=p
-  emit(ctx, IAdd(1, 2, 1)) ; emit(ctx, IStoreByte(0, 1, 0))           // (byte)*(p+off) = val
+  genExpr(ctx, pE); emit(ctx, IPush(0))
+  genExpr(ctx, offE); emit(ctx, IPush(0))
+  genExpr(ctx, valE); emit(ctx, IPush(0))
+  emit(ctx, IPop(0)); emit(ctx, IPop(1)); emit(ctx, IPop(2)) // x0=val, x1=off, x2=p
+  emit(ctx, IAdd(1, 2, 1)); emit(ctx, IStoreByte(0, 1, 0)) // (byte)*(p+off) = val
   return emit(ctx, IZero(0))
 }
-fun genRefcount(ctx: Ctx, p: Expr): Int {        // read refcount at [p-16]
-  genExpr(ctx, p) ; emit(ctx, ISubImm(0, 0, 16)) ; return emit(ctx, ILoadOff(0, 0, 0))
+
+fun genRefcount(ctx: Ctx, p: Expr): Int { // read refcount at [p-16]
+  genExpr(ctx, p); emit(ctx, ISubImm(0, 0, 16)); return emit(ctx, ILoadOff(0, 0, 0))
 }
-fun genRetain(ctx: Ctx, p: Expr): Int {          // [p-16] += 1 ; returns p ; nil-safe (no-op on null)
+
+fun genRetain(ctx: Ctx, p: Expr): Int { // [p-16] += 1 ; returns p ; nil-safe (no-op on null)
   genExpr(ctx, p)
   val done = concat("Lret_", intToStr(fresh(ctx)))
-  loadImm(ctx, 1, 0) ; emit(ctx, ICmp(0, 1)) ; emit(ctx, IJmpCondL("eq", done))
+  loadImm(ctx, 1, 0); emit(ctx, ICmp(0, 1)); emit(ctx, IJmpCondL("eq", done))
   emit(ctx, ISubImm(1, 0, 16))
-  emit(ctx, ILoadOff(2, 1, 0)) ; emit(ctx, IAddImm(2, 2, 1)) ; emit(ctx, IStoreOff(2, 1, 0))
-  emit(ctx, ILabel(done))                        // x0 still = p on both paths
+  emit(ctx, ILoadOff(2, 1, 0)); emit(ctx, IAddImm(2, 2, 1)); emit(ctx, IStoreOff(2, 1, 0))
+  emit(ctx, ILabel(done)) // x0 still = p on both paths
   return 0
 }
-fun genRelease(ctx: Ctx, p: Expr): Int {         // [p-16] -= 1 ; if 0 free(p-16) ; nil-safe (SHALLOW)
+
+fun genRelease(ctx: Ctx, p: Expr): Int { // [p-16] -= 1 ; if 0 free(p-16) ; nil-safe (SHALLOW)
   genExpr(ctx, p)
   val done = concat("LrelN_", intToStr(fresh(ctx)))
-  loadImm(ctx, 3, 0) ; emit(ctx, ICmp(0, 3)) ; emit(ctx, IJmpCondL("eq", done))
+  loadImm(ctx, 3, 0); emit(ctx, ICmp(0, 3)); emit(ctx, IJmpCondL("eq", done))
   emit(ctx, ISubImm(1, 0, 16))
-  emit(ctx, ILoadOff(2, 1, 0)) ; emit(ctx, ISubImm(2, 2, 1)) ; emit(ctx, IStoreOff(2, 1, 0))
-  loadImm(ctx, 3, 0) ; emit(ctx, ICmp(2, 3))
+  emit(ctx, ILoadOff(2, 1, 0)); emit(ctx, ISubImm(2, 2, 1)); emit(ctx, IStoreOff(2, 1, 0))
+  loadImm(ctx, 3, 0); emit(ctx, ICmp(2, 3))
   val skip = concat("Lrel_", intToStr(fresh(ctx)))
   emit(ctx, IJmpCondL("ne", skip))
-  emit(ctx, IMov(0, 1)) ; emit(ctx, ICallSym("_free"))
+  emit(ctx, IMov(0, 1)); emit(ctx, ICallSym("_free"))
   emit(ctx, ILabel(skip))
   emit(ctx, ILabel(done))
   return emit(ctx, IZero(0))
 }
+
 // --- deep (recursive) release support -------------------------------------------------
 // __decRefcount(p): [p-8] -= 1, returns the NEW count (does NOT free). Used by generated
 // per-type release routines to test for the last owner before recursing into fields.
 fun genDecRefcount(ctx: Ctx, p: Expr): Int {
-  genExpr(ctx, p) ; emit(ctx, ISubImm(1, 0, 16))
-  emit(ctx, ILoadOff(2, 1, 0)) ; emit(ctx, ISubImm(2, 2, 1)) ; emit(ctx, IStoreOff(2, 1, 0))
+  genExpr(ctx, p); emit(ctx, ISubImm(1, 0, 16))
+  emit(ctx, ILoadOff(2, 1, 0)); emit(ctx, ISubImm(2, 2, 1)); emit(ctx, IStoreOff(2, 1, 0))
   return emit(ctx, IMov(0, 2))
 }
+
 // __freeObj(p): free the underlying block (p-16, where the header lives).
 fun genFreeObj(ctx: Ctx, p: Expr): Int {
-  genExpr(ctx, p) ; emit(ctx, ISubImm(0, 0, 16)) ; return emit(ctx, ICallSym("_free"))
+  genExpr(ctx, p); emit(ctx, ISubImm(0, 0, 16)); return emit(ctx, ICallSym("_free"))
 }
+
 // ARC-EXEMPTION — the SINGLE SOURCE OF TRUTH for which nominal types are excluded from automatic ARC.
 // The built-in container/string nominals (List, Map, String) are leak-managed: List/Map are type-erased
 // word-lists whose elements can't be retained (and the compiler nests containers, so a naive deep-release
@@ -614,12 +737,14 @@ fun genFreeObj(ctx: Ctx, p: Expr): Int {
 // standalone genProgram entry that builds a Gen with no tables) — the populated set is byte-identical
 // to {List, Map, String}, so emission is unchanged (kcc2==kcc3 holds).
 fun isArcExemptLit(t: String): Bool { return strEq(t, "List") || strEq(t, "Map") || strEq(t, "String") }
+
 fun isArcExemptIn(arcE: List, t: String): Bool {
   if (arcE.len() == 0) { return isArcExemptLit(t) }
   var i = 0
-  while (i < arcE.len()) { if (strEq(arcE.get(i), t)) { return true } ; i = i + 1 }
+  while (i < arcE.len()) { if (strEq(arcE.get(i), t)) { return true }; i = i + 1 }
   return false
 }
+
 // a struct is "deep" (needs a generated recursive-release routine) iff any field is itself
 // a struct type — those fields hold ref-counted objects that must be released with the parent.
 // A field is a RELEASABLE reference iff its type is a struct/class we generate rel routines for, EXCLUDING
@@ -627,29 +752,32 @@ fun isArcExemptIn(arcE: List, t: String): Bool {
 // lists), so a struct field of type List must NOT be deep-released (it is typically shared/aliased;
 // releasing it would double-free). Keeps List-as-a-class leak-consistent.
 fun isRelField(gen: Gen, ft: String): Bool { return isStructName(gen, ft) && (isArcExemptIn(gen.arcE, ft) == false) }
+
 fun structHasRefField(gen: Gen, name: String): Bool {
   val idx = structIdx(gen, name)
   if (idx < 0) { return false }
   val fts: List = gen.structFT.get(idx)
   var i = 0
-  while (i < fts.len()) { val ft: String = fts.get(i) ; if (isRelField(gen, ft)) { return true } ; i = i + 1 }
+  while (i < fts.len()) { val ft: String = fts.get(i); if (isRelField(gen, ft)) { return true }; i = i + 1 }
   return false
 }
+
 // type-directed __release: dispatch a struct-with-ref-fields to its generated ___rel_<T>
 // routine (deep); everything else uses the shallow dec-and-free. Non-struct / erased / string
 // fields are intentionally left shallow so we never free a static literal or an unknown word.
 fun genReleaseDisp(ctx: Ctx, p: Expr): Int {
   val t = typeNameOf(ctx, p)
   if (isStructName(ctx.gen, t) && structNeedsRel(ctx.gen, t)) {
-    genExpr(ctx, p)                              // x0 = p ; nil-safe dispatch
+    genExpr(ctx, p) // x0 = p ; nil-safe dispatch
     val done = concat("LrelD_", intToStr(fresh(ctx)))
-    loadImm(ctx, 1, 0) ; emit(ctx, ICmp(0, 1)) ; emit(ctx, IJmpCondL("eq", done))
+    loadImm(ctx, 1, 0); emit(ctx, ICmp(0, 1)); emit(ctx, IJmpCondL("eq", done))
     emit(ctx, ICallSym(concat("___rel_", t)))
     emit(ctx, ILabel(done))
     return emit(ctx, IZero(0))
   }
   return genRelease(ctx, p)
 }
+
 // intrinsicFloor(): THE SINGLE SOURCE OF TRUTH for the intrinsic-floor NAME SET — the builtins with no
 // Kite body, which genCall (below) lowers directly to machine code. Both membership consumers derive from
 // this ONE list instead of keeping a hand-synced copy: klower's isIntrinsic (which adds only `comptime`,
@@ -659,15 +787,17 @@ fun genReleaseDisp(ctx: Ctx, p: Expr): Int {
 // single edit here (plus its lowering body, unavoidably, in genCall).
 fun intrinsicFloor(): List {
   val f = list()
-  f.push("toInt") ; f.push("__abort") ; f.push("__allocRC") ; f.push("__retain") ; f.push("__release")
-  f.push("__decRefcount") ; f.push("__freeObj") ; f.push("__refcount") ; f.push("__typeId")
-  f.push("__rawAlloc") ; f.push("__rawFree") ; f.push("__rawRealloc") ; f.push("__argv")
-  f.push("__rawLoad") ; f.push("__rawStore") ; f.push("__rawLoadByte") ; f.push("__rawStoreByte")
-  f.push("__funcAddr") ; f.push("__closGet") ; f.push("__closNew") ; f.push("__closCall")
-  f.push("println") ; f.push("print") ; f.push("printlnF") ; f.push("printF")
-  f.push("readFile") ; f.push("writeFile") ; f.push("fopenW") ; f.push("fputByte") ; f.push("fcloseF")
+  f.push("toInt"); f.push("__abort"); f.push("__allocRC"); f.push("__retain"); f.push("__release")
+  f.push("__decRefcount"); f.push("__freeObj"); f.push("__refcount"); f.push("__typeId")
+  f.push("__rawAlloc"); f.push("__rawFree"); f.push("__rawRealloc"); f.push("__argv")
+  f.push("__rawLoad"); f.push("__rawStore"); f.push("__rawLoadByte"); f.push("__rawStoreByte")
+  f.push("__funcAddr"); f.push("__closGet"); f.push("__closNew"); f.push("__closCall")
+  f.push("println"); f.push("print"); f.push("printlnF"); f.push("printF")
+  f.push("eprintln"); f.push("eprint")
+  f.push("readFile"); f.push("writeFile"); f.push("fopenW"); f.push("fputByte"); f.push("fcloseF")
   return f
 }
+
 // floorRetTag: THE SINGLE return-type manifest for the type-carrying intrinsics — floor builtins with no
 // Kite body whose result type the compiler must still know (for %s-vs-%ld print selection and type
 // propagation). Both former copies collapse onto this ONE lookup: klower's builtinRetTag returns it, and
@@ -677,11 +807,12 @@ fun intrinsicFloor(): List {
 // them would just re-create the stale duplicate this step removes. strEq is listed explicitly (its
 // prelude body would also resolve it, but it is the one type-carrying comparison the floor names for %s).
 fun floorRetTag(nm: String): String {
-  if (strEq(nm,"readFile") || strEq(nm,"__argv")) { return "String" }
-  if (strEq(nm,"writeFile") || strEq(nm,"fopenW") || strEq(nm,"fputByte") || strEq(nm,"fcloseF") || strEq(nm,"toInt")) { return "Int" }
-  if (strEq(nm,"strEq")) { return "Bool" }
+  if (strEq(nm, "readFile") || strEq(nm, "__argv")) { return "String" }
+  if (strEq(nm, "writeFile") || strEq(nm, "fopenW") || strEq(nm, "fputByte") || strEq(nm, "fcloseF") || strEq(nm, "toInt")) { return "Int" }
+  if (strEq(nm, "strEq")) { return "Bool" }
   return ""
 }
+
 fun genCall(ctx: Ctx, name: String, args: List): Int {
   if (strEq(name, "toInt") && args.len() == 1) { return genFToInt(ctx, aAt(args, 0)) }
   if (strEq(name, "__abort") && args.len() == 0) { return emit(ctx, ICallSym("_abort")) }
@@ -704,10 +835,12 @@ fun genCall(ctx: Ctx, name: String, args: List): Int {
   if (strEq(name, "__closGet") && args.len() == 2) { return genClosGet(ctx, aAt(args, 0), aAt(args, 1)) }
   if (strEq(name, "__closNew")) { return genClosNew(ctx, args) }
   if (strEq(name, "__closCall")) { return genClosCall(ctx, args) }
-  if (strEq(name, "println") && args.len() == 1) { genPrintln(ctx, aAt(args, 0), "Lfmt_println_s", "Lfmt_println") ; return 0 }
-  if (strEq(name, "print") && args.len() == 1) { genPrintln(ctx, aAt(args, 0), "Lfmt_print_s", "Lfmt_print") ; return 0 }
+  if (strEq(name, "println") && args.len() == 1) { genPrintln(ctx, aAt(args, 0), "Lfmt_println_s", "Lfmt_println"); return 0 }
+  if (strEq(name, "print") && args.len() == 1) { genPrintln(ctx, aAt(args, 0), "Lfmt_print_s", "Lfmt_print"); return 0 }
   if (strEq(name, "printlnF") && args.len() == 1) { return genPrintFloat(ctx, aAt(args, 0), "Lfmt_println_f") }
   if (strEq(name, "printF") && args.len() == 1) { return genPrintFloat(ctx, aAt(args, 0), "Lfmt_print_f") }
+  if (strEq(name, "eprintln") && args.len() == 1) { return genEStderr(ctx, aAt(args, 0), 1) }
+  if (strEq(name, "eprint") && args.len() == 1) { return genEStderr(ctx, aAt(args, 0), 0) }
   // List/string ops (listNew/listPush/listGet/listSet/listLen, strLen/charAt/strEq/concat/substr/
   // intToStr) are pure-Kite prelude functions (lib/core/string.kite, lib/alloc/collections/list.kite)
   // on the raw memory/byte primitives; they resolve through the default ICallSym path below. Their
@@ -720,11 +853,12 @@ fun genCall(ctx: Ctx, name: String, args: List): Int {
   if (isVariantName(ctx.gen, name)) { return genVariantNew(ctx, name, args) }
   if (isStructName(ctx.gen, name)) { return genStructNew(ctx, name, args) }
   var i = 0
-  while (i < args.len()) { val a: Expr = args.get(i) ; genExpr(ctx, a) ; emit(ctx, IPush(0)) ; i = i + 1 }
+  while (i < args.len()) { val a: Expr = args.get(i); genExpr(ctx, a); emit(ctx, IPush(0)); i = i + 1 }
   var j = args.len() - 1
-  while (j >= 0) { emit(ctx, IPop(j)) ; j = j - 1 }
+  while (j >= 0) { emit(ctx, IPop(j)); j = j - 1 }
   return emit(ctx, ICallSym(concat("_", name)))
 }
+
 fun genIf(ctx: Ctx, c: Expr, t: Expr, el: Expr): Int {
   val l = fresh(ctx)
   val lelse = concat("Lelse_", intToStr(l))
@@ -737,10 +871,12 @@ fun genIf(ctx: Ctx, c: Expr, t: Expr, el: Expr): Int {
   if (isNoRes(el)) { emit(ctx, IZero(0)) } else { genExpr(ctx, el) }
   return emit(ctx, ILabel(lend))
 }
+
 fun genRet(ctx: Ctx, v: Expr): Int {
   if (isNoRes(v) == false) { genExpr(ctx, v) }
   return emit(ctx, ICallL(ctx.epi))
 }
+
 fun genWhile(ctx: Ctx, c: Expr, body: Expr): Int {
   val l = fresh(ctx)
   val ltop = concat("Lwhile_", intToStr(l))
@@ -752,18 +888,23 @@ fun genWhile(ctx: Ctx, c: Expr, body: Expr): Int {
   emit(ctx, ICallL(ltop))
   return emit(ctx, ILabel(lend))
 }
+
 // loop-label stack (for break/continue). Nested loops push their (break, continue) targets; the
 // innermost pair is the top. Uses listSet-below-length + listPush-at-length + a mutable depth so no
 // list-pop primitive is needed.
 fun pushLoop(ctx: Ctx, brk: String, cont: String): Int {
-  if (ctx.loopDepth < ctx.brkL.len()) { ctx.brkL.set(ctx.loopDepth, brk) ; ctx.contL.set(ctx.loopDepth, cont) }
-  else { ctx.brkL.push(brk) ; ctx.contL.push(cont) }
+  if (ctx.loopDepth < ctx.brkL.len()) { ctx.brkL.set(ctx.loopDepth, brk); ctx.contL.set(ctx.loopDepth, cont) }
+  else { ctx.brkL.push(brk); ctx.contL.push(cont) }
   ctx.loopDepth = ctx.loopDepth + 1
   return 0
 }
-fun popLoop(ctx: Ctx): Int { ctx.loopDepth = ctx.loopDepth - 1 ; return 0 }
+
+fun popLoop(ctx: Ctx): Int { ctx.loopDepth = ctx.loopDepth - 1; return 0 }
+
 fun curBrk(ctx: Ctx): String { return ctx.brkL.get(ctx.loopDepth - 1) }
+
 fun curCont(ctx: Ctx): String { return ctx.contL.get(ctx.loopDepth - 1) }
+
 // SLoop(cond, body, step): a while whose per-iteration STEP is codegen'd at the continue target, so
 // `break` -> lend, `continue` -> lcont (runs step, then re-tests cond). Plain `while` uses an empty step.
 fun genLoop(ctx: Ctx, c: Expr, body: Expr, step: Stmt): Int {
@@ -782,34 +923,37 @@ fun genLoop(ctx: Ctx, c: Expr, body: Expr, step: Stmt): Int {
   emit(ctx, ILabel(lend))
   return popLoop(ctx)
 }
+
 fun genBlock(ctx: Ctx, stmts: List, res: Expr): Int {
   var i = 0
-  while (i < stmts.len()) { val s: Stmt = stmts.get(i) ; genStmt(ctx, s) ; i = i + 1 }
+  while (i < stmts.len()) { val s: Stmt = stmts.get(i); genStmt(ctx, s); i = i + 1 }
   if (isNoRes(res) == false) { genExpr(ctx, res) }
   return 0
 }
+
 fun genStmt(ctx: Ctx, s: Stmt): Int {
   return when (s) {
-    SLet(nm, init) -> { if (isStrExpr(ctx, init)) { ctx.strLocals.push(nm) } inferLty(ctx, nm, init) ; genExpr(ctx, init) ; stFp(ctx, 0, slotOf(ctx, nm)) }
-    SLetT(nm, ty, init) -> { if (isStrExpr(ctx, init)) { ctx.strLocals.push(nm) } setLty(ctx, nm, ty) ; genExpr(ctx, init) ; stFp(ctx, 0, slotOf(ctx, nm)) }
-    SReturnV(e) -> { genExpr(ctx, e) ; emit(ctx, ICallL(ctx.epi)) }
+    SLet(nm, init) -> { if (isStrExpr(ctx, init)) { ctx.strLocals.push(nm) } inferLty(ctx, nm, init); genExpr(ctx, init); stFp(ctx, 0, slotOf(ctx, nm)) }
+    SLetT(nm, ty, init) -> { if (isStrExpr(ctx, init)) { ctx.strLocals.push(nm) } setLty(ctx, nm, ty); genExpr(ctx, init); stFp(ctx, 0, slotOf(ctx, nm)) }
+    SReturnV(e) -> { genExpr(ctx, e); emit(ctx, ICallL(ctx.epi)) }
     SReturnU -> emit(ctx, ICallL(ctx.epi))
     SExprS(e) -> genExpr(ctx, e)
-    SAssign(nm, rhs) -> { genExpr(ctx, rhs) ; stFp(ctx, 0, slotOf(ctx, nm)) }
+    SAssign(nm, rhs) -> { genExpr(ctx, rhs); stFp(ctx, 0, slotOf(ctx, nm)) }
     SAssignF(base, f, rhs) -> genFieldAssign(ctx, base, f, rhs)
     SWhile(c, b) -> genWhile(ctx, c, b)
     SLoop(c, b, st) -> genLoop(ctx, c, b, st)
     else -> 0
   }
 }
+
 fun genExpr(ctx: Ctx, e: Expr): Int {
   return when (e) {
     EInt(t) -> loadImm(ctx, 0, parseIntK(t))
     EFLit(t) -> genFLit(ctx, t)
     EFBin(op, l, r) -> genFBin(ctx, op, l, r)
     EIdent(nm) -> { if (isVariantName(ctx.gen, nm)) { genVariantNew(ctx, nm, list()) } else { ldFp(ctx, 0, slotOf(ctx, nm)) } }
-    EStr(s) -> { val lab = internStr(ctx, s) ; emit(ctx, ISymHi(0, lab)) ; emit(ctx, ISymLo(0, 0, lab)) }
-    EUnary(op, x) -> { genExpr(ctx, x) ; emit(ctx, INeg(0, 0)) }
+    EStr(s) -> { val lab = internStr(ctx, s); emit(ctx, ISymHi(0, lab)); emit(ctx, ISymLo(0, 0, lab)) }
+    EUnary(op, x) -> { genExpr(ctx, x); if (strEq(op, "not !")) { loadImm(ctx, 1, 0); emit(ctx, ICmp(0, 1)); emit(ctx, ICset(0, "eq")) } else { emit(ctx, INeg(0, 0)) } }
     EBin(op, l, r) -> genBinary(ctx, op, l, r)
     ECall(nm, args) -> genCall(ctx, nm, args)
     EField(b, f) -> genField(ctx, b, f)
@@ -825,28 +969,29 @@ fun genExpr(ctx: Ctx, e: Expr): Int {
 
 fun collectS(acc: List, s: Stmt): Int {
   when (s) {
-    SLet(nm, init) -> { acc.push(nm) ; collectE(acc, init) ; 0 }
-    SLetT(nm, ty, init) -> { acc.push(nm) ; collectE(acc, init) ; 0 }
+    SLet(nm, init) -> { acc.push(nm); collectE(acc, init); 0 }
+    SLetT(nm, ty, init) -> { acc.push(nm); collectE(acc, init); 0 }
     SReturnV(e) -> collectE(acc, e)
     SExprS(e) -> collectE(acc, e)
     SAssign(nm, rhs) -> collectE(acc, rhs)
-    SAssignF(base, f, rhs) -> { collectE(acc, base) ; collectE(acc, rhs) ; 0 }
-    SWhile(c, b) -> { collectE(acc, c) ; collectE(acc, b) ; 0 }
-    SLoop(c, b, st) -> { collectE(acc, c) ; collectE(acc, b) ; collectS(acc, st) ; 0 }
+    SAssignF(base, f, rhs) -> { collectE(acc, base); collectE(acc, rhs); 0 }
+    SWhile(c, b) -> { collectE(acc, c); collectE(acc, b); 0 }
+    SLoop(c, b, st) -> { collectE(acc, c); collectE(acc, b); collectS(acc, st); 0 }
     else -> 0
   }
   return 0
 }
+
 fun collectE(acc: List, e: Expr): Int {
   when (e) {
     EBlock(stmts, res) -> {
       var i = 0
-      while (i < stmts.len()) { collectS(acc, stmts.get(i)) ; i = i + 1 }
+      while (i < stmts.len()) { collectS(acc, stmts.get(i)); i = i + 1 }
       if (isNoRes(res) == false) { collectE(acc, res) }
       0
     }
-    EIf(c, t, el) -> { collectE(acc, t) ; if (isNoRes(el) == false) { collectE(acc, el) } ; 0 }
-    ERet(v) -> { if (isNoRes(v) == false) { collectE(acc, v) } ; 0 }
+    EIf(c, t, el) -> { collectE(acc, t); if (isNoRes(el) == false) { collectE(acc, el) }; 0 }
+    ERet(v) -> { if (isNoRes(v) == false) { collectE(acc, v) }; 0 }
     EWhen(subj, arms) -> {
       collectE(acc, subj)
       var i = 0
@@ -868,7 +1013,7 @@ fun genFun(gen: Gen, fd: Func): Int {
   collectE(locals, fd.body)
   val names = list()
   var i = 0
-  while (i < fd.params.len()) { names.push(fd.params.get(i)) ; i = i + 1 }
+  while (i < fd.params.len()) { names.push(fd.params.get(i)); i = i + 1 }
   i = 0
   while (i < locals.len()) {
     val nm: String = locals.get(i)
@@ -877,7 +1022,7 @@ fun genFun(gen: Gen, fd: Func): Int {
   }
   val offs = list()
   i = 0
-  while (i < names.len()) { offs.push(8 * (i + 1)) ; i = i + 1 }
+  while (i < names.len()) { offs.push(8 * (i + 1)); i = i + 1 }
   val frame = align16(8 * names.len())
   val ctx = Ctx(gen, names, offs, concat("Lepi_", fd.name), list(), list(), list(), list(), list(), 0)
   i = 0
@@ -889,54 +1034,58 @@ fun genFun(gen: Gen, fd: Func): Int {
   emit(ctx, ILabel(concat("_", fd.name)))
   emit(ctx, IEnter)
   emit(ctx, ISetFrame)
-  if (frame > 0) { emit(ctx, IStackAlloc(frame)) }
+  if (frame > 0) { emitStackAlloc(ctx, frame) }
   i = 0
-  while (i < fd.params.len()) { emit(ctx, IStoreLocal(i, 8 * (i + 1))) ; i = i + 1 }
+  while (i < fd.params.len()) { emit(ctx, IStoreLocal(i, 8 * (i + 1))); i = i + 1 }
   genExpr(ctx, fd.body)
   emit(ctx, ILabel(concat("Lepi_", fd.name)))
-  if (frame > 0) { emit(ctx, IStackFree(frame)) }
+  if (frame > 0) { emitStackFree(ctx, frame) }
   emit(ctx, ILeave)
   emit(ctx, IReturn)
   return 0
 }
+
 // Build one recursive-release routine  fun ___rel_T(p: T): Int { if (--rc(p)==0) { release each
 // struct field; freeObj(p) } ; 0 }  for a struct T that has at least one struct-typed field.
 // Field releases go through __release, which re-dispatches by each field's static type, so the
 // whole object graph is freed depth-first. Non-struct fields are skipped (kept shallow / leaked).
 // a class T defines a destructor iff a function named `T_deinit` was generated (klower collectDeinit).
 fun hasDeinit(gen: Gen, name: String): Bool { return containsStr(gen.funN, concat(name, "_deinit")) }
+
 // a type needs a generated recursive-release routine if it has reference fields OR a deinit to run.
 fun structNeedsRel(gen: Gen, name: String): Bool { return structHasRefField(gen, name) || hasDeinit(gen, name) }
+
 fun buildRelRoutine(gen: Gen, name: String): Func {
   val idx = structIdx(gen, name)
   val fields: List = gen.structF.get(idx)
   val fts: List = gen.structFT.get(idx)
   val stmts = list()
-  if (hasDeinit(gen, name)) {                       // run the destructor before releasing fields / freeing
-    val dArgs = list() ; dArgs.push(EIdent("p"))
+  if (hasDeinit(gen, name)) { // run the destructor before releasing fields / freeing
+    val dArgs = list(); dArgs.push(EIdent("p"))
     stmts.push(SExprS(ECall(concat(name, "_deinit"), dArgs)))
   }
   var i = 0
   while (i < fields.len()) {
     val ft: String = fts.get(i)
     if (isRelField(gen, ft)) {
-      val relArgs = list() ; relArgs.push(EField(EIdent("p"), fields.get(i)))
+      val relArgs = list(); relArgs.push(EField(EIdent("p"), fields.get(i)))
       stmts.push(SExprS(ECall("__release", relArgs)))
     }
     i = i + 1
   }
-  val freeArgs = list() ; freeArgs.push(EIdent("p"))
+  val freeArgs = list(); freeArgs.push(EIdent("p"))
   stmts.push(SExprS(ECall("__freeObj", freeArgs)))
   val thenB = EBlock(stmts, ENoRes)
-  val decArgs = list() ; decArgs.push(EIdent("p"))
+  val decArgs = list(); decArgs.push(EIdent("p"))
   val cond = EBin("==", ECall("__decRefcount", decArgs), EInt("0"))
   val body = list()
   body.push(SExprS(EIf(cond, thenB, ENoRes)))
   body.push(SReturnV(EInt("0")))
-  val ps = list() ; ps.push("p")
-  val pts = list() ; pts.push(name)
+  val ps = list(); ps.push("p")
+  val pts = list(); pts.push(name)
   return Func(concat("__rel_", name), ps, pts, EBlock(body, ENoRes))
 }
+
 fun genRelRoutines(gen: Gen): Int {
   var i = 0
   while (i < gen.structN.len()) {
@@ -946,13 +1095,15 @@ fun genRelRoutines(gen: Gen): Int {
   }
   return 0
 }
+
 fun genProgramG(funcs: List, structN: List, structF: List, structFT: List, variantN: List, variantTag: List, variantTys: List, funN: List, funRet: List, arcE: List): Gen {
   val gen = Gen(list(), 0, list(), list(), 0, structN, structF, structFT, variantN, variantTag, variantTys, funN, funRet, arcE)
   var i = 0
-  while (i < funcs.len()) { val f: Func = funcs.get(i) ; genFun(gen, f) ; i = i + 1 }
+  while (i < funcs.len()) { val f: Func = funcs.get(i); genFun(gen, f); i = i + 1 }
   genRelRoutines(gen)
   return gen
 }
+
 fun genProgram(funcs: List): List { return genProgramG(funcs, list(), list(), list(), list(), list(), list(), list(), list(), list()).code }
 
 // ============================================================================
@@ -965,11 +1116,15 @@ fun genProgram(funcs: List): List { return genProgramG(funcs, list(), list(), li
 // Adjacency makes the push/pop a matched LIFO pair regardless of the surrounding stack
 // depth; a label between them blocks fusion (they are no longer adjacent), so this is
 // sound program-wide. Iterated to a fixpoint since each removal can expose a new pair.
-fun isPushI(i: Instr): Bool { return when (i) { IPush(r) -> true ; else -> false } }
-fun isPopI(i: Instr): Bool { return when (i) { IPop(r) -> true ; else -> false } }
-fun pushRegI(i: Instr): Int { return when (i) { IPush(r) -> r ; else -> 0 - 1 } }
-fun popRegI(i: Instr): Int { return when (i) { IPop(r) -> r ; else -> 0 - 1 } }
-fun isIdMov(i: Instr): Bool { return when (i) { IMov(d, m) -> d == m ; else -> false } }
+fun isPushI(i: Instr): Bool { return when (i) { IPush(r) -> true; else -> false } }
+
+fun isPopI(i: Instr): Bool { return when (i) { IPop(r) -> true; else -> false } }
+
+fun pushRegI(i: Instr): Int { return when (i) { IPush(r) -> r; else -> 0 - 1 } }
+
+fun popRegI(i: Instr): Int { return when (i) { IPop(r) -> r; else -> 0 - 1 } }
+
+fun isIdMov(i: Instr): Bool { return when (i) { IMov(d, m) -> d == m; else -> false } }
 
 fun peephole1(code: List): List {
   val out = list()
@@ -986,15 +1141,16 @@ fun peephole1(code: List): List {
         if (isPopI(b)) {
           val ra = pushRegI(a)
           val rb = popRegI(b)
-          if (ra == rb) { fused = true } else { out.push(IMov(rb, ra)) ; fused = true }
+          if (ra == rb) { fused = true } else { out.push(IMov(rb, ra)); fused = true }
           i = i + 2
         }
       }
-      if (fused == false) { out.push(a) ; i = i + 1 }
+      if (fused == false) { out.push(a); i = i + 1 }
     }
   }
   return out
 }
+
 fun optimize(code: List): List {
   var cur = code
   var pass = 0
@@ -1009,7 +1165,9 @@ fun optimize(code: List): List {
 
 // AST builders (concise hand-construction)
 fun ei(s: String): Expr { return EInt(s) }
+
 fun ev(s: String): Expr { return EIdent(s) }
+
 fun eb(op: String, l: Expr, r: Expr): Expr { return EBin(op, l, r) }
 
 // one-statement `return E` block body
@@ -1018,7 +1176,7 @@ fun retBody(e: Expr): Expr {
   stmts.push(SReturnV(e))
   return EBlock(stmts, ENoRes)
 }
-fun oneFunc(f: Func): List { val l = list() ; l.push(f) ; return l }
-fun args2(a: Expr, b: Expr): List { val l = list() ; l.push(a) ; l.push(b) ; return l }
 
+fun oneFunc(f: Func): List { val l = list(); l.push(f); return l }
 
+fun args2(a: Expr, b: Expr): List { val l = list(); l.push(a); l.push(b); return l }

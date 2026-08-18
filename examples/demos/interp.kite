@@ -1,27 +1,27 @@
 // exercises string interpolation and Go-style ATI (no semicolons)
 
 fun greet(name: String, n: Int): String {
-    return "Hello, $name! You have ${n + 1} new ${label(n)}."
+  return "Hello, $name! You have ${n + 1} new ${label(n)}."
 }
 
 fun classify(n: Int): String {
-    // then-branch and else on their own lines (ATI keeps the `if` together)
-    val label = if (n > 0)
-        "positive"
-    else
-        "non-positive"
-    return label
+  // then-branch and else on their own lines (ATI keeps the `if` together)
+  val label = if (n > 0)
+  "positive"
+  else
+  "non-positive"
+  return label
 }
 
 fun longExpr(a: Int, b: Int): Int {
-    // a line ending in an operator continues (no terminator inserted)
-    return a * a +
-        b * b
+  // a line ending in an operator continues (no terminator inserted)
+  return a * a +
+  b * b
 }
 
 fun pipeline(xs: List): List {
-    // leading-dot method chain across lines stays one expression
-    return xs
-        .filter(positive)
-        .map(square)
+  // leading-dot method chain across lines stays one expression
+  return xs
+  .filter(positive)
+  .map(square)
 }

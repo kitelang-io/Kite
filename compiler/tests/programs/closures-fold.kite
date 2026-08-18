@@ -3,6 +3,7 @@ fun fold(xs: List, init: Int, f: (Int, Int) -> Int): Int {
   for (v in xs) { acc = f(acc, v) }
   return acc
 }
+
 fun main(): Int {
   val xs = [1, 2, 3, 4, 5]
   return fold(xs, 0, { a, b -> a + b })
