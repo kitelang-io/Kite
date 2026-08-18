@@ -9,7 +9,7 @@ fun main(argc: Int, argv: Int): Int {
   val diags = checkDiags(lex(readFile(__argv(argv, 1))), 0)
   if (diags.len() == 0) { println("ok (name resolution + type check passed)"); return 0 }
   var i = 0
-  while (i < diags.len()) { val m: String = diags.get(i); println(concat("error: ", m)); i = i + 1 }
-  println(concat(intToStr(diags.len()), " semantic error(s)"))
+  while (i < diags.len()) { val m: String = diags.get(i); println("error: " + m); i = i + 1 }
+  println(diags.len().toStr() + " semantic error(s)")
   return diags.len()
 }

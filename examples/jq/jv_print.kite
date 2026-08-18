@@ -5,13 +5,13 @@ import "examples/jq/jv.kite"
 fun escStr(s: String): String {
   var out = "\""
   var i = 0
-  while (i < strLen(s)) {
-    val c = charAt(s, i)
+  while (i < s.len()) {
+    val c = s.charAt(i)
     if (c == 34) { out += "\\\"" }
     else { if (c == 92) { out += "\\\\" }
       else { if (c == 10) { out += "\\n" }
         else { if (c == 9) { out += "\\t" }
-          else { out += substr(s, i, 1) } } } }
+          else { out += s.substr(i, 1) } } } }
     i += 1
   }
   return out + "\""
@@ -21,7 +21,7 @@ fun jsonToStr(j: Json): String {
   return when (j) {
     JNull -> "null"
     JBool(b) -> if (b) { "true" } else { "false" }
-    JNum(n) -> intToStr(n)
+    JNum(n) -> n.toStr()
     JStr(s) -> escStr(s)
     JArr(xs) -> {
       var out = "["

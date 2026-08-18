@@ -10,7 +10,7 @@ fun main(): Int {
   val c = V2(1, 2) + V2(10, 20) // user Add impl -> V2(11, 22)
   var acc = c.x + c.y // Int + still primitive: 33
   val s = "foo" + "bar" + "baz" // String + overload -> "foobarbaz" (len 9)
-  acc = acc + strLen(s) // 33 + 9 = 42
+  acc = acc + s.len() // 33 + 9 = 42
   acc = acc * (7 - 2) // Int - and * still primitive: 42 * 5 = 210
   return acc // 210
 }

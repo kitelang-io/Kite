@@ -23,6 +23,6 @@ fun main(): Int {
   val hid = h?.id ?: 0
   val n = getHandle(0)
   val nid = n?.id ?: 7
-  val s = sumList(mapList(rangeList(4), { k -> k * k }))
+  val s = rangeList(4).map({ k -> k * k }).sum()
   return sz + t + hid + nid + s - 100
 }

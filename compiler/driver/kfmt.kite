@@ -49,13 +49,13 @@ fun zfScopeSet(scopes: List, idx: Int, sc: ZfScope): Int {
 
 // strip trailing spaces/tabs from a line/comment.
 fun zfRstrip(s: String): String {
-  var e = strLen(s)
+  var e = s.len()
   var go = 1
   while (go == 1 && e > 0) {
-    val c = charAt(s, e - 1)
+    val c = s.charAt(e - 1)
     if (c == 32 || c == 9) { e = e - 1 } else { go = 0 }
   }
-  return substr(s, 0, e)
+  return s.substr(0, e)
 }
 
 // kind of the token kfront's lexer just pushed onto a throwaway list (99 = it pushed nothing, e.g. an
@@ -71,7 +71,7 @@ fun zfLastKind(toks: List): Int {
 fun zfLexLine(l: Lx, pieces: List, nl: Int): Int {
   val s = l.pos
   scanLineComment(l)
-  pieces.push(ZfPiece(200, zfRstrip(substr(l.src, s, l.pos - s)), nl))
+  pieces.push(ZfPiece(200, zfRstrip(l.src.substr(s, l.pos - s)), nl))
   return 0
 }
 
@@ -80,7 +80,7 @@ fun zfLexLine(l: Lx, pieces: List, nl: Int): Int {
 fun zfLexBlock(l: Lx, pieces: List, nl: Int): Int {
   val s = l.pos
   scanBlockComment(l)
-  pieces.push(ZfPiece(201, substr(l.src, s, l.pos - s), nl))
+  pieces.push(ZfPiece(201, l.src.substr(s, l.pos - s), nl))
   return 0
 }
 
@@ -96,13 +96,13 @@ fun zfLexToken(l: Lx, pieces: List, nl: Int): Int {
   if (isDigit(c)) { val sc = list(); readNum(l, sc); kind = zfLastKind(sc) }
   else { if (isAlpha(c)) {
       while (isAlnum(cur(l))) { adv(l) }
-      kind = kw(substr(l.src, s, l.pos - s))
+      kind = kw(l.src.substr(s, l.pos - s))
     }
     else { if (c == 34) { val sc = list(); lexStr(l, sc); kind = zfLastKind(sc) }
       else { if (c == 39) { val sc = list(); lexChar(l, sc); kind = 9 }
         else { if (c == 59) { adv(l); kind = 90 } // ; -> a real token to the formatter
           else { val sc = list(); lexOp(l, sc); kind = zfLastKind(sc) } } } } }
-  pieces.push(ZfPiece(kind, substr(l.src, s, l.pos - s), nl))
+  pieces.push(ZfPiece(kind, l.src.substr(s, l.pos - s), nl))
   return 0
 }
 
@@ -111,7 +111,7 @@ fun zfLexToken(l: Lx, pieces: List, nl: Int): Int {
 // trivia the compiler throws away), and every real token is delegated to kfront's lexer via zfLexToken.
 fun zfLex(src: String): List {
   val pieces = list()
-  val l = Lx(src, strLen(src), 0, 1)
+  val l = Lx(src, src.len(), 0, 1)
   var pendingNl = 0
   var go = 1
   while (go == 1) {
@@ -269,15 +269,15 @@ fun zfWouldMerge(a: Int, b: Int): Bool {
 // alone misses because it only sees the trailing `.`.
 fun zfMergeHazard(pk: Int, pt: String, b: Int): Bool {
   if (pk == 28 && b == 60) { return true } // ..  +  <  -> ..<
-  val pn = strLen(pt)
+  val pn = pt.len()
   if (pn == 0) { return false }
-  return zfWouldMerge(charAt(pt, pn - 1), b)
+  return zfWouldMerge(pt.charAt(pn - 1), b)
 }
 
 fun zfIndent(n: Int): String {
   var s = ""
   var i = 0
-  while (i < n) { s = concat(s, "  "); i = i + 1 }
+  while (i < n) { s = s + "  "; i = i + 1 }
   return s
 }
 
@@ -295,7 +295,7 @@ fun zfJoin(cs: List): String {
     while (i + 1 < work.len()) {
       val a: String = work.get(i)
       val b: String = work.get(i + 1)
-      nxt.push(concat(a, b))
+      nxt.push(a + b)
       i = i + 2
     }
     if (i < work.len()) { val a: String = work.get(i); nxt.push(a) }
@@ -366,8 +366,8 @@ fun zfFormat(src: String): String {
       if (depth >= 1) { val scC: ZfScope = scopes.get(depth - 1); scC.lines = scC.lines + 1 }
     } else {
       var sp = zfSpace(prevKind, prevAngle, prevUnary, k, ca, cu)
-      if (sp == 0 && !zfIsComment(k) && strLen(p.text) > 0) {
-        if (zfMergeHazard(prevKind, prevText, charAt(p.text, 0))) { sp = 1 }
+      if (sp == 0 && !zfIsComment(k) && p.text.len() > 0) {
+        if (zfMergeHazard(prevKind, prevText, p.text.charAt(0))) { sp = 1 }
       }
       if (sp == 1) { out.push(" ") }
     }

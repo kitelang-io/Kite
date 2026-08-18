@@ -1,9 +1,9 @@
 // pub-import re-export chain: `import kite::core` gives gcdI (core pub-imports core::math), optGetOr/Some
-// (core pub-imports core::option); `import kite::alloc` gives sumList/rangeList (alloc pub-imports
-// collections). collections' PRIVATE `import kite::core::option` does NOT leak optGetOr through alloc.
+// (core pub-imports core::option). `rangeList` and the `.sum()` List method come from the prelude
+// (kite::alloc::collections::list); `import kite::alloc` still pulls in the collections aggregator.
 import kite::core
 import kite::alloc
 
 fun main(): Int {
-  return gcdI(100, 60) + sumList(rangeList(5)) + optGetOr(Some(7), 0)
+  return gcdI(100, 60) + rangeList(5).sum() + optGetOr(Some(7), 0)
 }

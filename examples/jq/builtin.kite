@@ -1,5 +1,5 @@
 // builtin.kite — jq's named builtins (length, keys, add). Mirrors the numeric/collection parts of
-// jq's src/builtin.c. `add` folds with the standard library's foldList (kite::alloc::collections).
+// jq's src/builtin.c. `add` folds with the standard library's `List.fold` method (prelude).
 import kite::core::option
 import kite::alloc::collections
 import "examples/jq/jv.kite"
@@ -11,7 +11,7 @@ fun lengthOf(j: Json): Int {
   return when (j) {
     JArr(xs) -> xs.len()
     JObj(es) -> es.len()
-    JStr(s) -> strLen(s)
+    JStr(s) -> s.len()
     JNum(n) -> if (n < 0) { 0 - n } else { n }
     else -> 0
   }
@@ -19,13 +19,13 @@ fun lengthOf(j: Json): Int {
 
 // lexicographic String <, used to sort object keys the way jq's `keys` does.
 fun strLess(a: String, b: String): Bool {
-  val la = strLen(a)
-  val lb = strLen(b)
+  val la = a.len()
+  val lb = b.len()
   val n = if (la < lb) { la } else { lb }
   var i = 0
   while (i < n) {
-    val ca = charAt(a, i)
-    val cb = charAt(b, i)
+    val ca = a.charAt(i)
+    val cb = b.charAt(i)
     if (ca < cb) { return true }
     if (ca > cb) { return false }
     i += 1
@@ -35,7 +35,7 @@ fun strLess(a: String, b: String): Bool {
 
 // keys: a SORTED array of an object's keys (jq's `keys` sorts; `keys_unsorted` preserves order).
 fun keysOf(j: Json): Json {
-  val ks = listNew()
+  val ks = list()
   when (j) {
     JObj(es) -> { for (e in es) { ks.push(entryKey(e)) } }
     else -> 0
@@ -48,7 +48,7 @@ fun keysOf(j: Json): Json {
     ks.set(d + 1, key)
     i += 1
   }
-  val out = listNew()
+  val out = list()
   for (k in ks) { out.push(JStr(k)) }
   return JArr(out)
 }
@@ -56,7 +56,7 @@ fun keysOf(j: Json): Json {
 // add: sum an array's numbers (jq's numeric `add`); an empty array is null.
 fun addOf(j: Json): Json {
   return when (j) {
-    JArr(xs) -> if (xs.len() == 0) { JNull } else { JNum(foldList(xs, 0, { a, x -> a + numOf(x) })) }
+    JArr(xs) -> if (xs.len() == 0) { JNull } else { JNum(xs.fold(0, { a, x -> a + numOf(x) })) }
     else -> JNull
   }
 }

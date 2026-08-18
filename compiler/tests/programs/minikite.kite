@@ -43,18 +43,18 @@ fun isAlpha(c: Int): Bool { return (c >= 97 && c <= 122) || (c >= 65 && c <= 90)
 fun isIdent(c: Int): Bool { return isAlpha(c) || isDigit(c) }
 
 fun charAtSafe(src: String, i: Int, n: Int): Int {
-  if (i < n) { return charAt(src, i) }
+  if (i < n) { return src.charAt(i) }
   return 0
 }
 
 fun kwKind(word: String): Int {
-  if (strEq(word, "fun")) { return 30 }
-  if (strEq(word, "val")) { return 31 }
-  if (strEq(word, "var")) { return 32 }
-  if (strEq(word, "return")) { return 33 }
-  if (strEq(word, "if")) { return 34 }
-  if (strEq(word, "else")) { return 35 }
-  if (strEq(word, "while")) { return 36 }
+  if (word == "fun") { return 30 }
+  if (word == "val") { return 31 }
+  if (word == "var") { return 32 }
+  if (word == "return") { return 33 }
+  if (word == "if") { return 34 }
+  if (word == "else") { return 35 }
+  if (word == "while") { return 36 }
   return 1
 }
 
@@ -76,41 +76,41 @@ fun opKind(c: Int): Int {
 }
 
 fun lex(src: String): List {
-  val toks = listNew()
-  val n = strLen(src)
+  val toks = list()
+  val n = src.len()
   var i = 0
   while (i < n) {
-    val c = charAt(src, i)
+    val c = src.charAt(i)
     if (isSpace(c)) {
       i = i + 1
     } else {
       if (isDigit(c)) {
         var v = 0
-        while (i < n && isDigit(charAt(src, i))) {
-          v = v * 10 + (charAt(src, i) - 48)
+        while (i < n && isDigit(src.charAt(i))) {
+          v = v * 10 + (src.charAt(i) - 48)
           i = i + 1
         }
-        listPush(toks, Tok(0, v, ""))
+        toks.push(Tok(0, v, ""))
       } else {
         if (isAlpha(c)) {
           val start = i
-          while (i < n && isIdent(charAt(src, i))) { i = i + 1 }
-          val word = substr(src, start, i - start)
+          while (i < n && isIdent(src.charAt(i))) { i = i + 1 }
+          val word = src.substr(start, i - start)
           val k = kwKind(word)
-          if (k == 1) { listPush(toks, Tok(1, 0, word)) }
-          else { listPush(toks, Tok(k, 0, "")) }
+          if (k == 1) { toks.push(Tok(1, 0, word)) }
+          else { toks.push(Tok(k, 0, "")) }
         } else {
           val c2 = charAtSafe(src, i + 1, n)
-          if (c == 61 && c2 == 61) { listPush(toks, Tok(17, 0, "")); i = i + 2 }
-          else { if (c == 33 && c2 == 61) { listPush(toks, Tok(18, 0, "")); i = i + 2 }
-            else { if (c == 60 && c2 == 61) { listPush(toks, Tok(19, 0, "")); i = i + 2 }
-              else { if (c == 62 && c2 == 61) { listPush(toks, Tok(20, 0, "")); i = i + 2 }
-                else { listPush(toks, Tok(opKind(c), 0, "")); i = i + 1 } } } }
+          if (c == 61 && c2 == 61) { toks.push(Tok(17, 0, "")); i = i + 2 }
+          else { if (c == 33 && c2 == 61) { toks.push(Tok(18, 0, "")); i = i + 2 }
+            else { if (c == 60 && c2 == 61) { toks.push(Tok(19, 0, "")); i = i + 2 }
+              else { if (c == 62 && c2 == 61) { toks.push(Tok(20, 0, "")); i = i + 2 }
+                else { toks.push(Tok(opKind(c), 0, "")); i = i + 1 } } } }
         }
       }
     }
   }
-  listPush(toks, Tok(99, 0, ""))
+  toks.push(Tok(99, 0, ""))
   return toks
 }
 
@@ -120,18 +120,18 @@ fun lex(src: String): List {
 struct P(val toks: List, var pos: Int)
 
 fun peekKind(p: P): Int {
-  if (p.pos >= listLen(p.toks)) { return 99 }
-  val t: Tok = listGet(p.toks, p.pos)
+  if (p.pos >= p.toks.len()) { return 99 }
+  val t: Tok = p.toks.get(p.pos)
   return t.kind
 }
 
-fun peekVal(p: P): Int { val t: Tok = listGet(p.toks, p.pos); return t.ival }
+fun peekVal(p: P): Int { val t: Tok = p.toks.get(p.pos); return t.ival }
 
-fun peekText(p: P): String { val t: Tok = listGet(p.toks, p.pos); return t.text }
+fun peekText(p: P): String { val t: Tok = p.toks.get(p.pos); return t.text }
 
 fun peekKind2(p: P): Int {
-  if (p.pos + 1 >= listLen(p.toks)) { return 99 }
-  val t: Tok = listGet(p.toks, p.pos + 1)
+  if (p.pos + 1 >= p.toks.len()) { return 99 }
+  val t: Tok = p.toks.get(p.pos + 1)
   return t.kind
 }
 
@@ -144,11 +144,11 @@ fun isAdd(k: Int): Bool { return k == 10 || k == 11 }
 fun isMul(k: Int): Bool { return k == 12 || k == 13 || k == 14 }
 
 fun parseArgs(p: P): List {
-  val args = listNew()
+  val args = list()
   if (peekKind(p) != 3) {
     var more = 1
     while (more == 1) {
-      listPush(args, parseExpr(p))
+      args.push(parseExpr(p))
       if (peekKind(p) == 6) { advance(p) } else { more = 0 }
     }
   }
@@ -212,8 +212,8 @@ fun parseExpr(p: P): Expr {
 }
 
 fun parseBlock(p: P): List {
-  val b = listNew()
-  while (peekKind(p) != 5 && peekKind(p) != 99) { listPush(b, parseStmt(p)) }
+  val b = list()
+  while (peekKind(p) != 5 && peekKind(p) != 99) { b.push(parseStmt(p)) }
   return b
 }
 
@@ -251,7 +251,7 @@ fun parseStmt(p: P): Stmt {
     advance(p) // consume '{'
     val thenB = parseBlock(p)
     advance(p) // consume '}'
-    var elseB = listNew()
+    var elseB = list()
     if (peekKind(p) == 35) {
       advance(p) // consume 'else'
       advance(p) // consume '{'
@@ -268,11 +268,11 @@ fun parseFunc(p: P): Func {
   val name = peekText(p)
   advance(p) // consume name
   advance(p) // consume '('
-  val params = listNew()
+  val params = list()
   if (peekKind(p) != 3) {
     var more = 1
     while (more == 1) {
-      listPush(params, peekText(p))
+      params.push(peekText(p))
       advance(p) // consume param name
       if (peekKind(p) == 6) { advance(p) } else { more = 0 }
     }
@@ -285,8 +285,8 @@ fun parseFunc(p: P): Func {
 }
 
 fun parseProgram(p: P): List {
-  val fns = listNew()
-  while (peekKind(p) == 30) { listPush(fns, parseFunc(p)) }
+  val fns = list()
+  while (peekKind(p) == 30) { fns.push(parseFunc(p)) }
   return fns
 }
 
@@ -298,17 +298,17 @@ struct Env(val names: List, val vals: List)
 struct Ret(var done: Int, var value: Int)
 
 fun define(env: Env, name: String, value: Int): Int {
-  listPush(env.names, name)
-  listPush(env.vals, value)
+  env.names.push(name)
+  env.vals.push(value)
   return 0
 }
 
 fun lookup(env: Env, name: String): Int {
   var i = 0
   var found = 0
-  while (i < listLen(env.names)) {
-    val nm: String = listGet(env.names, i)
-    if (strEq(nm, name)) { found = listGet(env.vals, i) }
+  while (i < env.names.len()) {
+    val nm: String = env.names.get(i)
+    if (nm == name) { found = env.vals.get(i) }
     i = i + 1
   }
   return found
@@ -334,21 +334,21 @@ fun combine(op: Int, a: Int, b: Int): Int {
 fun findFunc(funcs: List, name: String): Func {
   var i = 0
   var hit = 0
-  while (i < listLen(funcs)) {
-    val f: Func = listGet(funcs, i)
-    if (strEq(f.name, name)) { hit = i }
+  while (i < funcs.len()) {
+    val f: Func = funcs.get(i)
+    if (f.name == name) { hit = i }
     i = i + 1
   }
-  val r: Func = listGet(funcs, hit)
+  val r: Func = funcs.get(hit)
   return r
 }
 
 fun callFunc(f: Func, args: List, caller: Env, funcs: List): Int {
-  val local = Env(listNew(), listNew())
+  val local = Env(list(), list())
   var i = 0
-  while (i < listLen(f.params)) {
-    val pname: String = listGet(f.params, i)
-    val ae: Expr = listGet(args, i)
+  while (i < f.params.len()) {
+    val pname: String = f.params.get(i)
+    val ae: Expr = args.get(i)
     define(local, pname, evalExpr(ae, caller, funcs))
     i = i + 1
   }
@@ -396,8 +396,8 @@ fun evalStmt(s: Stmt, env: Env, funcs: List, ret: Ret): Int {
 
 fun evalStmts(stmts: List, env: Env, funcs: List, ret: Ret): Int {
   var i = 0
-  while (i < listLen(stmts) && ret.done == 0) {
-    val s: Stmt = listGet(stmts, i)
+  while (i < stmts.len() && ret.done == 0) {
+    val s: Stmt = stmts.get(i)
     evalStmt(s, env, funcs, ret)
     i = i + 1
   }
@@ -407,17 +407,17 @@ fun evalStmts(stmts: List, env: Env, funcs: List, ret: Ret): Int {
 fun run(src: String): Int {
   val p = P(lex(src), 0)
   val funcs = parseProgram(p)
-  val top = Env(listNew(), listNew())
-  return callFunc(findFunc(funcs, "main"), listNew(), top, funcs)
+  val top = Env(list(), list())
+  return callFunc(findFunc(funcs, "main"), list(), top, funcs)
 }
 
 fun main(): Int {
-  println(intToStr(run("fun add(a, b) { return a + b } fun main() { return add(2, 3) * 4 }"))) // 20
-  println(intToStr(run("fun fact(n) { if (n < 2) { return 1 } return n * fact(n - 1) } fun main() { return fact(5) }"))) // 120
-  println(intToStr(run("fun fib(n) { if (n < 2) { return n } return fib(n - 1) + fib(n - 2) } fun main() { return fib(10) }"))) // 55
-  println(intToStr(run("fun max(a, b) { if (a > b) { return a } return b } fun main() { val x = max(3, 9) val y = max(x, 7) return x + y }"))) // 18
-  println(intToStr(run("fun main() { var s = 0 var i = 1 while (i <= 10) { s = s + i i = i + 1 } return s }"))) // 55 (while + assignment)
-  println(intToStr(run("fun main() { var f = 1 var i = 1 while (i <= 5) { f = f * i i = i + 1 } return f }"))) // 120 (loop factorial)
-  println(intToStr(run("fun collatz(n) { var c = 0 var x = n while (x > 1) { if (x % 2 == 0) { x = x / 2 } else { x = 3 * x + 1 } c = c + 1 } return c } fun main() { return collatz(27) }"))) // 111 (steps)
+  println(run("fun add(a, b) { return a + b } fun main() { return add(2, 3) * 4 }").toStr()) // 20
+  println(run("fun fact(n) { if (n < 2) { return 1 } return n * fact(n - 1) } fun main() { return fact(5) }").toStr()) // 120
+  println(run("fun fib(n) { if (n < 2) { return n } return fib(n - 1) + fib(n - 2) } fun main() { return fib(10) }").toStr()) // 55
+  println(run("fun max(a, b) { if (a > b) { return a } return b } fun main() { val x = max(3, 9) val y = max(x, 7) return x + y }").toStr()) // 18
+  println(run("fun main() { var s = 0 var i = 1 while (i <= 10) { s = s + i i = i + 1 } return s }").toStr()) // 55 (while + assignment)
+  println(run("fun main() { var f = 1 var i = 1 while (i <= 5) { f = f * i i = i + 1 } return f }").toStr()) // 120 (loop factorial)
+  println(run("fun collatz(n) { var c = 0 var x = n while (x > 1) { if (x % 2 == 0) { x = x / 2 } else { x = 3 * x + 1 } c = c + 1 } return c } fun main() { return collatz(27) }").toStr()) // 111 (steps)
   return run("fun sq(x) { return x * x } fun main() { var s = 0 var i = 1 while (i <= 4) { s = s + sq(i) i = i + 1 } return s }") // 30 (1+4+9+16, exit code)
 }

@@ -5,7 +5,7 @@ import "examples/jq/jv.kite"
 
 struct Parser(val src: String, var pos: Int)
 
-fun peek(p: Parser): Int { if (p.pos >= strLen(p.src)) { return 0 - 1 } return charAt(p.src, p.pos) }
+fun peek(p: Parser): Int { if (p.pos >= p.src.len()) { return 0 - 1 } return p.src.charAt(p.pos) }
 
 fun bump(p: Parser) { p.pos += 1 }
 
@@ -57,7 +57,7 @@ fun parseValue(p: Parser): Json {
 
 fun parseArray(p: Parser): Json {
   bump(p) // '['
-  val xs = listNew()
+  val xs = list()
   skipWs(p)
   if (peek(p) == 93) { bump(p) return JArr(xs) } // empty ']'
   var go = true
@@ -72,7 +72,7 @@ fun parseArray(p: Parser): Json {
 
 fun parseObject(p: Parser): Json {
   bump(p) // '{'
-  val es = listNew()
+  val es = list()
   skipWs(p)
   if (peek(p) == 125) { bump(p) return JObj(es) } // empty '}'
   var go = true

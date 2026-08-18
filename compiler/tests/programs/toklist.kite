@@ -16,21 +16,21 @@ fun isSpace(c: Int): Bool { return c == 32 }
 
 // ---- lexer: String -> List<Tok> -------------------------------------------
 fun lex(src: String): List {
-  val toks = listNew()
-  val n = strLen(src)
+  val toks = list()
+  val n = src.len()
   var i = 0
   while (i < n) {
-    val c = charAt(src, i)
+    val c = src.charAt(i)
     if (isSpace(c)) {
       i = i + 1
     } else {
       if (isDigit(c)) {
         var v = 0
-        while (i < n && isDigit(charAt(src, i))) {
-          v = v * 10 + (charAt(src, i) - 48)
+        while (i < n && isDigit(src.charAt(i))) {
+          v = v * 10 + (src.charAt(i) - 48)
           i = i + 1
         }
-        listPush(toks, Tok(0, v))
+        toks.push(Tok(0, v))
       } else {
         var k = 7
         if (c == 43) { k = 1 } else {
@@ -39,12 +39,12 @@ fun lex(src: String): List {
               if (c == 47) { k = 4 } else {
                 if (c == 40) { k = 5 } else {
                   if (c == 41) { k = 6 } else { k = 7 } } } } } }
-        listPush(toks, Tok(k, 0))
+        toks.push(Tok(k, 0))
         i = i + 1
       }
     }
   }
-  listPush(toks, Tok(7, 0))
+  toks.push(Tok(7, 0))
   return toks
 }
 
@@ -52,13 +52,13 @@ fun lex(src: String): List {
 struct PS(val toks: List, var pos: Int)
 
 fun peekKind(ps: PS): Int {
-  if (ps.pos >= listLen(ps.toks)) { return 7 }
-  val t: Tok = listGet(ps.toks, ps.pos)
+  if (ps.pos >= ps.toks.len()) { return 7 }
+  val t: Tok = ps.toks.get(ps.pos)
   return t.kind
 }
 
 fun peekVal(ps: PS): Int {
-  val t: Tok = listGet(ps.toks, ps.pos)
+  val t: Tok = ps.toks.get(ps.pos)
   return t.ival
 }
 
@@ -121,8 +121,8 @@ fun compile(src: String): Int {
 }
 
 fun main(): Int {
-  println(intToStr(compile("(2 + 3) * 4"))) // 20
-  println(intToStr(compile("2 + 3 * 4"))) // 14
-  println(intToStr(compile("100 - 7 * (3 + 4)"))) // 51
+  println(compile("(2 + 3) * 4").toStr()) // 20
+  println(compile("2 + 3 * 4").toStr()) // 14
+  println(compile("100 - 7 * (3 + 4)").toStr()) // 51
   return compile("2 * 3 + 4 * 5") // 26  (exit code)
 }

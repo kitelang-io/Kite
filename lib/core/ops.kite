@@ -20,3 +20,10 @@ trait Mul { @lang("op.*") fun mul(self, rhs: Self): Self }
 trait Div { @lang("op./") fun div(self, rhs: Self): Self }
 
 trait Rem { @lang("op.%") fun rem(self, rhs: Self): Self }
+
+// Eq overloads `==` (and `!=` as its negation) as VALUE comparison, routed like the arithmetic operators.
+// klower's lowerBin desugars `a == b` to the `eq` method (emitted mangled with the operand's type, e.g.
+// String_eq) ONLY when an operand is concretely String; `a != b` lowers to `not(a == b)`. Int/Char/Float
+// and every other type have no Eq impl, so their `==`/`!=` fall through to the built-in machine compare —
+// zero-cost, and the pervasive integer `==` in the compiler's own sources is never misrouted. Returns Bool.
+trait Eq { @lang("op.==") fun eq(self, rhs: Self): Bool }

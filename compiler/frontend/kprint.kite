@@ -19,7 +19,7 @@ fun main(argc: Int, argv: Int): Int {
           else { if (k == 55) { printEDecl(parseEnum(p, annos)); count = count + 1 } // enum
             else { if (k == 66) { printTrait(parseTrait(p, annos)); count = count + 1 } // trait
               else { if (k == 67) { printImpl(parseImpl(p, annos)); count = count + 1 } // impl
-                else { if (k == 58) { line(0, concat("import ", parseImport(p))); println(""); count = count + 1 }
+                else { if (k == 58) { line(0, "import " + parseImport(p)); println(""); count = count + 1 }
                   else { go = 0 } } } } } } }
     }
   }

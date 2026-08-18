@@ -19,28 +19,28 @@ fun isIdent(c: Int): Bool { return isAlpha(c) || isDigit(c) }
 
 // ---- lexer: String -> List<Tok> -------------------------------------------
 fun lex(src: String): List {
-  val toks = listNew()
-  val n = strLen(src)
+  val toks = list()
+  val n = src.len()
   var i = 0
   while (i < n) {
-    val c = charAt(src, i)
+    val c = src.charAt(i)
     if (isSpace(c)) {
       i = i + 1
     } else {
       if (isDigit(c)) {
         var v = 0
-        while (i < n && isDigit(charAt(src, i))) {
-          v = v * 10 + (charAt(src, i) - 48)
+        while (i < n && isDigit(src.charAt(i))) {
+          v = v * 10 + (src.charAt(i) - 48)
           i = i + 1
         }
-        listPush(toks, Tok(0, v, ""))
+        toks.push(Tok(0, v, ""))
       } else {
         if (isAlpha(c)) {
           val start = i
-          while (i < n && isIdent(charAt(src, i))) { i = i + 1 }
-          val word = substr(src, start, i - start)
-          if (strEq(word, "val")) { listPush(toks, Tok(10, 0, "")) }
-          else { listPush(toks, Tok(8, 0, word)) }
+          while (i < n && isIdent(src.charAt(i))) { i = i + 1 }
+          val word = src.substr(start, i - start)
+          if (word == "val") { toks.push(Tok(10, 0, "")) }
+          else { toks.push(Tok(8, 0, word)) }
         } else {
           var k = 7
           if (c == 43) { k = 1 } else {
@@ -50,13 +50,13 @@ fun lex(src: String): List {
                   if (c == 40) { k = 5 } else {
                     if (c == 41) { k = 6 } else {
                       if (c == 61) { k = 9 } else { k = 7 } } } } } } }
-          listPush(toks, Tok(k, 0, ""))
+          toks.push(Tok(k, 0, ""))
           i = i + 1
         }
       }
     }
   }
-  listPush(toks, Tok(7, 0, ""))
+  toks.push(Tok(7, 0, ""))
   return toks
 }
 
@@ -64,8 +64,8 @@ fun lex(src: String): List {
 struct Env(val names: List, val vals: List)
 
 fun define(env: Env, name: String, value: Int): Int {
-  listPush(env.names, name)
-  listPush(env.vals, value)
+  env.names.push(name)
+  env.vals.push(value)
   return 0
 }
 
@@ -73,9 +73,9 @@ fun define(env: Env, name: String, value: Int): Int {
 fun lookup(env: Env, name: String): Int {
   var i = 0
   var found = 0
-  while (i < listLen(env.names)) {
-    val nm: String = listGet(env.names, i)
-    if (strEq(nm, name)) { found = listGet(env.vals, i) }
+  while (i < env.names.len()) {
+    val nm: String = env.names.get(i)
+    if (nm == name) { found = env.vals.get(i) }
     i = i + 1
   }
   return found
@@ -85,18 +85,18 @@ fun lookup(env: Env, name: String): Int {
 struct P(val toks: List, var pos: Int, val env: Env)
 
 fun peekKind(p: P): Int {
-  if (p.pos >= listLen(p.toks)) { return 7 }
-  val t: Tok = listGet(p.toks, p.pos)
+  if (p.pos >= p.toks.len()) { return 7 }
+  val t: Tok = p.toks.get(p.pos)
   return t.kind
 }
 
 fun peekVal(p: P): Int {
-  val t: Tok = listGet(p.toks, p.pos)
+  val t: Tok = p.toks.get(p.pos)
   return t.ival
 }
 
 fun peekText(p: P): String {
-  val t: Tok = listGet(p.toks, p.pos)
+  val t: Tok = p.toks.get(p.pos)
   return t.text
 }
 
@@ -147,7 +147,7 @@ fun parseExpr(p: P): Int {
 
 // ---- program: `val NAME = expr`* then a final expression ------------------
 fun run(src: String): Int {
-  val env = Env(listNew(), listNew())
+  val env = Env(list(), list())
   val p = P(lex(src), 0, env)
   while (peekKind(p) == 10) { // 'val'
     advance(p) // consume 'val'
@@ -161,8 +161,8 @@ fun run(src: String): Int {
 }
 
 fun main(): Int {
-  println(intToStr(run("val a = 2 + 3   val b = a * 4   a + b"))) // 25
-  println(intToStr(run("val x = 10   val y = x * x   val z = y - x   z / 3"))) // 30
-  println(intToStr(run("val a = 4   val b = a   val a = 9   a + b"))) // 13 (last a wins)
+  println(run("val a = 2 + 3   val b = a * 4   a + b").toStr()) // 25
+  println(run("val x = 10   val y = x * x   val z = y - x   z / 3").toStr()) // 30
+  println(run("val a = 4   val b = a   val a = 9   a + b").toStr()) // 13 (last a wins)
   return run("val a = 2 + 3   val b = (a + 1) * 4   val c = b - a   a + b + c") // 5+24+19=48
 }

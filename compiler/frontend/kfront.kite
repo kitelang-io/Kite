@@ -32,12 +32,14 @@ struct Tok(val kind: Int, val text: String, val line: Int)
 struct Span(val off: Int, val line: Int, val col: Int)
 
 fun spanNone(): Span { return Span(0 - 1, 0, 0) }
+
 fun spanLine(line: Int): Span { return Span(0 - 1, line, 0) }
 
 // severity: 0 = error, 1 = warning, 2 = note. `code` is an optional short error code ("" = none).
 struct Diagnostic(val severity: Int, val span: Span, val message: String, val code: String)
 
 fun diagError(msg: String): Diagnostic { return Diagnostic(0, spanNone(), msg, "") }
+
 fun diagErrorAt(line: Int, msg: String): Diagnostic { return Diagnostic(0, spanLine(line), msg, "") }
 
 fun sevLabel(sev: Int): String {
@@ -50,9 +52,9 @@ fun sevLabel(sev: Int): String {
 // message already carries its own "line N: " position prefix, so this renders exactly the legacy
 // "error: <msg>" wire form and the committed goldens stay byte-valid. A non-empty code renders "[code] ".
 fun renderDiag(d: Diagnostic): String {
-  var s = concat(sevLabel(d.severity), ": ")
-  if (strEq(d.code, "") == false) { s = concat(s, concat("[", concat(d.code, "] "))) }
-  return concat(s, d.message)
+  var s = sevLabel(d.severity) + ": "
+  if (d.code != "") { s = s + ("[" + (d.code + "] ")) }
+  return s + d.message
 }
 
 // THE single sink: render one Diagnostic and emit it to STDERR (never stdout), so a program's own stdout
@@ -70,13 +72,13 @@ fun emitDiags(ds: List): Int {
 // line: 1-based source line of the current lex position, bumped by adv() whenever it steps over a '\n'.
 struct Lx(val src: String, val n: Int, var pos: Int, var line: Int)
 
-fun cur(lx: Lx): Int { if (lx.pos < lx.n) { return charAt(lx.src, lx.pos) } return 0 }
+fun cur(lx: Lx): Int { if (lx.pos < lx.n) { return lx.src.charAt(lx.pos) } return 0 }
 
-fun nxt(lx: Lx): Int { if (lx.pos + 1 < lx.n) { return charAt(lx.src, lx.pos + 1) } return 0 }
+fun nxt(lx: Lx): Int { if (lx.pos + 1 < lx.n) { return lx.src.charAt(lx.pos + 1) } return 0 }
 
-fun at(lx: Lx, k: Int): Int { if (lx.pos + k < lx.n) { return charAt(lx.src, lx.pos + k) } return 0 }
+fun at(lx: Lx, k: Int): Int { if (lx.pos + k < lx.n) { return lx.src.charAt(lx.pos + k) } return 0 }
 
-fun adv(lx: Lx): Int { if (lx.pos < lx.n) { if (charAt(lx.src, lx.pos) == 10) { lx.line = lx.line + 1 } } lx.pos = lx.pos + 1; return 0 }
+fun adv(lx: Lx): Int { if (lx.pos < lx.n) { if (lx.src.charAt(lx.pos) == 10) { lx.line = lx.line + 1 } } lx.pos = lx.pos + 1; return 0 }
 
 fun isDigit(c: Int): Bool { return c >= 48 && c <= 57 }
 
@@ -101,20 +103,20 @@ fun isBinD(c: Int): Bool { return c == 48 || c == 49 }
 // (below) split it back out so codegen/klower see a pure decimal while the checker reads the type.
 fun peekAlnum(lx: Lx): String {
   var i = lx.pos
-  while (i < lx.n && isAlnum(charAt(lx.src, i))) { i = i + 1 }
-  return substr(lx.src, lx.pos, i - lx.pos)
+  while (i < lx.n && isAlnum(lx.src.charAt(i))) { i = i + 1 }
+  return lx.src.substr(lx.pos, i - lx.pos)
 }
 
 fun isIntSuffixW(w: String): Bool {
-  return strEq(w, "L") || strEq(w, "i8") || strEq(w, "i16") || strEq(w, "i32") || strEq(w, "i64") ||
-  strEq(w, "u8") || strEq(w, "u16") || strEq(w, "u32") || strEq(w, "u64") || strEq(w, "isize") || strEq(w, "usize")
+  return w == "L" || w == "i8" || w == "i16" || w == "i32" || w == "i64" ||
+  w == "u8" || w == "u16" || w == "u32" || w == "u64" || w == "isize" || w == "usize"
 }
 
 // consume + return a trailing integer suffix if one is present; else "" with lx.pos unchanged (so an
 // unrecognized trailing word lexes as its own identifier, exactly as before — purely additive).
 fun readIntSuffix(lx: Lx): String {
   val w = peekAlnum(lx)
-  if (isIntSuffixW(w)) { var k = 0; while (k < strLen(w)) { adv(lx); k = k + 1 }; return w }
+  if (isIntSuffixW(w)) { var k = 0; while (k < w.len()) { adv(lx); k = k + 1 }; return w }
   return ""
 }
 
@@ -122,26 +124,26 @@ fun readIntSuffix(lx: Lx): String {
 // Value is pure decimal (optional leading '-'), so the first non-digit begins the suffix.
 fun litNum(s: String): String {
   var i = 0
-  if (strLen(s) >= 1 && charAt(s, 0) == 45) { i = 1 } // leading '-'
-  while (i < strLen(s) && isDigit(charAt(s, i))) { i = i + 1 }
-  return substr(s, 0, i)
+  if (s.len() >= 1 && s.charAt(0) == 45) { i = 1 } // leading '-'
+  while (i < s.len() && isDigit(s.charAt(i))) { i = i + 1 }
+  return s.substr(0, i)
 }
 
 fun litSuf(s: String): String {
-  val n = strLen(litNum(s))
-  return substr(s, n, strLen(s) - n)
+  val n = litNum(s).len()
+  return s.substr(n, s.len() - n)
 }
 
 // map an integer suffix to its checker primitive-type name ("" -> no suffix).
 fun suffixTyName(suf: String): String {
-  if (strEq(suf, "")) { return "" }
-  if (strEq(suf, "L")) { return "Long" }
-  if (strEq(suf, "i8")) { return "I8" } if (strEq(suf, "i16")) { return "I16" }
-  if (strEq(suf, "i32")) { return "I32" } if (strEq(suf, "i64")) { return "I64" }
-  if (strEq(suf, "u8")) { return "U8" } if (strEq(suf, "u16")) { return "U16" }
-  if (strEq(suf, "u32")) { return "U32" } if (strEq(suf, "u64")) { return "U64" }
-  if (strEq(suf, "isize")) { return "ISize" }
-  if (strEq(suf, "usize")) { return "USize" }
+  if (suf == "") { return "" }
+  if (suf == "L") { return "Long" }
+  if (suf == "i8") { return "I8" } if (suf == "i16") { return "I16" }
+  if (suf == "i32") { return "I32" } if (suf == "i64") { return "I64" }
+  if (suf == "u8") { return "U8" } if (suf == "u16") { return "U16" }
+  if (suf == "u32") { return "U32" } if (suf == "u64") { return "U64" }
+  if (suf == "isize") { return "ISize" }
+  if (suf == "usize") { return "USize" }
   return ""
 }
 
@@ -156,7 +158,7 @@ fun readNum(lx: Lx, toks: List): Int {
     while (isHexD(cur(lx)) || (cur(lx) == 95 && isHexD(nxt(lx)))) {
       if (cur(lx) == 95) { adv(lx) } else { hv = hv * 16 + hexDigitF(cur(lx)); adv(lx) }
     }
-    return push2(lx, toks, 2, concat(intToStr(hv), readIntSuffix(lx)))
+    return push2(lx, toks, 2, hv.toStr() + readIntSuffix(lx))
   }
   if (c == 48 && (nxt(lx) == 111 || nxt(lx) == 79)) { // 0o / 0O
     adv(lx); adv(lx)
@@ -164,7 +166,7 @@ fun readNum(lx: Lx, toks: List): Int {
     while (isOctD(cur(lx)) || (cur(lx) == 95 && isOctD(nxt(lx)))) {
       if (cur(lx) == 95) { adv(lx) } else { ov = ov * 8 + (cur(lx) - 48); adv(lx) }
     }
-    return push2(lx, toks, 2, concat(intToStr(ov), readIntSuffix(lx)))
+    return push2(lx, toks, 2, ov.toStr() + readIntSuffix(lx))
   }
   if (c == 48 && (nxt(lx) == 98 || nxt(lx) == 66)) { // 0b / 0B
     adv(lx); adv(lx)
@@ -172,30 +174,30 @@ fun readNum(lx: Lx, toks: List): Int {
     while (isBinD(cur(lx)) || (cur(lx) == 95 && isBinD(nxt(lx)))) {
       if (cur(lx) == 95) { adv(lx) } else { bv = bv * 2 + (cur(lx) - 48); adv(lx) }
     }
-    return push2(lx, toks, 2, concat(intToStr(bv), readIntSuffix(lx)))
+    return push2(lx, toks, 2, bv.toStr() + readIntSuffix(lx))
   }
   var body = ""
   while (isDigit(cur(lx)) || (cur(lx) == 95 && isDigit(nxt(lx)))) {
-    if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)); adv(lx) }
+    if (cur(lx) == 95) { adv(lx) } else { body = body + lx.src.substr(lx.pos, 1); adv(lx) }
   }
   var isFloat = 0
   if (cur(lx) == 46 && isDigit(nxt(lx))) { // '.' fractional
     isFloat = 1
-    body = concat(body, "."); adv(lx)
+    body = body + "."; adv(lx)
     while (isDigit(cur(lx)) || (cur(lx) == 95 && isDigit(nxt(lx)))) {
-      if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)); adv(lx) }
+      if (cur(lx) == 95) { adv(lx) } else { body = body + lx.src.substr(lx.pos, 1); adv(lx) }
     }
   }
   if ((cur(lx) == 101 || cur(lx) == 69) && (isDigit(nxt(lx)) || ((nxt(lx) == 43 || nxt(lx) == 45) && isDigit(at(lx, 2))))) { // exponent e[+/-]d+
     isFloat = 1
-    body = concat(body, "e"); adv(lx)
-    if (cur(lx) == 43 || cur(lx) == 45) { body = concat(body, substr(lx.src, lx.pos, 1)); adv(lx) }
+    body = body + "e"; adv(lx)
+    if (cur(lx) == 43 || cur(lx) == 45) { body = body + lx.src.substr(lx.pos, 1); adv(lx) }
     while (isDigit(cur(lx)) || (cur(lx) == 95 && isDigit(nxt(lx)))) {
-      if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)); adv(lx) }
+      if (cur(lx) == 95) { adv(lx) } else { body = body + lx.src.substr(lx.pos, 1); adv(lx) }
     }
   }
   if (isFloat == 1) { return push2(lx, toks, 3, body) }
-  return push2(lx, toks, 2, concat(body, readIntSuffix(lx)))
+  return push2(lx, toks, 2, body + readIntSuffix(lx))
 }
 
 // --- comment RECOGNIZERS (shared single source of truth) --------------------
@@ -237,39 +239,39 @@ fun skipTrivia(lx: Lx): Int {
 }
 
 fun kw(w: String): Int {
-  if (strEq(w, "fun")) { return 10 }
-  if (strEq(w, "val")) { return 11 }
-  if (strEq(w, "var")) { return 12 }
-  if (strEq(w, "return")) { return 13 }
-  if (strEq(w, "while")) { return 14 }
-  if (strEq(w, "true")) { return 5 }
-  if (strEq(w, "false")) { return 6 }
-  if (strEq(w, "null")) { return 7 }
-  if (strEq(w, "this")) { return 8 }
-  if (strEq(w, "if")) { return 50 }
-  if (strEq(w, "else")) { return 51 }
-  if (strEq(w, "for")) { return 52 }
-  if (strEq(w, "in")) { return 53 }
-  if (strEq(w, "struct")) { return 54 }
-  if (strEq(w, "enum")) { return 55 }
-  if (strEq(w, "pub")) { return 56 }
-  if (strEq(w, "when")) { return 57 }
-  if (strEq(w, "import")) { return 58 }
-  if (strEq(w, "is")) { return 59 }
-  if (strEq(w, "break")) { return 62 }
-  if (strEq(w, "continue")) { return 63 }
-  if (strEq(w, "where")) { return 64 }
-  if (strEq(w, "class")) { return 65 }
-  if (strEq(w, "trait")) { return 66 }
-  if (strEq(w, "impl")) { return 67 }
-  if (strEq(w, "deinit")) { return 68 }
-  if (strEq(w, "self")) { return 69 }
-  if (strEq(w, "mut")) { return 70 }
-  if (strEq(w, "inout")) { return 71 }
-  if (strEq(w, "consuming")) { return 72 }
-  if (strEq(w, "const")) { return 80 }
-  if (strEq(w, "use")) { return 81 }
-  if (strEq(w, "until")) { return 84 }
+  if (w == "fun") { return 10 }
+  if (w == "val") { return 11 }
+  if (w == "var") { return 12 }
+  if (w == "return") { return 13 }
+  if (w == "while") { return 14 }
+  if (w == "true") { return 5 }
+  if (w == "false") { return 6 }
+  if (w == "null") { return 7 }
+  if (w == "this") { return 8 }
+  if (w == "if") { return 50 }
+  if (w == "else") { return 51 }
+  if (w == "for") { return 52 }
+  if (w == "in") { return 53 }
+  if (w == "struct") { return 54 }
+  if (w == "enum") { return 55 }
+  if (w == "pub") { return 56 }
+  if (w == "when") { return 57 }
+  if (w == "import") { return 58 }
+  if (w == "is") { return 59 }
+  if (w == "break") { return 62 }
+  if (w == "continue") { return 63 }
+  if (w == "where") { return 64 }
+  if (w == "class") { return 65 }
+  if (w == "trait") { return 66 }
+  if (w == "impl") { return 67 }
+  if (w == "deinit") { return 68 }
+  if (w == "self") { return 69 }
+  if (w == "mut") { return 70 }
+  if (w == "inout") { return 71 }
+  if (w == "consuming") { return 72 }
+  if (w == "const") { return 80 }
+  if (w == "use") { return 81 }
+  if (w == "until") { return 84 }
   return 1
 }
 
@@ -277,7 +279,7 @@ fun push2(lx: Lx, toks: List, kind: Int, text: String): Int { toks.push(Tok(kind
 
 fun lex(src: String): List {
   val toks = list()
-  val lx = Lx(src, strLen(src), 0, 1)
+  val lx = Lx(src, src.len(), 0, 1)
   var go = 1
   while (go == 1) {
     skipTrivia(lx)
@@ -290,7 +292,7 @@ fun lex(src: String): List {
         if (isAlpha(c)) {
           val s = lx.pos
           while (isAlnum(cur(lx))) { adv(lx) }
-          val w = substr(lx.src, s, lx.pos - s)
+          val w = lx.src.substr(s, lx.pos - s)
           val k = kw(w)
           if (k == 1) { push2(lx, toks, 1, w) } else { push2(lx, toks, k, "") }
         } else {
@@ -320,7 +322,7 @@ fun lexChar(lx: Lx, toks: List): Int {
             else { code = 0 } } } } } // \0
   } else { code = cur(lx); adv(lx) }
   adv(lx) // closing '
-  return push2(lx, toks, 9, intToStr(code))
+  return push2(lx, toks, 9, code.toStr())
 }
 
 // string literals: triple-quoted raw (kind 16/17) or regular (kind 4/15).
@@ -341,7 +343,7 @@ fun lexStr(lx: Lx, toks: List): Int {
           adv(lx)
         } }
     }
-    val content = substr(lx.src, s, lx.pos - s)
+    val content = lx.src.substr(s, lx.pos - s)
     adv(lx); adv(lx); adv(lx) // closing """
     if (hasItp == 1) { return push2(lx, toks, 17, content) }
     return push2(lx, toks, 16, content)
@@ -364,7 +366,7 @@ fun lexStr(lx: Lx, toks: List): Int {
                 else { adv(lx) } } } } }
       } }
   }
-  val content = substr(lx.src, s, lx.pos - s)
+  val content = lx.src.substr(s, lx.pos - s)
   adv(lx) // closing "
   if (hasItp == 1) { return push2(lx, toks, 15, content) }
   return push2(lx, toks, 4, content)
@@ -522,34 +524,34 @@ fun parseTyBase(p: P): String {
     var inner = ""
     if (pk(p) != 21) {
       inner = parseTy(p)
-      while (pk(p) == 24) { eat(p); inner = concat(inner, concat(", ", parseTy(p))) }
+      while (pk(p) == 24) { eat(p); inner = inner + (", " + parseTy(p)) }
     }
     eat(p) // ')'
     eat(p) // '->'
-    return concat("(", concat(inner, concat(") -> ", parseTy(p))))
+    return "(" + (inner + (") -> " + parseTy(p)))
   }
   var s = ptext(p); eat(p) // path Seg(::Seg)*
-  while (pk(p) == 26) { eat(p); s = concat(s, concat("::", ptext(p))); eat(p) }
+  while (pk(p) == 26) { eat(p); s = s + ("::" + ptext(p)); eat(p) }
   if (pk(p) == 37) { // '<' generic args
     eat(p)
     var inner = parseTy(p)
-    while (pk(p) == 24) { eat(p); inner = concat(inner, concat(", ", parseTy(p))) }
+    while (pk(p) == 24) { eat(p); inner = inner + (", " + parseTy(p)) }
     eat(p) // '>'
-    s = concat(s, concat("<", concat(inner, ">")))
+    s = s + ("<" + (inner + ">"))
   }
   return s
 }
 
 fun parseTy(p: P): String {
   var s = parseTyBase(p)
-  while (pk(p) == 45) { eat(p); s = concat(s, "?") } // nullable postfix loop
+  while (pk(p) == 45) { eat(p); s = s + "?" } // nullable postfix loop
   return s
 }
 
 // ---- shared declaration infrastructure: generics / where / bounds / annotations ----
 fun parseBoundList(p: P): String { // bound (+ bound)*  -> "A + B"
   var s = parseTy(p)
-  while (pk(p) == 30) { eat(p); s = concat(s, concat(" + ", parseTy(p))) } // 30 = '+'
+  while (pk(p) == 30) { eat(p); s = s + (" + " + parseTy(p)) } // 30 = '+'
   return s
 }
 
@@ -561,13 +563,13 @@ fun parseGenerics(p: P): String { // "" if no '<', else "<...>"
   var more = 1
   while (more == 1) {
     var one = ptext(p); eat(p)
-    if (pk(p) == 25) { eat(p); one = concat(one, concat(": ", parseBoundList(p))) } // : bounds
-    if (pk(p) == 43) { eat(p); one = concat(one, concat(" = ", parseTy(p))) } // = default
-    if (first == 1) { s = concat(s, one); first = 0 } else { s = concat(s, concat(", ", one)) }
+    if (pk(p) == 25) { eat(p); one = one + (": " + parseBoundList(p)) } // : bounds
+    if (pk(p) == 43) { eat(p); one = one + (" = " + parseTy(p)) } // = default
+    if (first == 1) { s = s + one; first = 0 } else { s = s + (", " + one) }
     if (pk(p) == 24) { eat(p) } else { more = 0 }
   }
   eat(p) // '>'
-  return concat(s, ">")
+  return s + ">"
 }
 
 fun parseWhere(p: P): String { // "" if no 'where', else " where ..."
@@ -579,8 +581,8 @@ fun parseWhere(p: P): String { // "" if no 'where', else " where ..."
   while (more == 1) {
     var one = parseTy(p)
     eat(p) // ':'
-    one = concat(one, concat(": ", parseBoundList(p)))
-    if (first == 1) { s = concat(s, one); first = 0 } else { s = concat(s, concat(", ", one)) }
+    one = one + (": " + parseBoundList(p))
+    if (first == 1) { s = s + one; first = 0 } else { s = s + (", " + one) }
     if (pk(p) == 24) { eat(p) } else { more = 0 }
   }
   return s
@@ -621,14 +623,14 @@ fun parseIf(p: P): FExpr {
 }
 
 fun isUpper(s: String): Bool {
-  if (strLen(s) == 0) { return false }
-  val c = charAt(s, 0)
+  if (s.len() == 0) { return false }
+  val c = s.charAt(0)
   return c >= 65 && c <= 90
 }
 
 fun isLower(s: String): Bool {
-  if (strLen(s) == 0) { return false }
-  val c = charAt(s, 0); return c >= 97 && c <= 122
+  if (s.len() == 0) { return false }
+  val c = s.charAt(0); return c >= 97 && c <= 122
 }
 
 fun bindName(pat: FPat): String { return when (pat) { FPBind(s) -> s; else -> "" } }
@@ -640,8 +642,8 @@ fun parsePattern(p: P): FPat {
   if (k == 31) { // -INT / -FLOAT
     eat(p)
     val nk = pk(p); val t = ptext(p); eat(p)
-    if (nk == 3) { return FPFloatP(concat("-", fmtFloat(t))) }
-    return FPInt(concat("-", t))
+    if (nk == 3) { return FPFloatP("-" + fmtFloat(t)) }
+    return FPInt("-" + t)
   }
   if (k == 4) { val t = ptext(p); eat(p); return FPStr(t) } // STRING
   if (k == 9) { val t = ptext(p); eat(p); return FPCharP(t) } // CHAR
@@ -656,10 +658,10 @@ fun parsePattern(p: P): FPat {
     eat(p); return FPInP(parseExpr(p), 1)
   }
   val name = ptext(p); eat(p)
-  if (strEq(name, "_")) { return FPWild }
+  if (name == "_") { return FPWild }
   if (isUpper(name)) {
     var path = name
-    while (pk(p) == 26) { eat(p); path = concat(path, concat("::", ptext(p))); eat(p) }
+    while (pk(p) == 26) { eat(p); path = path + ("::" + ptext(p)); eat(p) }
     if (pk(p) == 20) { return parseCtorPat(p, path) }
     return FPPath(path)
   }
@@ -716,7 +718,7 @@ fun parseWhen(p: P): FExpr {
       eat(p)
       val bn = ptext(p); eat(p)
       eat(p) // '='
-      bindStr = concat("val ", concat(bn, " = "))
+      bindStr = "val " + (bn + " = ")
     }
     subj = parseExpr(p)
     eat(p) // ')'
@@ -760,38 +762,38 @@ fun parseInterpSub(src: String): FExpr {
 
 fun interpParts(body: String, isRaw: Int): List {
   val parts = list()
-  val n = strLen(body)
+  val n = body.len()
   var i = 0
   var lit = ""
   while (i < n) {
-    val c = charAt(body, i)
+    val c = body.charAt(i)
     if (isRaw == 0 && c == 92 && i + 1 < n) { // backslash escape: keep both chars literally
-      lit = concat(lit, substr(body, i, 2)); i = i + 2
+      lit = lit + body.substr(i, 2); i = i + 2
     }
-    else { if (c == 36 && i + 1 < n && (charAt(body, i + 1) == 123 || isAlpha(charAt(body, i + 1)))) {
-        if (strEq(lit, "") == false) { parts.push(FILit(lit)); lit = "" }
+    else { if (c == 36 && i + 1 < n && (body.charAt(i + 1) == 123 || isAlpha(body.charAt(i + 1)))) {
+        if (lit != "") { parts.push(FILit(lit)); lit = "" }
         i = i + 1
-        if (charAt(body, i) == 123) { // ${ expr }
+        if (body.charAt(i) == 123) { // ${ expr }
           i = i + 1
           val start = i
           var depth = 1
           while (i < n && depth > 0) {
-            val d = charAt(body, i)
+            val d = body.charAt(i)
             if (d == 123) { depth = depth + 1 } else { if (d == 125) { depth = depth - 1 } }
             if (depth > 0) { i = i + 1 }
           }
-          val code = substr(body, start, i - start)
+          val code = body.substr(start, i - start)
           i = i + 1 // skip '}'
           parts.push(FIExpr(parseInterpSub(code)))
         } else { // $ident — a plain identifier (no keyword lookup)
           val start = i
-          while (i < n && isAlnum(charAt(body, i))) { i = i + 1 }
-          parts.push(FIExpr(FEIdent(substr(body, start, i - start))))
+          while (i < n && isAlnum(body.charAt(i))) { i = i + 1 }
+          parts.push(FIExpr(FEIdent(body.substr(start, i - start))))
         }
       }
-      else { lit = concat(lit, substr(body, i, 1)); i = i + 1 } }
+      else { lit = lit + body.substr(i, 1); i = i + 1 } }
   }
-  if (strEq(lit, "") == false) { parts.push(FILit(lit)) }
+  if (lit != "") { parts.push(FILit(lit)) }
   return parts
 }
 
@@ -869,7 +871,7 @@ fun parseArgs(p: P): List {
 fun parseTypeArgs(p: P): String { // at '<' — turbofish / generic arg list
   eat(p)
   var s = parseTy(p)
-  while (pk(p) == 24) { eat(p); s = concat(s, concat(", ", parseTy(p))) }
+  while (pk(p) == 24) { eat(p); s = s + (", " + parseTy(p)) }
   eat(p) // '>'
   return s
 }
@@ -1024,8 +1026,8 @@ fun tryLambdaParams(p: P): FLamHead {
     if (pk(p) != 1) { ok = 0; more = 0 }
     else {
       var one = ptext(p); eat(p)
-      if (pk(p) == 25) { eat(p); one = concat(one, concat(": ", parseTy(p))) }
-      if (strEq(s, "")) { s = one } else { s = concat(s, concat(", ", one)) }
+      if (pk(p) == 25) { eat(p); one = one + (": " + parseTy(p)) }
+      if (s == "") { s = one } else { s = s + (", " + one) }
       if (pk(p) == 24) { eat(p) } else { more = 0 }
     }
   }
@@ -1098,7 +1100,7 @@ fun parseParam(p: P): FParam {
   var pre = ""
   if (pk(p) == 71) { eat(p); pre = "inout " }
   else { if (pk(p) == 72) { eat(p); pre = "consuming " } }
-  return FParam(nm, concat(pre, parseTy(p)))
+  return FParam(nm, pre + parseTy(p))
 }
 
 fun parseRecv(p: P): String {
@@ -1113,12 +1115,12 @@ fun parseFunc(p: P, annos: List): FFunc {
   eat(p) // 'fun'
   var gen = parseGenerics(p) // free-fn: fun <T> name
   val name = ptext(p); eat(p)
-  if (strEq(gen, "")) { gen = parseGenerics(p) } // method: fun name<T>
+  if (gen == "") { gen = parseGenerics(p) } // method: fun name<T>
   eat(p) // '('
   val recv = parseRecv(p)
   val params = list()
   var need = 0
-  if (strEq(recv, "")) { if (pk(p) != 21) { need = 1 } }
+  if (recv == "") { if (pk(p) != 21) { need = 1 } }
   else { if (pk(p) == 24) { eat(p); need = 1 } }
   if (need == 1) { var more = 1
     while (more == 1) { params.push(parseParam(p)); if (pk(p) == 24) { eat(p) } else { more = 0 } } }
@@ -1136,7 +1138,7 @@ fun parseFunc(p: P, annos: List): FFunc {
 fun parseImport(p: P): String {
   eat(p) // 'import'
   var s = ptext(p); eat(p)
-  while (pk(p) == 26) { eat(p); s = concat(s, concat("::", ptext(p))); eat(p) }
+  while (pk(p) == 26) { eat(p); s = s + ("::" + ptext(p)); eat(p) }
   return s
 }
 
@@ -1234,18 +1236,18 @@ fun parseTrait(p: P, annos: List): FTraitDecl {
   val name = ptext(p); eat(p)
   val gen = parseGenerics(p)
   var supers = ""
-  if (pk(p) == 25) { eat(p); supers = concat(" : ", parseBoundList(p)) } // ' : ' supers
+  if (pk(p) == 25) { eat(p); supers = " : " + parseBoundList(p) } // ' : ' supers
   val whr = parseWhere(p)
   eat(p) // '{'
   val assoc = list()
   val methods = list()
   while (pk(p) != 23 && pk(p) != 0) {
     val manns = parseAnnos(p)
-    if (pk(p) == 1 && strEq(ptext(p), "type")) { // associated type
+    if (pk(p) == 1 && ptext(p) == "type") { // associated type
       eat(p)
       val an = ptext(p); eat(p)
       var text = ""
-      if (pk(p) == 25) { eat(p); text = concat(" : ", parseBoundList(p)) }
+      if (pk(p) == 25) { eat(p); text = " : " + parseBoundList(p) }
       assoc.push(FAssoc(an, text))
     } else { methods.push(parseFunc(p, manns)) }
   }
@@ -1266,11 +1268,11 @@ fun parseImpl(p: P, annos: List): FImplDecl {
   val methods = list()
   while (pk(p) != 23 && pk(p) != 0) {
     val manns = parseAnnos(p)
-    if (pk(p) == 1 && strEq(ptext(p), "type")) { // associated-type binding
+    if (pk(p) == 1 && ptext(p) == "type") { // associated-type binding
       eat(p)
       val an = ptext(p); eat(p)
       eat(p) // '='
-      assoc.push(FAssoc(an, concat(" = ", parseTy(p))))
+      assoc.push(FAssoc(an, " = " + parseTy(p)))
     } else { methods.push(parseFunc(p, manns)) }
   }
   eat(p) // '}'
@@ -1281,61 +1283,61 @@ fun parseImpl(p: P, annos: List): FImplDecl {
 // %S string escaping (matches OCaml Printf %S / printer.ml): decode source escapes (unless raw),
 // then re-encode. Used by FEStr, FPStr, and interpolation lit chunks.
 fun pad3(n: Int): String {
-  var s = intToStr(n)
-  while (strLen(s) < 3) { s = concat("0", s) }
+  var s = n.toStr()
+  while (s.len() < 3) { s = "0" + s }
   return s
 }
 
 fun escByte(out: String, b: Int, srcChar: String): String {
-  if (b == 34) { return concat(out, "\\\"") }
-  if (b == 92) { return concat(out, "\\\\") }
-  if (b == 10) { return concat(out, "\\n") }
-  if (b == 9) { return concat(out, "\\t") }
-  if (b == 13) { return concat(out, "\\r") }
-  if (b == 8) { return concat(out, "\\b") }
-  if (b < 32 || b > 126) { return concat(out, concat("\\", pad3(b))) }
-  return concat(out, srcChar)
+  if (b == 34) { return out + "\\\"" }
+  if (b == 92) { return out + "\\\\" }
+  if (b == 10) { return out + "\\n" }
+  if (b == 9) { return out + "\\t" }
+  if (b == 13) { return out + "\\r" }
+  if (b == 8) { return out + "\\b" }
+  if (b < 32 || b > 126) { return out + ("\\" + pad3(b)) }
+  return out + srcChar
 }
 
 fun escStr(raw: String, isRaw: Int): String {
   var out = ""
-  val n = strLen(raw)
+  val n = raw.len()
   var i = 0
   while (i < n) {
-    val c = charAt(raw, i)
+    val c = raw.charAt(i)
     if (isRaw == 0 && c == 92 && i + 1 < n) { // decode one source escape
-      val e = charAt(raw, i + 1)
+      val e = raw.charAt(i + 1)
       var b = e
       if (e == 110) { b = 10 } else { if (e == 116) { b = 9 } else { if (e == 114) { b = 13 }
           else { if (e == 92) { b = 92 } else { if (e == 34) { b = 34 } else { if (e == 48) { b = 0 }
                 else { b = e } } } } } } // \$ -> $ ; unknown -> the char itself
-      out = escByte(out, b, substr(raw, i + 1, 1))
+      out = escByte(out, b, raw.substr(i + 1, 1))
       i = i + 2
     }
-    else { out = escByte(out, c, substr(raw, i, 1)); i = i + 1 }
+    else { out = escByte(out, c, raw.substr(i, 1)); i = i + 1 }
   }
   return out
 }
 
 fun stripZeros(s: String): String { // strip trailing '0' from a fractional digit string
-  var e = strLen(s)
-  while (e > 0 && charAt(s, e - 1) == 48) { e = e - 1 }
-  return substr(s, 0, e)
+  var e = s.len()
+  while (e > 0 && s.charAt(e - 1) == 48) { e = e - 1 }
+  return s.substr(0, e)
 }
 
-fun zeros(k: Int): String { var s = ""; var i = 0; while (i < k) { s = concat(s, "0"); i = i + 1 }; return s }
+fun zeros(k: Int): String { var s = ""; var i = 0; while (i < k) { s = s + "0"; i = i + 1 }; return s }
 
 fun incDigits(s: String): String { // s all-digits; return s+1 (may grow one digit)
-  var i = strLen(s) - 1
+  var i = s.len() - 1
   var carry = 1
   var out = ""
   while (i >= 0) {
-    var d = charAt(s, i) - 48 + carry
+    var d = s.charAt(i) - 48 + carry
     if (d >= 10) { d = d - 10; carry = 1 } else { carry = 0 }
-    out = concat(intToStr(d), out)
+    out = d.toStr() + out
     i = i - 1
   }
-  if (carry == 1) { out = concat("1", out) }
+  if (carry == 1) { out = "1" + out }
   return out
 }
 
@@ -1343,9 +1345,9 @@ fun expStr(e: Int): String { // "e+06" / "e-05" (exponent >= 2 digits)
   var sign = "+"
   var m = e
   if (e < 0) { sign = "-"; m = 0 - e }
-  var ds = intToStr(m)
-  if (strLen(ds) < 2) { ds = concat("0", ds) }
-  return concat("e", concat(sign, ds))
+  var ds = m.toStr()
+  if (ds.len() < 2) { ds = "0" + ds }
+  return "e" + (sign + ds)
 }
 
 // reproduce OCaml default float printing (%g, precision 6): 1.0->"1", 0.5->"0.5", 100.0->"100",
@@ -1354,72 +1356,72 @@ fun fmtFloat(raw: String): String {
   // Exponent lexemes (1.5e3, 2e-4, 1e9) are already normalized enough; emit them verbatim rather than
   // running them through the fixed-notation %g emulator (which assumes a plain d+.d+ lexeme).
   var xi = 0
-  while (xi < strLen(raw)) { val xc = charAt(raw, xi); if (xc == 101 || xc == 69) { return raw }; xi = xi + 1 }
+  while (xi < raw.len()) { val xc = raw.charAt(xi); if (xc == 101 || xc == 69) { return raw }; xi = xi + 1 }
   var dot = 0 - 1
   var i = 0
-  while (i < strLen(raw)) { if (charAt(raw, i) == 46) { dot = i }; i = i + 1 }
+  while (i < raw.len()) { if (raw.charAt(i) == 46) { dot = i }; i = i + 1 }
   if (dot < 0) { return raw }
-  val intPart = substr(raw, 0, dot)
-  val allDigits = concat(intPart, substr(raw, dot + 1, strLen(raw) - dot - 1))
+  val intPart = raw.substr(0, dot)
+  val allDigits = intPart + raw.substr(dot + 1, raw.len() - dot - 1)
   var fnz = 0
-  while (fnz < strLen(allDigits) && charAt(allDigits, fnz) == 48) { fnz = fnz + 1 }
-  if (fnz >= strLen(allDigits)) { return "0" } // value is zero
-  var e = strLen(intPart) - 1 - fnz
-  var sig = substr(allDigits, fnz, strLen(allDigits) - fnz)
+  while (fnz < allDigits.len() && allDigits.charAt(fnz) == 48) { fnz = fnz + 1 }
+  if (fnz >= allDigits.len()) { return "0" } // value is zero
+  var e = intPart.len() - 1 - fnz
+  var sig = allDigits.substr(fnz, allDigits.len() - fnz)
   val P = 6
-  if (strLen(sig) > P) { // round to 6 significant figures
-    val nxtd = charAt(sig, P)
-    var head = substr(sig, 0, P)
-    if (nxtd >= 53) { head = incDigits(head); if (strLen(head) > P) { head = substr(head, 0, P); e = e + 1 } }
+  if (sig.len() > P) { // round to 6 significant figures
+    val nxtd = sig.charAt(P)
+    var head = sig.substr(0, P)
+    if (nxtd >= 53) { head = incDigits(head); if (head.len() > P) { head = head.substr(0, P); e = e + 1 } }
     sig = head
   }
   if (e < 0 - 4 || e >= P) { // scientific
-    val rest = stripZeros(substr(sig, 1, strLen(sig) - 1))
-    if (strEq(rest, "")) { return concat(substr(sig, 0, 1), expStr(e)) }
-    return concat(substr(sig, 0, 1), concat(".", concat(rest, expStr(e))))
+    val rest = stripZeros(sig.substr(1, sig.len() - 1))
+    if (rest == "") { return sig.substr(0, 1) + expStr(e) }
+    return sig.substr(0, 1) + ("." + (rest + expStr(e)))
   }
   if (e >= 0) { // fixed, integer part present
     var ip = ""
     var fp = ""
-    if (strLen(sig) > e + 1) { ip = substr(sig, 0, e + 1); fp = substr(sig, e + 1, strLen(sig) - e - 1) }
-    else { ip = concat(sig, zeros(e + 1 - strLen(sig))) }
+    if (sig.len() > e + 1) { ip = sig.substr(0, e + 1); fp = sig.substr(e + 1, sig.len() - e - 1) }
+    else { ip = sig + zeros(e + 1 - sig.len()) }
     fp = stripZeros(fp)
-    if (strEq(fp, "")) { return ip }
-    return concat(ip, concat(".", fp))
+    if (fp == "") { return ip }
+    return ip + ("." + fp)
   }
-  return concat("0.", stripZeros(concat(zeros(0 - e - 1), sig))) // 0 < value < 1
+  return "0." + stripZeros(zeros(0 - e - 1) + sig) // 0 < value < 1
 }
 
 fun pad(ind: Int): String {
   var s = ""
   var i = 0
-  while (i < ind) { s = concat(s, "  "); i = i + 1 }
+  while (i < ind) { s = s + "  "; i = i + 1 }
   return s
 }
 
-fun line(ind: Int, s: String): Int { println(concat(pad(ind), s)); return 0 }
+fun line(ind: Int, s: String): Int { println(pad(ind) + s); return 0 }
 
 fun isNoResF(e: FExpr): Bool { return when (e) { FENoRes -> true; else -> false } }
 
 fun printExpr(ind: Int, e: FExpr): Int {
   return when (e) {
-    FEInt(t) -> line(ind, concat("int ", t))
-    FEFloat(t) -> line(ind, concat("float ", fmtFloat(t)))
-    FEChar(t) -> line(ind, concat("char ", t))
-    FEStr(t, r) -> line(ind, concat("string \"", concat(escStr(t, r), "\"")))
-    FEBool(t) -> line(ind, concat("bool ", t))
+    FEInt(t) -> line(ind, "int " + t)
+    FEFloat(t) -> line(ind, "float " + fmtFloat(t))
+    FEChar(t) -> line(ind, "char " + t)
+    FEStr(t, r) -> line(ind, "string \"" + (escStr(t, r) + "\""))
+    FEBool(t) -> line(ind, "bool " + t)
     FENull -> line(ind, "null")
     FEThis -> line(ind, "this")
-    FEIdent(nm) -> line(ind, concat("ident ", nm))
-    FEUnary(o, x) -> lineThen1(ind, concat("unary ", o), x)
+    FEIdent(nm) -> line(ind, "ident " + nm)
+    FEUnary(o, x) -> lineThen1(ind, "unary " + o, x)
     FEBin(o, l, r) -> printBin(ind, o, l, r)
-    FEField(x, nm) -> lineThen1(ind, concat("field .", nm), x)
-    FEStatic(x, nm) -> lineThen1(ind, concat("static ::", nm), x)
-    FESafeField(x, nm) -> lineThen1(ind, concat("safe-field ?.", nm), x)
+    FEField(x, nm) -> lineThen1(ind, "field ." + nm, x)
+    FEStatic(x, nm) -> lineThen1(ind, "static ::" + nm, x)
+    FESafeField(x, nm) -> lineThen1(ind, "safe-field ?." + nm, x)
     FENotNull(x) -> lineThen1(ind, "not-null !!", x)
     FEElvis(a, b) -> printBin2(ind, "elvis ?:", a, b)
     FEIndex(a, ix) -> printBin2(ind, "index", a, ix)
-    FETypeApp(x, ta) -> lineThen1(ind, concat("type-app ::<", concat(ta, ">")), x)
+    FETypeApp(x, ta) -> lineThen1(ind, "type-app ::<" + (ta + ">"), x)
     FEList(elems) -> printList(ind, elems)
     FEMap(ents) -> printMap(ind, ents)
     FELambda(params, body) -> printLambda(ind, params, body)
@@ -1443,17 +1445,17 @@ fun printRet(ind: Int, e: FExpr): Int {
 fun printPat(ind: Int, pat: FPat): Int {
   return when (pat) {
     FPWild -> line(ind, "_")
-    FPBind(s) -> line(ind, concat("bind ", s))
-    FPInt(t) -> line(ind, concat("int ", t))
-    FPFloatP(t) -> line(ind, concat("float ", t))
-    FPCharP(t) -> line(ind, concat("char ", t))
-    FPStr(t) -> line(ind, concat("string \"", concat(escStr(t, 0), "\"")))
-    FPBoolP(t) -> line(ind, concat("bool ", t))
+    FPBind(s) -> line(ind, "bind " + s)
+    FPInt(t) -> line(ind, "int " + t)
+    FPFloatP(t) -> line(ind, "float " + t)
+    FPCharP(t) -> line(ind, "char " + t)
+    FPStr(t) -> line(ind, "string \"" + (escStr(t, 0) + "\""))
+    FPBoolP(t) -> line(ind, "bool " + t)
     FPNullP -> line(ind, "null")
-    FPPath(pth) -> line(ind, concat("variant ", pth))
+    FPPath(pth) -> line(ind, "variant " + pth)
     FPCtor(pth, subs) -> printCtor(ind, pth, subs)
     FPRecord(pth, flds, hasRest) -> printRecord(ind, pth, flds, hasRest)
-    FPIsP(ty, neg) -> line(ind, concat(negMark(neg), concat("is ", ty)))
+    FPIsP(ty, neg) -> line(ind, negMark(neg) + ("is " + ty))
     FPInP(e, neg) -> printIn(ind, negMark(neg), e)
     else -> 0
   }
@@ -1462,22 +1464,22 @@ fun printPat(ind: Int, pat: FPat): Int {
 fun negMark(neg: Int): String { if (neg == 1) { return "!" } return "" }
 
 fun printCtor(ind: Int, pth: String, subs: List): Int {
-  line(ind, concat("ctor ", pth))
+  line(ind, "ctor " + pth)
   var i = 0
   while (i < subs.len()) { val s: FPat = subs.get(i); printPat(ind + 1, s); i = i + 1 }
   return 0
 }
 
 fun printIn(ind: Int, mark: String, e: FExpr): Int {
-  line(ind, concat(mark, "in")); printExpr(ind + 1, e); return 0
+  line(ind, mark + "in"); printExpr(ind + 1, e); return 0
 }
 
 fun printRecord(ind: Int, pth: String, flds: List, hasRest: Int): Int {
-  line(ind, concat("ctor ", pth))
+  line(ind, "ctor " + pth)
   var i = 0
   while (i < flds.len()) { val f: FRFld = flds.get(i)
-    if (f.hasPat == 1) { line(ind + 1, concat("field ", concat(f.name, " ="))); printPat(ind + 2, f.pat) }
-    else { line(ind + 1, concat("field ", concat(f.name, " (pun)"))) }
+    if (f.hasPat == 1) { line(ind + 1, "field " + (f.name + " =")); printPat(ind + 2, f.pat) }
+    else { line(ind + 1, "field " + (f.name + " (pun)")) }
     i = i + 1 }
   if (hasRest == 1) { line(ind + 1, "..") }
   return 0
@@ -1485,7 +1487,7 @@ fun printRecord(ind: Int, pth: String, flds: List, hasRest: Int): Int {
 
 fun printWhen(ind: Int, hasSubj: Int, bindStr: String, subj: FExpr, arms: List): Int {
   line(ind, "when")
-  if (hasSubj == 1) { line(ind + 1, concat("subject ", bindStr)); printExpr(ind + 2, subj) }
+  if (hasSubj == 1) { line(ind + 1, "subject " + bindStr); printExpr(ind + 2, subj) }
   var i = 0
   while (i < arms.len()) {
     val a: FArm = arms.get(i)
@@ -1507,7 +1509,7 @@ fun printWhen(ind: Int, hasSubj: Int, bindStr: String, subj: FExpr, arms: List):
 fun lineThen1(ind: Int, s: String, x: FExpr): Int { line(ind, s); printExpr(ind + 1, x); return 0 }
 
 fun printBin(ind: Int, o: String, l: FExpr, r: FExpr): Int {
-  line(ind, concat("binary ", o)); printExpr(ind + 1, l); printExpr(ind + 1, r); return 0
+  line(ind, "binary " + o); printExpr(ind + 1, l); printExpr(ind + 1, r); return 0
 }
 
 fun printInterpExpr(ind: Int, e: FExpr): Int { line(ind + 1, "expr"); printExpr(ind + 2, e); return 0 }
@@ -1518,7 +1520,7 @@ fun printInterp(ind: Int, parts: List, isRaw: Int): Int {
   while (i < parts.len()) {
     val pt: FIPart = parts.get(i)
     when (pt) {
-      FILit(s) -> line(ind + 1, concat("lit \"", concat(escStr(s, isRaw), "\"")))
+      FILit(s) -> line(ind + 1, "lit \"" + (escStr(s, isRaw) + "\""))
       FIExpr(e) -> printInterpExpr(ind, e)
       else -> 0
     }
@@ -1528,7 +1530,7 @@ fun printInterp(ind: Int, parts: List, isRaw: Int): Int {
 }
 
 fun printLambda(ind: Int, params: String, body: FExpr): Int {
-  line(ind, concat("lambda (", concat(params, ")")))
+  line(ind, "lambda (" + (params + ")"))
   printExpr(ind + 1, body)
   return 0
 }
@@ -1561,8 +1563,8 @@ fun printCall(ind: Int, f: FExpr, args: List): Int {
     var i = 0
     while (i < args.len()) {
       val a: FArg = args.get(i)
-      if (strEq(a.name, "")) { printExpr(ind + 2, a.expr) }
-      else { line(ind + 2, concat(a.name, " =")); printExpr(ind + 3, a.expr) }
+      if (a.name == "") { printExpr(ind + 2, a.expr) }
+      else { line(ind + 2, a.name + " ="); printExpr(ind + 3, a.expr) }
       i = i + 1
     }
   }
@@ -1604,7 +1606,7 @@ fun printBin2(ind: Int, s: String, l: FExpr, r: FExpr): Int {
 }
 
 fun printFor(ind: Int, v: String, it: FExpr, b: FExpr): Int {
-  line(ind, concat("for ", concat(v, " in")))
+  line(ind, "for " + (v + " in"))
   printExpr(ind + 1, it)
   printExpr(ind + 1, b)
   return 0
@@ -1612,8 +1614,8 @@ fun printFor(ind: Int, v: String, it: FExpr, b: FExpr): Int {
 
 fun printLet(ind: Int, isVar: Int, name: String, ty: String, init: FExpr): Int {
   val kwName = if (isVar == 1) { "var " } else { "val " }
-  var head = concat(kwName, name)
-  if (strEq(ty, "") == false) { head = concat(head, concat(" : ", ty)) }
+  var head = kwName + name
+  if (ty != "") { head = head + (" : " + ty) }
   line(ind, head)
   printExpr(ind + 1, init)
   return 0
@@ -1624,8 +1626,8 @@ fun paramStr(params: List): String {
   var i = 0
   while (i < params.len()) {
     val pp: FParam = params.get(i)
-    val one = concat(pp.name, concat(": ", pp.ty))
-    if (i == 0) { s = one } else { s = concat(s, concat(", ", one)) }
+    val one = pp.name + (": " + pp.ty)
+    if (i == 0) { s = one } else { s = s + (", " + one) }
     i = i + 1
   }
   return s
@@ -1635,8 +1637,8 @@ fun printAnnos(ind: Int, annos: List): Int {
   var i = 0
   while (i < annos.len()) {
     val a: Anno = annos.get(i)
-    if (a.args.len() == 0) { line(ind, concat("@", a.name)) }
-    else { line(ind, concat("@", concat(a.name, "(...)")))
+    if (a.args.len() == 0) { line(ind, "@" + a.name) }
+    else { line(ind, "@" + (a.name + "(...)"))
       var j = 0
       while (j < a.args.len()) { val e: FExpr = a.args.get(j); printExpr(ind + 1, e); j = j + 1 } }
     i = i + 1
@@ -1646,13 +1648,12 @@ fun printAnnos(ind: Int, annos: List): Int {
 
 fun funcHead(fd: FFunc): String {
   var recvp = ""
-  if (strEq(fd.recv, "") == false) {
-    if (fd.params.len() == 0) { recvp = fd.recv } else { recvp = concat(fd.recv, ", ") }
+  if (fd.recv != "") {
+    if (fd.params.len() == 0) { recvp = fd.recv } else { recvp = fd.recv + ", " }
   }
-  var head = concat("fun ", concat(fd.name, concat(fd.gen,
-        concat("(", concat(recvp, concat(paramStr(fd.params), ")"))))))
-  if (strEq(fd.ret, "") == false) { head = concat(head, concat(" : ", fd.ret)) }
-  return concat(head, fd.whr)
+  var head = "fun " + (fd.name + (fd.gen + ("(" + (recvp + (paramStr(fd.params) + ")")))))
+  if (fd.ret != "") { head = head + (" : " + fd.ret) }
+  return head + fd.whr
 }
 
 fun printFuncAt(ind: Int, fd: FFunc): Int { // members use ind 1; NO trailing blank line
@@ -1667,13 +1668,13 @@ fun printFunc(fd: FFunc): Int { printFuncAt(0, fd); println(""); return 0 }
 fun fldStr(f: FFld): String { // "pub val x : Int"
   val pubs = if (f.isPub == 1) { "pub " } else { "" }
   val kw = if (f.isVar == 1) { "var" } else { "val" }
-  return concat(pubs, concat(kw, concat(" ", concat(f.name, concat(" : ", f.ty)))))
+  return pubs + (kw + (" " + (f.name + (" : " + f.ty))))
 }
 
 fun printTDecl(td: FTDecl): Int {
   printAnnos(0, td.annos)
   val kw = if (td.kind == 1) { "class " } else { "struct " }
-  line(0, concat(kw, concat(td.name, concat(td.gen, td.whr))))
+  line(0, kw + (td.name + (td.gen + td.whr)))
   var i = 0
   while (i < td.fields.len()) { val f: FFld = td.fields.get(i); line(1, fldStr(f)); i = i + 1 }
   if (isNoResF(td.dtor) == false) { line(1, "deinit"); printExpr(2, td.dtor) }
@@ -1688,7 +1689,7 @@ fun tyList(tys: List): String {
   var i = 0
   while (i < tys.len()) {
     val t: String = tys.get(i)
-    if (i == 0) { s = t } else { s = concat(s, concat(", ", t)) }
+    if (i == 0) { s = t } else { s = s + (", " + t) }
     i = i + 1
   }
   return s
@@ -1698,19 +1699,19 @@ fun fldList(flds: List): String { // "val w : Int, val h : Int"
   var s = ""
   var i = 0
   while (i < flds.len()) { val f: FFld = flds.get(i)
-    if (i == 0) { s = fldStr(f) } else { s = concat(s, concat(", ", fldStr(f))) }; i = i + 1 }
+    if (i == 0) { s = fldStr(f) } else { s = s + (", " + fldStr(f)) }; i = i + 1 }
   return s
 }
 
 fun variantStr(v: FVariant): String {
   if (v.payKind == 0) { return v.name }
-  if (v.payKind == 1) { return concat(v.name, concat("(", concat(tyList(v.tys), ")"))) }
-  return concat(v.name, concat("(", concat(fldList(v.flds), ")")))
+  if (v.payKind == 1) { return v.name + ("(" + (tyList(v.tys) + ")")) }
+  return v.name + ("(" + (fldList(v.flds) + ")"))
 }
 
 fun printEDecl(ed: FEDecl): Int {
   printAnnos(0, ed.annos)
-  line(0, concat("enum ", concat(ed.name, ed.gen)))
+  line(0, "enum " + (ed.name + ed.gen))
   var i = 0
   while (i < ed.variants.len()) {
     val v: FVariant = ed.variants.get(i)
@@ -1724,13 +1725,13 @@ fun printEDecl(ed: FEDecl): Int {
 fun printAssoc(assoc: List): Int { // shared trait/impl (impl text = " = Ty")
   var i = 0
   while (i < assoc.len()) { val a: FAssoc = assoc.get(i)
-    line(1, concat("type ", concat(a.name, a.text))); i = i + 1 }
+    line(1, "type " + (a.name + a.text)); i = i + 1 }
   return 0
 }
 
 fun printTrait(tr: FTraitDecl): Int {
   printAnnos(0, tr.annos)
-  line(0, concat("trait ", concat(tr.name, concat(tr.gen, concat(tr.supers, tr.whr)))))
+  line(0, "trait " + (tr.name + (tr.gen + (tr.supers + tr.whr))))
   printAssoc(tr.assoc)
   var j = 0
   while (j < tr.methods.len()) { val m: FFunc = tr.methods.get(j); printFuncAt(1, m); j = j + 1 }
@@ -1739,11 +1740,10 @@ fun printTrait(tr: FTraitDecl): Int {
 }
 
 fun implHead(im: FImplDecl): String {
-  if (strEq(im.traitName, "")) {
-    return concat("impl", concat(im.gen, concat(" ", concat(im.forTy, im.whr))))
+  if (im.traitName == "") {
+    return "impl" + (im.gen + (" " + (im.forTy + im.whr)))
   }
-  return concat("impl", concat(im.gen, concat(" ",
-        concat(im.traitName, concat(" for ", concat(im.forTy, im.whr))))))
+  return "impl" + (im.gen + (" " + (im.traitName + (" for " + (im.forTy + im.whr)))))
 }
 
 fun printImpl(im: FImplDecl): Int {

@@ -52,7 +52,7 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/trait-default.kite:42 compiler/tests/programs/comptime-heap.kite:111
        compiler/tests/programs/generic-trait-bound.kite:119 compiler/tests/programs/comptime-computed.kite:25
        compiler/tests/programs/modules-collide.kite:42
-       compiler/tests/programs/nominal-methods.kite:32 compiler/tests/programs/pub-reexport.kite:37 compiler/tests/programs/vec-raw.kite:158 compiler/tests/programs/str-raw.kite:37 compiler/tests/programs/map-vec.kite:124
+       compiler/tests/programs/nominal-methods.kite:32 compiler/tests/programs/pub-reexport.kite:37
        compiler/tests/programs/break-continue.kite:77 compiler/tests/programs/compound-assign.kite:96 compiler/tests/programs/exclusive-range.kite:57
        compiler/tests/programs/property-getset.kite:53
        compiler/tests/programs/map-class.kite:166

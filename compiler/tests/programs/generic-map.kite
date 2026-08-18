@@ -1,11 +1,11 @@
 fun map1<A, B>(xs: List, f: (A) -> B): List {
-  val out = listNew()
-  for (x in xs) { listPush(out, f(x)) }
+  val out = list()
+  for (x in xs) { out.push(f(x)) }
   return out
 }
 
 fun main(): Int {
   val xs = [1, 2, 3, 4]
   val ys = map1(xs, { n -> n * n })
-  return listGet(ys, 0) + listGet(ys, 3)
+  return ys.get(0) + ys.get(3)
 }

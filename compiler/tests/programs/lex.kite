@@ -11,26 +11,26 @@ fun isSpace(c: Int): Bool {
 }
 
 fun lex(src: String): Int {
-  val n = strLen(src)
+  val n = src.len()
   var i = 0
   var count = 0
   while (i < n) {
-    val c = charAt(src, i)
+    val c = src.charAt(i)
     if (isSpace(c)) {
       i = i + 1
     } else {
       if (isDigit(c)) {
         var v = 0
-        while (i < n && isDigit(charAt(src, i))) {
-          v = v * 10 + (charAt(src, i) - 48)
+        while (i < n && isDigit(src.charAt(i))) {
+          v = v * 10 + (src.charAt(i) - 48)
           i = i + 1
         }
         print("NUM ")
-        println(intToStr(v))
+        println(v.toStr())
         count = count + 1
       } else {
         print("OP ")
-        println(substr(src, i, 1))
+        println(src.substr(i, 1))
         i = i + 1
         count = count + 1
       }

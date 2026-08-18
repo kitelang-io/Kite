@@ -19,11 +19,11 @@
 
 struct Lx(val src: String, val n: Int, var pos: Int)
 
-fun cur(lx: Lx): Int { if (lx.pos < lx.n) { return charAt(lx.src, lx.pos) } return 0 }
+fun cur(lx: Lx): Int { if (lx.pos < lx.n) { return lx.src.charAt(lx.pos) } return 0 }
 
-fun nxt(lx: Lx): Int { if (lx.pos + 1 < lx.n) { return charAt(lx.src, lx.pos + 1) } return 0 }
+fun nxt(lx: Lx): Int { if (lx.pos + 1 < lx.n) { return lx.src.charAt(lx.pos + 1) } return 0 }
 
-fun at2(lx: Lx): Int { if (lx.pos + 2 < lx.n) { return charAt(lx.src, lx.pos + 2) } return 0 }
+fun at2(lx: Lx): Int { if (lx.pos + 2 < lx.n) { return lx.src.charAt(lx.pos + 2) } return 0 }
 
 fun advance(lx: Lx): Int { lx.pos = lx.pos + 1; return 0 }
 
@@ -34,8 +34,8 @@ fun isAlpha(c: Int): Bool { return (c >= 97 && c <= 122) || (c >= 65 && c <= 90)
 fun isAlnum(c: Int): Bool { return isAlpha(c) || isDigit(c) }
 
 fun startsWith(s: String, p: String): Bool {
-  if (strLen(s) < strLen(p)) { return false }
-  return strEq(substr(s, 0, strLen(p)), p)
+  if (s.len() < p.len()) { return false }
+  return s.substr(0, p.len()) == p
 }
 
 // Which token kinds may terminate a statement when they end a line (lexer.ml can_end).
@@ -46,10 +46,10 @@ fun canEnd(s: String): Bool {
   if (startsWith(s, "CHAR(")) { return true }
   if (startsWith(s, "INTERP[")) { return true }
   if (startsWith(s, "IDENT(")) { return true }
-  if (strEq(s, "TRUE") || strEq(s, "FALSE") || strEq(s, "NULL") || strEq(s, "THIS")) { return true }
-  if (strEq(s, "RETURN") || strEq(s, "BREAK") || strEq(s, "CONTINUE")) { return true }
-  if (strEq(s, "RPAREN") || strEq(s, "RBRACKET") || strEq(s, "RBRACE")) { return true }
-  if (strEq(s, "BANGBANG") || strEq(s, "QUESTION")) { return true }
+  if (s == "TRUE" || s == "FALSE" || s == "NULL" || s == "THIS") { return true }
+  if (s == "RETURN" || s == "BREAK" || s == "CONTINUE") { return true }
+  if (s == "RPAREN" || s == "RBRACKET" || s == "RBRACE") { return true }
+  if (s == "BANGBANG" || s == "QUESTION") { return true }
   return false
 }
 
@@ -95,37 +95,37 @@ fun skipTrivia(lx: Lx): Int {
 
 // --- keywords: lexeme -> token name, or "" if it is an ordinary identifier ----
 fun kwName(w: String): String {
-  if (strEq(w, "fun")) { return "FUN" }
-  if (strEq(w, "val")) { return "VAL" }
-  if (strEq(w, "var")) { return "VAR" }
-  if (strEq(w, "if")) { return "IF" }
-  if (strEq(w, "else")) { return "ELSE" }
-  if (strEq(w, "while")) { return "WHILE" }
-  if (strEq(w, "for")) { return "FOR" }
-  if (strEq(w, "return")) { return "RETURN" }
-  if (strEq(w, "when")) { return "WHEN" }
-  if (strEq(w, "is")) { return "IS" }
-  if (strEq(w, "in")) { return "IN" }
-  if (strEq(w, "as")) { return "AS" }
-  if (strEq(w, "struct")) { return "STRUCT" }
-  if (strEq(w, "class")) { return "CLASS" }
-  if (strEq(w, "enum")) { return "ENUM" }
-  if (strEq(w, "deinit")) { return "DEINIT" }
-  if (strEq(w, "pub")) { return "PUB" }
-  if (strEq(w, "import")) { return "IMPORT" }
-  if (strEq(w, "true")) { return "TRUE" }
-  if (strEq(w, "false")) { return "FALSE" }
-  if (strEq(w, "null")) { return "NULL" }
-  if (strEq(w, "this")) { return "THIS" }
-  if (strEq(w, "self")) { return "SELF" }
-  if (strEq(w, "mut")) { return "MUT" }
-  if (strEq(w, "consuming")) { return "CONSUMING" }
-  if (strEq(w, "inout")) { return "INOUT" }
-  if (strEq(w, "trait")) { return "TRAIT" }
-  if (strEq(w, "impl")) { return "IMPL" }
-  if (strEq(w, "where")) { return "WHERE" }
-  if (strEq(w, "break")) { return "BREAK" }
-  if (strEq(w, "continue")) { return "CONTINUE" }
+  if (w == "fun") { return "FUN" }
+  if (w == "val") { return "VAL" }
+  if (w == "var") { return "VAR" }
+  if (w == "if") { return "IF" }
+  if (w == "else") { return "ELSE" }
+  if (w == "while") { return "WHILE" }
+  if (w == "for") { return "FOR" }
+  if (w == "return") { return "RETURN" }
+  if (w == "when") { return "WHEN" }
+  if (w == "is") { return "IS" }
+  if (w == "in") { return "IN" }
+  if (w == "as") { return "AS" }
+  if (w == "struct") { return "STRUCT" }
+  if (w == "class") { return "CLASS" }
+  if (w == "enum") { return "ENUM" }
+  if (w == "deinit") { return "DEINIT" }
+  if (w == "pub") { return "PUB" }
+  if (w == "import") { return "IMPORT" }
+  if (w == "true") { return "TRUE" }
+  if (w == "false") { return "FALSE" }
+  if (w == "null") { return "NULL" }
+  if (w == "this") { return "THIS" }
+  if (w == "self") { return "SELF" }
+  if (w == "mut") { return "MUT" }
+  if (w == "consuming") { return "CONSUMING" }
+  if (w == "inout") { return "INOUT" }
+  if (w == "trait") { return "TRAIT" }
+  if (w == "impl") { return "IMPL" }
+  if (w == "where") { return "WHERE" }
+  if (w == "break") { return "BREAK" }
+  if (w == "continue") { return "CONTINUE" }
   return ""
 }
 
@@ -133,9 +133,9 @@ fun kwName(w: String): String {
 fun readIdent(lx: Lx): String {
   val start = lx.pos
   while (isAlnum(cur(lx))) { advance(lx) }
-  val w = substr(lx.src, start, lx.pos - start)
+  val w = lx.src.substr(start, lx.pos - start)
   val kw = kwName(w)
-  if (strEq(kw, "")) { return concat("IDENT(", concat(w, ")")) }
+  if (kw == "") { return "IDENT(" + (w + ")") }
   return kw
 }
 
@@ -145,11 +145,11 @@ fun readNumber(lx: Lx): String {
   if (cur(lx) == 46 && isDigit(nxt(lx))) { // '.' then digit -> float
     advance(lx)
     while (isDigit(cur(lx))) { advance(lx) }
-    val f = substr(lx.src, start, lx.pos - start)
-    return concat("FLOAT(", concat(f, ")"))
+    val f = lx.src.substr(start, lx.pos - start)
+    return "FLOAT(" + (f + ")")
   }
-  val w = substr(lx.src, start, lx.pos - start)
-  return concat("INT(", concat(w, ")"))
+  val w = lx.src.substr(start, lx.pos - start)
+  return "INT(" + (w + ")")
 }
 
 fun readChar(lx: Lx): String {
@@ -167,12 +167,12 @@ fun readChar(lx: Lx): String {
     advance(lx)
   } else { code = cur(lx); advance(lx) }
   advance(lx) // closing '
-  return concat("CHAR(", concat(intToStr(code), ")"))
+  return "CHAR(" + (code.toStr() + ")")
 }
 
 fun appendPart(out: String, n: Int, part: String): String {
   if (n == 0) { return part }
-  return concat(out, concat("; ", part))
+  return out + ("; " + part)
 }
 
 // Re-escape a raw (triple-string) chunk to match OCaml's %S rendering: literal
@@ -181,15 +181,15 @@ fun appendPart(out: String, n: Int, part: String): String {
 fun escapeS(s: String): String {
   var out = ""
   var i = 0
-  val n = strLen(s)
+  val n = s.len()
   while (i < n) {
-    val c = charAt(s, i)
-    if (c == 92) { out = concat(out, "\\\\") }
-    else { if (c == 34) { out = concat(out, "\\\"") }
-      else { if (c == 10) { out = concat(out, "\\n") }
-        else { if (c == 9) { out = concat(out, "\\t") }
-          else { if (c == 13) { out = concat(out, "\\r") }
-            else { out = concat(out, substr(s, i, 1)) } } } } }
+    val c = s.charAt(i)
+    if (c == 92) { out = out + "\\\\" }
+    else { if (c == 34) { out = out + "\\\"" }
+      else { if (c == 10) { out = out + "\\n" }
+        else { if (c == 9) { out = out + "\\t" }
+          else { if (c == 13) { out = out + "\\r" }
+            else { out = out + s.substr(i, 1) } } } } }
     i = i + 1
   }
   return out
@@ -198,13 +198,13 @@ fun escapeS(s: String): String {
 // Render a literal string chunk as a `str "..."` INTERP part (escaping only when
 // the surrounding literal is a raw triple-quoted string).
 fun strPart(raw: String, triple: Int): String {
-  if (triple == 1) { return concat("str \"", concat(escapeS(raw), "\"")) }
-  return concat("str \"", concat(raw, "\""))
+  if (triple == 1) { return "str \"" + (escapeS(raw) + "\"") }
+  return "str \"" + (raw + "\"")
 }
 
 // forward-referenced by ${...}: tokenize a substring, space-joined to_string.
 fun tokenizeSub(sub: String): String {
-  val lx = Lx(sub, strLen(sub), 0)
+  val lx = Lx(sub, sub.len(), 0)
   var out = ""
   var first = 1
   var go = 1
@@ -213,7 +213,7 @@ fun tokenizeSub(sub: String): String {
     if (lx.pos >= lx.n) { go = 0 }
     else {
       val t = tokStr(lx)
-      if (first == 1) { out = t; first = 0 } else { out = concat(out, concat(" ", t)) }
+      if (first == 1) { out = t; first = 0 } else { out = out + (" " + t) }
     }
   }
   return out
@@ -241,12 +241,12 @@ fun readString(lx: Lx): String {
     if (atClose(lx, triple)) {
       if (hasInterp == 1) {
         if (lx.pos > chunkStart) {
-          val chunk = substr(lx.src, chunkStart, lx.pos - chunkStart)
+          val chunk = lx.src.substr(chunkStart, lx.pos - chunkStart)
           out = appendPart(out, nparts, strPart(chunk, triple))
           nparts = nparts + 1
         }
       } else {
-        val rawp = substr(lx.src, wholeStart, lx.pos - wholeStart)
+        val rawp = lx.src.substr(wholeStart, lx.pos - wholeStart)
         if (triple == 1) { payload = escapeS(rawp) } else { payload = rawp }
       }
       advance(lx) // closing quote
@@ -260,7 +260,7 @@ fun readString(lx: Lx): String {
         else {
           if (c == 36 && nxt(lx) == 123) { // ${ expr }
             if (lx.pos > chunkStart) {
-              val chunk = substr(lx.src, chunkStart, lx.pos - chunkStart)
+              val chunk = lx.src.substr(chunkStart, lx.pos - chunkStart)
               out = appendPart(out, nparts, strPart(chunk, triple))
               nparts = nparts + 1
             }
@@ -276,15 +276,15 @@ fun readString(lx: Lx): String {
                 else { if (cc == 125) { depth = depth - 1; if (depth == 0) { sc = 0 } else { advance(lx) } }
                   else { advance(lx) } } }
             }
-            val sub = substr(lx.src, subStart, lx.pos - subStart)
+            val sub = lx.src.substr(subStart, lx.pos - subStart)
             advance(lx) // closing }
-            out = appendPart(out, nparts, concat("expr(", concat(tokenizeSub(sub), ")")))
+            out = appendPart(out, nparts, "expr(" + (tokenizeSub(sub) + ")"))
             nparts = nparts + 1
             chunkStart = lx.pos
           } else {
             if (c == 36 && isAlpha(nxt(lx))) { // $ident
               if (lx.pos > chunkStart) {
-                val chunk = substr(lx.src, chunkStart, lx.pos - chunkStart)
+                val chunk = lx.src.substr(chunkStart, lx.pos - chunkStart)
                 out = appendPart(out, nparts, strPart(chunk, triple))
                 nparts = nparts + 1
               }
@@ -292,8 +292,8 @@ fun readString(lx: Lx): String {
               advance(lx) // $
               val s0 = lx.pos
               while (isAlnum(cur(lx))) { advance(lx) }
-              val name = substr(lx.src, s0, lx.pos - s0)
-              out = appendPart(out, nparts, concat("expr(IDENT(", concat(name, "))")))
+              val name = lx.src.substr(s0, lx.pos - s0)
+              out = appendPart(out, nparts, "expr(IDENT(" + (name + "))"))
               nparts = nparts + 1
               chunkStart = lx.pos
             } else { advance(lx) } // literal char
@@ -302,8 +302,8 @@ fun readString(lx: Lx): String {
       }
     }
   }
-  if (hasInterp == 0) { return concat("STRING(\"", concat(payload, "\")")) }
-  return concat("INTERP[", concat(out, "]"))
+  if (hasInterp == 0) { return "STRING(\"" + (payload + "\")") }
+  return "INTERP[" + (out + "]")
 }
 
 fun readOp(lx: Lx): String {
@@ -359,7 +359,7 @@ fun tokStr(lx: Lx): String {
 
 // Main scan loop: mirrors lexer.ml tokenize, including ATI NEWLINE + trailing EOF.
 fun lexAll(src: String): Int {
-  val lx = Lx(src, strLen(src), 0)
+  val lx = Lx(src, src.len(), 0)
   var last = "NEWLINE" // start as if just after a newline
   var count = 0
   var go = 1
