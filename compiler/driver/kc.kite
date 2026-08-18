@@ -1,9 +1,10 @@
 // stage1/kc.kite — a scalar Kite compiler DRIVER (Phase C integration).
-// Run: kitec run stage1/kenc.kite stage1/kc.kite
-// Reads /tmp/kc_input.kite, lexes + parses the scalar subset into the backend's
+// Run: kitec kc.kite <input.kite> [output]
+// Reads the input path from argv, lexes + parses the scalar subset into the backend's
 // AST (Expr/Stmt/Func from kenc.kite), then codegen -> assembleExe -> Mach-O ->
-// signed native binary at /tmp/kc_out. This is the whole pipeline in Kite for the
-// pure-Int subset (fun/val/var/return/while/if/assign/arith/compare/bitwise/calls).
+// signed native binary at the output path (argv[2], default ./kc_out). This is the whole pipeline
+// in Kite for the pure-Int subset (fun/val/var/return/while/if/assign/arith/compare/bitwise/calls).
+// Legacy scalar-subset driver (the first self-hosting fixpoint); superseded by the real `kitec` CLI.
 
 // --- scalar lexer ---
 struct TokS(val kind: Int, val text: String)
@@ -351,8 +352,10 @@ fun parseAll(toks: List): PR {
   return PR(funcs, structN, structF, structFT, variantN, variantTag, funN, funRet)
 }
 
-fun main(): Int {
-  val src = readFile("/tmp/kc_input.kite")
+fun main(argc: Int, argv: Int): Int {
+  if (argc < 2) { println("usage: kc <input.kite> [output]") ; return 1 }
+  val src = readFile(__argv(argv, 1))
+  val output = if (argc >= 3) { __argv(argv, 2) } else { "kc_out" }
   val pr = parseAll(lexS(src))
   val gen = genProgramG(pr.funcs, pr.structN, pr.structF, pr.structFT, pr.variantN, pr.variantTag, pr.funN, pr.funRet)
   val code = optimize(gen.code)
@@ -360,7 +363,7 @@ fun main(): Int {
   val cs = buildCstr(gen.cstrN, gen.cstrV)
   val externals = externalsOf(asmR.relocs)
   val entry = entryOffset(code, "_main")
-  val n = writeBytes("/tmp/kc_out", buildExeFull(asmR.words, asmR.relocs, cs, externals, entry, "_main", "kcout"))
+  val n = writeBytes(output, buildExeFull(asmR.words, asmR.relocs, cs, externals, entry, "_main", "kcout"))
   println(concat("compiled ", concat(intToStr(pr.funcs.len()), concat(" funcs, ", concat(intToStr(pr.structN.len()), " structs")))))
   return pr.funcs.len()
 }

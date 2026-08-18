@@ -1,0 +1,2 @@
+fun bases(): Int { return 0xFF + 0o17 + 0b1010 + 42 }
+fun upper(): Int { return 0XFF + 0O17 + 0B1010 }

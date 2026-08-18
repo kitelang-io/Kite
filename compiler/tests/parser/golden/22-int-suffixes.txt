@@ -1,0 +1,20 @@
+fun sufs() : Int
+  block
+    return
+      binary +
+        binary +
+          binary +
+            int 42u16
+            int 100i64
+          int 7L
+        int 255u8
+
+fun sufs2() : Int
+  block
+    return
+      binary +
+        binary +
+          int 255u8
+          int 1000i32
+        int 5usize
+

@@ -1,0 +1,9 @@
+fun seps() : Int
+  block
+    return
+      binary +
+        binary +
+          int 1000000
+          int 65535
+        int 170
+

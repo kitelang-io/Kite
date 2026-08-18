@@ -235,7 +235,6 @@ fun buildCstr(cstrN: List, cstrV: List): CstrSec {
   addC(bytes, labN, labOff, "Lfmt_print_s", strBytesK("%s"))
   addC(bytes, labN, labOff, "Lfmt_println_f", strBytesK("%g\n"))
   addC(bytes, labN, labOff, "Lfmt_print_f", strBytesK("%g"))
-  addC(bytes, labN, labOff, "Lfmt_ld", strBytesK("%ld"))
   var i = 0
   while (i < cstrN.len()) { addC(bytes, labN, labOff, cstrN.get(i), strBytesK(cstrV.get(i))) ; i = i + 1 }
   return CstrSec(bytes, labN, labOff)

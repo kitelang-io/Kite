@@ -1,0 +1,18 @@
+fun fexp() : Float
+  block
+    return
+      binary +
+        binary +
+          float 1.5e3
+          float 2e-4
+        float 1e9
+
+fun fexp2() : Float
+  block
+    return
+      binary +
+        binary +
+          float 1.0e10
+          float 3.14e0
+        float 6e2
+

@@ -1,7 +1,8 @@
 // compiler/kcheck.kite — M2 semantic checks (name resolution + type check) in Kite, ported from
 // lib/resolve.ml + lib/typecheck.ml. Operates on kfront's surface AST (F-prefixed nodes).
 // Build:  kitec run compiler/kfront.kite compiler/kcheck.kite
-// Reads /tmp/kcheck_input.kite, prints diagnostics in `kitec check` form (path prefix stripped):
+// The standalone tool (kcheck_main.kite) reads its source path from argv; it prints diagnostics in
+// `kitec check` form (path prefix stripped):
 //   no errors -> "ok (name resolution + type check passed)"
 //   errors    -> "error: <msg>" per diag, then "<N> semantic error(s)"
 
@@ -337,16 +338,84 @@ fun resolveCheck(decls: List, lines: List, skipDup: Int): List {
 
 // ================= TYPE CHECK PASS =================
 enum Ty { TPrim(String); TNamed(String, List); TNull(Ty); TFun(List, Ty); TUnknown }
-fun isPrimitive(n: String): Bool {
-  return strEq(n,"Int") || strEq(n,"Long") || strEq(n,"Bool") || strEq(n,"Float") || strEq(n,"Double") ||
-      strEq(n,"String") || strEq(n,"Char") || strEq(n,"Unit") || strEq(n,"Nothing") ||
-      strEq(n,"Int8") || strEq(n,"Int16") || strEq(n,"Int32") || strEq(n,"Int64") ||
-      strEq(n,"UInt8") || strEq(n,"UInt16") || strEq(n,"UInt32") || strEq(n,"UInt64") || strEq(n,"ISize") || strEq(n,"USize")
+// ===== primitive-type REGISTRY (STDLIB-REDESIGN §2a numeric tower + scalars) =====
+// The checker consults this instead of ad-hoc strEq chains. Kind codes:
+//   0 none · 1 signed-int · 2 unsigned-int · 3 float · 4 bool · 5 char · 6 string
+//   7 unit · 8 never (bottom) · 9 reserved (I128/U128, not yet implemented)
+// Canonical doc names are I8..I64 / U8..U64 / ISize / USize / Double / Never; the older aliases
+// (Int8.., UInt8.., Float, Nothing, Byte, Long) stay recognized so no existing source regresses.
+// A2: registers are always 64-bit words — width lives in the TYPE, not the runtime rep (Phase 1).
+fun primKind(n: String): Int {
+  if (strEq(n,"Int") || strEq(n,"Long") || strEq(n,"ISize") ||
+      strEq(n,"I8") || strEq(n,"I16") || strEq(n,"I32") || strEq(n,"I64") ||
+      strEq(n,"Int8") || strEq(n,"Int16") || strEq(n,"Int32") || strEq(n,"Int64")) { return 1 }
+  if (strEq(n,"USize") || strEq(n,"Byte") ||
+      strEq(n,"U8") || strEq(n,"U16") || strEq(n,"U32") || strEq(n,"U64") ||
+      strEq(n,"UInt8") || strEq(n,"UInt16") || strEq(n,"UInt32") || strEq(n,"UInt64")) { return 2 }
+  if (strEq(n,"Double") || strEq(n,"Float")) { return 3 }
+  if (strEq(n,"Bool")) { return 4 }
+  if (strEq(n,"Char")) { return 5 }
+  if (strEq(n,"String")) { return 6 }
+  if (strEq(n,"Unit")) { return 7 }
+  if (strEq(n,"Never") || strEq(n,"Nothing")) { return 8 }
+  if (strEq(n,"I128") || strEq(n,"U128")) { return 9 }
+  return 0
 }
-fun isNumericN(n: String): Bool {
-  return strEq(n,"Int") || strEq(n,"Long") || strEq(n,"Float") || strEq(n,"Double") ||
-      strEq(n,"Int8") || strEq(n,"Int16") || strEq(n,"Int32") || strEq(n,"Int64") ||
-      strEq(n,"UInt8") || strEq(n,"UInt16") || strEq(n,"UInt32") || strEq(n,"UInt64") || strEq(n,"ISize") || strEq(n,"USize")
+fun isPrimReg(n: String): Bool { return primKind(n) != 0 }
+fun primIsInt(n: String): Bool { val k = primKind(n) ; return k == 1 || k == 2 }
+fun primIsSigned(n: String): Bool { return primKind(n) == 1 }
+fun primIsFloat(n: String): Bool { return primKind(n) == 3 }
+fun primIsReserved(n: String): Bool { return primKind(n) == 9 }
+// Storage width in bits for an integer primitive; the word types (Int/Long/I64/ISize/U64/USize) = 64.
+fun primBits(n: String): Int {
+  if (strEq(n,"I8") || strEq(n,"Int8") || strEq(n,"U8") || strEq(n,"UInt8") || strEq(n,"Byte")) { return 8 }
+  if (strEq(n,"I16") || strEq(n,"Int16") || strEq(n,"U16") || strEq(n,"UInt16")) { return 16 }
+  if (strEq(n,"I32") || strEq(n,"Int32") || strEq(n,"U32") || strEq(n,"UInt32")) { return 32 }
+  return 64
+}
+fun isPrimitive(n: String): Bool { return isPrimReg(n) }
+fun isNumericN(n: String): Bool { return primIsInt(n) || primIsFloat(n) }
+// 2^n for n in [0,63] (kite Int is the i64 word). Callers only pass n<=32, well inside the word.
+fun pow2(n: Int): Int { var r = 1 ; var i = 0 ; while (i < n) { r = r * 2 ; i = i + 1 } ; return r }
+// Compile-time range check: does the decimal literal `numStr` (optional leading '-') fit type `name`?
+// Sub-word widths (8/16/32) are checked exactly; the 64-bit word can't be bounded inside an i64, so we
+// only enforce the unsigned-can't-be-negative rule there.
+fun intInRange(numStr: String, name: String): Bool {
+  val neg = strLen(numStr) >= 1 && charAt(numStr, 0) == 45
+  if (neg && primIsSigned(name) == false) { return false }       // unsigned rejects negatives
+  val bits = primBits(name)
+  if (bits >= 64) { return true }
+  val v = parseIntK(numStr)
+  if (primIsSigned(name)) { val hi = pow2(bits - 1) - 1 ; val lo = 0 - pow2(bits - 1) ; return v >= lo && v <= hi }
+  return v >= 0 && v <= pow2(bits) - 1
+}
+// infer an integer literal, range-checking a SUFFIXED literal against its own fixed type (300u8 errors).
+fun inferIntLit(env: TEnv, t: String): Ty {
+  val nm = suffixTyName(litSuf(t))
+  if (strEq(nm, "")) { return TPrim("Int") }
+  if (intInRange(litNum(t), nm) == false) { tErr(env, concat("integer literal ", concat(t, concat(" out of range for ", nm)))) }
+  return TPrim(nm)
+}
+// Expected-type adoption: a BARE (unsuffixed) integer literal `val x: U16 = 300` adopts the annotated
+// integer type and is range-checked at compile time. Returns true iff it fully handled the binding.
+fun adoptDest(env: TEnv, numStr: String, dt: Ty): Bool {
+  return when (dt) {
+    TPrim(dn) -> { if (primIsInt(dn)) { if (intInRange(numStr, dn) == false) { tErr(env, concat("integer literal ", concat(numStr, concat(" out of range for ", dn)))) } ; true } else { false } }
+    else -> false
+  }
+}
+fun adoptBareIntLit(env: TEnv, init: FExpr, dt: Ty): Bool {
+  return when (init) {
+    FEInt(t) -> if (strEq(litSuf(t), "")) { adoptDest(env, litNum(t), dt) } else { false }
+    FEUnary(op, x) -> if (strEq(op, "neg -")) { adoptNegLit(env, x, dt) } else { false }
+    else -> false
+  }
+}
+fun adoptNegLit(env: TEnv, x: FExpr, dt: Ty): Bool {
+  return when (x) {
+    FEInt(t) -> if (strEq(litSuf(t), "")) { adoptDest(env, concat("-", litNum(t)), dt) } else { false }
+    else -> false
+  }
 }
 fun cons1(t: Ty): List { val l = list() ; l.push(t) ; return l }
 // --- type-string parser (reuses kfront's lexer + P) ---
@@ -377,7 +446,9 @@ fun parseTyStr(s: String): Ty { if (strEq(s, "")) { return TUnknown } return par
 fun retTy(s: String): Ty { if (strEq(s, "")) { return TUnknown } return parseTyStr(s) }
 // --- ty ops ---
 fun isUnknownT(t: Ty): Bool { return when (t) { TUnknown -> true ; else -> false } }
-fun isNothingT(t: Ty): Bool { return when (t) { TPrim(x) -> strEq(x, "Nothing") ; else -> false } }
+// Never (alias Nothing) is a REAL bottom type: uninhabited, subtype of every type — the type of a
+// diverging expression (break/continue/return, and __abort). compat() lets it flow to any target.
+fun isNothingT(t: Ty): Bool { return when (t) { TPrim(x) -> primKind(x) == 8 ; else -> false } }
 fun isNum(t: Ty): Bool { return when (t) { TPrim(x) -> isNumericN(x) ; else -> false } }
 // arithmetic on nullable numerics yields a plain numeric in Kite (null is 0): strip an outer `?`.
 fun stripNull(t: Ty): Ty { return when (t) { TNull(x) -> x ; else -> t } }
@@ -417,8 +488,22 @@ fun compat(a: Ty, b: Ty): Bool {
     else -> false
   }
 }
+// Distinct primitives are NOT interchangeable (STDLIB-REDESIGN §2a/§3: no implicit lossy coercion) —
+// the old "any numeric ≈ any numeric" rule is gone. Two prims are compatible iff they name the SAME
+// type up to documented aliasing: the signed word {Int,Long,I64,ISize}, the unsigned word
+// {U64,USize,UInt64}, each fixed width with its alias (I8/Int8, U8/UInt8/Byte, ...), and the float pair
+// {Double,Float}. So Int != I8, Int != U16, Int != Double — each needs an explicit conversion.
+fun primCompat(x: String, y: String): Bool {
+  if (strEq(x, y)) { return true }
+  val kx = primKind(x)
+  val ky = primKind(y)
+  if (kx == 0 || ky == 0) { return false }
+  if (kx != ky) { return false }
+  if (kx == 1 || kx == 2) { return primBits(x) == primBits(y) }   // integers: same sign-kind AND width
+  return true                                                     // float/bool/char/string/unit/never aliases
+}
 fun compatPrimR(x: String, b: Ty): Bool {
-  return when (b) { TPrim(y) -> strEq(x, y) || (isNumericN(x) && isNumericN(y)) ; TNull(y) -> compat(TPrim(x), y) ; else -> false }
+  return when (b) { TPrim(y) -> primCompat(x, y) ; TNull(y) -> compat(TPrim(x), y) ; else -> false }
 }
 fun compatNullR(x: Ty, b: Ty): Bool { return when (b) { TNull(y) -> compat(x, y) ; else -> false } }
 // a single uppercase letter (T, A, K, V, ...) is a generic type PARAMETER — erased, compatible with any.
@@ -486,6 +571,14 @@ fun subtypeOk(env: TEnv, a: Ty, b: Ty): Bool {
   }
 }
 fun tErr(env: TEnv, msg: String): Int { env.diags.push(concat(linePrefix(env.curLine), msg)) ; return 0 }
+// Reserved primitives (I128/U128) are recognized names but carry no lowering yet — reject on use.
+fun reservedTyErr(env: TEnv, t: Ty): Int {
+  return when (t) {
+    TPrim(x) -> { if (primIsReserved(x)) { tErr(env, concat(x, " is reserved and not yet implemented")) } ; 0 }
+    TNull(y) -> reservedTyErr(env, y)
+    else -> 0
+  }
+}
 fun tPush(env: TEnv): List {
   val saved = env.locals
   val ns = list()
@@ -921,7 +1014,7 @@ fun inferBlock(env: TEnv, stmts: List, res: FExpr): Ty {
 }
 fun infer(env: TEnv, e: FExpr): Ty {
   return when (e) {
-    FEInt(t) -> TPrim("Int")
+    FEInt(t) -> inferIntLit(env, t)
     FEFloat(t) -> TPrim("Double")
     FEStr(t, r) -> TPrim("String")
     FEInterp(parts, r) -> { inferInterp(env, parts) ; TPrim("String") }
@@ -953,9 +1046,13 @@ fun infer(env: TEnv, e: FExpr): Ty {
   }
 }
 fun checkLet(env: TEnv, name: String, ty: String, init: FExpr): Int {
-  val it = infer(env, init)
-  if (strEq(ty, "")) { tBind(env, name, it) ; return 0 }
+  if (strEq(ty, "")) { val it0 = infer(env, init) ; tBind(env, name, it0) ; return 0 }
   val dt = parseTyStr(ty)
+  reservedTyErr(env, dt)
+  // A bare integer literal adopts an integer annotation (val x: U16 = 300) with a compile-time range
+  // check, instead of the generic compat test (which would reject Int vs U16 under the tightened rule).
+  if (adoptBareIntLit(env, init, dt)) { tBind(env, name, dt) ; return 0 }
+  val it = infer(env, init)
   if (compat(it, dt) == false) { tErr(env, concat("cannot assign ", concat(showTy(it), concat(" to ", concat(showTy(dt), concat(" ", name)))))) }
   tBind(env, name, dt)
   return 0
@@ -996,10 +1093,11 @@ fun checkFun(env: TEnv, fd: FFunc): Int {
   if (isNoResF(fd.body)) { return 0 }
   val saved = tPush(env)
   var i = 0
-  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i) ; tBind(env, pp.name, parseTyStr(pp.ty)) ; i = i + 1 }
+  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i) ; val pt = parseTyStr(pp.ty) ; reservedTyErr(env, pt) ; tBind(env, pp.name, pt) ; i = i + 1 }
   val prevRet = env.curRet
   val prevHas = env.hasRet
   env.curRet = retTy(fd.ret)
+  reservedTyErr(env, env.curRet)
   env.hasRet = 1
   val bt = infer(env, fd.body)
   if (shouldCheckBody(fd.body) && strEq(fd.ret, "") == false && compat(bt, env.curRet) == false && tyEqPrim(bt, "Nothing") == false) {
