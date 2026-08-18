@@ -1,0 +1,2 @@
+error: mixed Int/Float arithmetic requires an explicit conversion (toFloat/toInt): Int and Double
+1 error(s)

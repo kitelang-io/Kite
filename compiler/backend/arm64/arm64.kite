@@ -37,12 +37,14 @@ fun encode(i: Instr): Int {
     ISub(d, n, m) -> w32(0xCB000000 | (m << 16) | (n << 5) | d)
     IMul(d, n, m) -> w32(0x9B000000 | (m << 16) | (31 << 10) | (n << 5) | d)
     IDiv(d, n, m) -> w32(0x9AC00C00 | (m << 16) | (n << 5) | d)
+    IUDiv(d, n, m) -> w32(0x9AC00800 | (m << 16) | (n << 5) | d) // udiv Xd, Xn, Xm
     IMulSub(d, n, m, a) -> w32(0x9B008000 | (m << 16) | (a << 10) | (n << 5) | d)
     IAnd(d, n, m) -> w32(0x8A000000 | (m << 16) | (n << 5) | d)
     IOr(d, n, m) -> w32(0xAA000000 | (m << 16) | (n << 5) | d)
     IXor(d, n, m) -> w32(0xCA000000 | (m << 16) | (n << 5) | d)
     IShl(d, n, m) -> w32(0x9AC02000 | (m << 16) | (n << 5) | d)
-    IShr(d, n, m) -> w32(0x9AC02800 | (m << 16) | (n << 5) | d)
+    IShr(d, n, m) -> w32(0x9AC02800 | (m << 16) | (n << 5) | d) // asrv (arithmetic / signed)
+    ILShr(d, n, m) -> w32(0x9AC02400 | (m << 16) | (n << 5) | d) // lsrv (logical / unsigned)
     INeg(d, m) -> w32(0xCB0003E0 | (m << 16) | d)
     IMov(d, m) -> w32(0xAA0003E0 | (m << 16) | d)
     IZero(d) -> w32(0xAA1F03E0 | d)
@@ -58,6 +60,14 @@ fun encode(i: Instr): Int {
     IStoreOff(t, n, off) -> w32(0xF9000000 | (((off / 8) & 0xfff) << 10) | (n << 5) | t)
     ILoadByte(t, n, off) -> w32(0x39400000 | ((off & 0xfff) << 10) | (n << 5) | t)
     IStoreByte(t, n, off) -> w32(0x39000000 | ((off & 0xfff) << 10) | (n << 5) | t)
+    // sized memory: LDRH/STRH (halfword, scale 2), LDR/STR Wt (word, scale 4), signed loads sign-extend to 64.
+    ILoadHalf(t, n, off) -> w32(0x79400000 | (((off / 2) & 0xfff) << 10) | (n << 5) | t)
+    IStoreHalf(t, n, off) -> w32(0x79000000 | (((off / 2) & 0xfff) << 10) | (n << 5) | t)
+    ILoadWord(t, n, off) -> w32(0xB9400000 | (((off / 4) & 0xfff) << 10) | (n << 5) | t)
+    IStoreWord(t, n, off) -> w32(0xB9000000 | (((off / 4) & 0xfff) << 10) | (n << 5) | t)
+    ILoadByteS(t, n, off) -> w32(0x39800000 | ((off & 0xfff) << 10) | (n << 5) | t) // ldrsb Xt (64-bit)
+    ILoadHalfS(t, n, off) -> w32(0x79800000 | (((off / 2) & 0xfff) << 10) | (n << 5) | t) // ldrsh Xt
+    ILoadWordS(t, n, off) -> w32(0xB9800000 | (((off / 4) & 0xfff) << 10) | (n << 5) | t) // ldrsw Xt
     ILoadTop(t) -> w32(0xF9400000 | (31 << 5) | t)
     IStoreTop(t) -> w32(0xF9000000 | (31 << 5) | t)
     IPush(t) -> w32(0xF8000C00 | (((0 - 16) & 0x1ff) << 12) | (31 << 5) | t)
@@ -80,6 +90,7 @@ fun encode(i: Instr): Int {
     IFStoreD(t, n, off) -> w32(0xFD000000 | (((off / 8) & 0xfff) << 10) | (n << 5) | t) // str Dt,[Xn,#off]
     IFCmp(n, m) -> w32(0x1E602000 | (m << 16) | (n << 5)) // fcmp Dn, Dm
     IFToInt(d, n) -> w32(0x9E780000 | (n << 5) | d) // fcvtzs Xd, Dn (trunc)
+    IIntToF(d, n) -> w32(0x9E620000 | (n << 5) | d) // scvtf Dd, Xn (signed int -> double)
     else -> 0
   }
 }

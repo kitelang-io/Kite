@@ -1,0 +1,7 @@
+fun m(): Int {
+  val a = 300 as U8
+  val b = x as I16
+  val c = i as Double
+  val d = (p + q) as U32
+  return a as Int
+}

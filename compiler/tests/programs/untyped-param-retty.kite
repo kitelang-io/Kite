@@ -1,0 +1,11 @@
+// Regression: an untyped LAST parameter must NOT swallow the function's return-type
+// annotation (parseParam bug). If it does, `tag`'s return type is lost, the call
+// result is mis-typed, and `.len()` on it aborts (exit 134) instead of yielding 5.
+fun tag(s: String, n): String {
+  return s
+}
+
+fun main(): Int {
+  val r = tag("hello", 1)
+  return r.len()
+}

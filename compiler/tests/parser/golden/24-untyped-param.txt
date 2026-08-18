@@ -1,0 +1,12 @@
+fun add(a: Int, b: ) : Int
+  block
+    return
+      binary +
+        ident a
+        ident b
+
+fun pick(x: , y: String) : String
+  block
+    return
+      ident y
+

@@ -1,0 +1,33 @@
+// Phase 3 regression: real unsigned semantics — UDIV / LSRV / unsigned condition codes are selected for
+// unsigned-typed operands, where the signed lowering would give a different answer for a high-bit-set
+// value. Exit code is a checksum; each passing check adds 1, final result subtracts the base.
+fun main(): Int {
+  var acc = 0
+
+  // A value with bit 63 set: as unsigned it is huge (~9.2e18), as signed it is negative.
+  val hi: U64 = 1u64 << 63
+
+  // Unsigned right shift (LSRV) zero-fills; signed (ASRV) would sign-extend the top bit.
+  // hi >> 60 unsigned = 8. Signed would be 0xFFFFFFFFFFFFFFF8 (a huge/negative value).
+  val r1: U64 = hi >> 60
+  if (r1 == 8) { acc = acc + 1 }              // 1
+
+  // Unsigned divide (UDIV): hi / 2 unsigned = 0x4000000000000000. Then >> 62 unsigned = 1.
+  val r2: U64 = hi / 2u64
+  if ((r2 >> 62) == 1) { acc = acc + 1 }      // 2
+
+  // Unsigned compare: hi (bit-63 set) is GREATER than 1 unsigned, but LESS than 1 signed.
+  if (hi > 1u64) { acc = acc + 1 }            // 3  (unsigned hi/hs)
+  val one: U64 = 1u64
+  if (one < hi) { acc = acc + 1 }             // 4  (unsigned lo)
+
+  // Signed sanity: a plain Int keeps signed semantics (negative < positive, ASR sign-extends).
+  val neg = 0 - 8
+  if (neg < 1) { acc = acc + 1 }              // 5  (signed lt)
+  if ((neg >> 1) == (0 - 4)) { acc = acc + 1 } // 6  (signed ASR: -8>>1 = -4)
+
+  // Unsigned modulo (UDIV-based): hi % 3 unsigned. 2^63 mod 3 = 2 (2^63 = 3*k + 2).
+  if ((hi % 3u64) == 2) { acc = acc + 1 }     // 7
+
+  return acc                                   // 7
+}

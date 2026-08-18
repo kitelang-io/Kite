@@ -122,6 +122,7 @@ fun rExpr(ctx: RCtx, e: FExpr): Int {
     FESafeField(a, f) -> rExpr(ctx, a)
     FEStatic(a, f) -> rExpr(ctx, a)
     FETypeApp(a, t) -> rExpr(ctx, a)
+    FECast(a, ty) -> rExpr(ctx, a)
     FEBin(op, a, b) -> { rExpr(ctx, a); rExpr(ctx, b) }
     FEElvis(a, b) -> { rExpr(ctx, a); rExpr(ctx, b) }
     FEIndex(a, b) -> { rExpr(ctx, a); rExpr(ctx, b) }
@@ -337,7 +338,10 @@ fun collectDeclNames(decls: List, out: List): Int {
 // checker and the lowerer can never disagree about what the prelude provides. Seeding the global scope
 // with these makes prelude names (concat, list, strLen, ...) resolve because they are DEFINED, not
 // whitelisted; this is what lets isBuiltin shrink to the intrinsic floor.
-fun preludeSigs(): List {
+// The prelude's top-level declarations, parsed ONCE from the same module list preludeSigs/injectHelpers
+// read. Returned so BOTH the resolver (names only) and the type-checker (full param/return signatures)
+// can seed themselves from one source of truth.
+fun preludeDeclList(): List {
   val out = list()
   val paths = preludeConfPaths()
   var pi = 0
@@ -346,10 +350,17 @@ fun preludeSigs(): List {
     if (src.len() > 0) {
       val plines = list()
       val decls = parseProgramLn(lex(src), plines)
-      collectDeclNames(decls, out)
+      var di = 0
+      while (di < decls.len()) { out.push(decls.get(di)); di = di + 1 }
     }
     pi = pi + 1
   }
+  return out
+}
+
+fun preludeSigs(): List {
+  val out = list()
+  collectDeclNames(preludeDeclList(), out)
   return out
 }
 
@@ -489,7 +500,14 @@ fun parseTyC(p: P): Ty {
   return b
 }
 
-fun parseTyStr(s: String): Ty { if (s == "") { return TUnknown } return parseTyC(P(lex(s), 0)) }
+// A param type string may carry a leading ownership modifier ("consuming Int" / "inout Int"); the
+// modifier is not part of the type, so skip a leading `inout`(71)/`consuming`(72) token before parsing.
+fun parseTyStr(s: String): Ty {
+  if (s == "") { return TUnknown }
+  val p = P(lex(s), 0)
+  if (pk(p) == 71 || pk(p) == 72) { eat(p) }
+  return parseTyC(p)
+}
 
 // An empty return type means UNKNOWN, not Unit: Kite functions with an untyped param lose their
 // declared return through a parser quirk (the untyped param swallows the `: Ret`), and assuming Unit
@@ -756,9 +774,26 @@ fun opOverloadTy(env: TEnv, op: String, ta: Ty): Ty {
   }
 }
 
+// Silent Int/Float mixing is UNSOUND (the int operand would be dereferenced as a double-pointer): ban
+// `i + f` when one side is a concrete integer prim and the other a concrete float prim — require an
+// explicit toFloat(i)/toInt(f). Only fires for two concrete primitives, so erased generics stay permissive.
+fun primFloatKind(t: Ty): Int { return when (t) { TPrim(x) -> primKind(x); else -> 0 } }
+
+fun mixedIntFloat(ta: Ty, tb: Ty): Bool {
+  val ka = primFloatKind(ta)
+  val kb = primFloatKind(tb)
+  if (ka == 3 && (kb == 1 || kb == 2)) { return true }
+  if (kb == 3 && (ka == 1 || ka == 2)) { return true }
+  return false
+}
+
 fun inferBinary(env: TEnv, op: String, a: FExpr, b: FExpr): Ty {
   val ta = infer(env, a)
   val tb = infer(env, b)
+  if (mixedIntFloat(ta, tb)) {
+    tErr(env, "mixed Int/Float arithmetic requires an explicit conversion (toFloat/toInt): " + (showTy(ta) + (" and " + showTy(tb))))
+    return TUnknown
+  }
   if (isArith(op)) {
     if (op == "+" && (tyEqPrim(ta, "String") || tyEqPrim(tb, "String"))) { return TPrim("String") }
     if (isNumOk(ta) && isNumOk(tb)) { return stripNull(joinTy(ta, tb)) }
@@ -780,6 +815,30 @@ fun inferBinary(env: TEnv, op: String, a: FExpr, b: FExpr): Ty {
 }
 
 fun inferNotNull(env: TEnv, a: FExpr): Ty { val t = infer(env, a); return when (t) { TNull(x) -> x; else -> t } }
+
+// `e as T` (Phase 3): an explicit numeric conversion — width truncation/extension between integer types,
+// int<->float via fcvt/scvtf, or a same-width sign reinterpret. The source and target must both be scalar
+// numeric (integer/float/char); casting a String or a struct is a type error. The result type is T.
+fun isCastScalar(t: Ty): Bool {
+  return when (t) {
+    TPrim(x) -> { val k = primKind(x); k == 1 || k == 2 || k == 3 || k == 5 }
+    TNamed(n, args) -> isTypeParam(n)
+    TNull(x) -> isCastScalar(x)
+    else -> false
+  }
+}
+
+fun inferCast(env: TEnv, a: FExpr, ty: String): Ty {
+  val src = infer(env, a)
+  val dt = parseTyStr(ty)
+  reservedTyErr(env, dt)
+  if (isUnknownT(src) == false) {
+    if (isCastScalar(src) == false || isCastScalar(dt) == false) {
+      tErr(env, "`as` cast requires numeric operands: " + (showTy(src) + (" as " + showTy(dt))))
+    }
+  }
+  return dt
+}
 
 // A property accessor exists for `T.name` when a getter method `T_name(self)` or a setter method
 // `T_name_set(self, v)` is defined. `obj.name` (getter) and `obj.name = v` (setter) then desugar to
@@ -1159,6 +1218,7 @@ fun infer(env: TEnv, e: FExpr): Ty {
     FESafeField(a, f) -> inferField(env, a, f, 1)
     FEStatic(a, f) -> inferStatic(env, a)
     FETypeApp(a, t) -> infer(env, a)
+    FECast(a, ty) -> inferCast(env, a, ty)
     FECall(f, args) -> inferCall(env, f, args)
     FEIndex(a, ix) -> { infer(env, a); infer(env, ix); TUnknown }
     FEList(es) -> inferList(env, es)
@@ -1273,6 +1333,18 @@ fun addStructSig(env: TEnv, td: FTDecl): Int {
   return 0
 }
 
+// Seed ONLY function signatures from a decl list (used for the prelude): structs/enums/impls are
+// deliberately skipped so prelude nominal types stay opaque to field-access checking.
+fun collectFunSigsOnly(env: TEnv, decls: List): Int {
+  var i = 0
+  while (i < decls.len()) {
+    val d: Decl = decls.get(i)
+    when (d) { DFun(fd) -> addFunSig(env, fd); else -> 0 }
+    i = i + 1
+  }
+  return 0
+}
+
 fun collectSigs(env: TEnv, decls: List): Int {
   var i = 0
   while (i < decls.len()) {
@@ -1293,6 +1365,13 @@ fun typecheckCheck(decls: List, lines: List): List {
   val diags = list()
   val env = TEnv(list(), list(), list(), list(), list(), list(), list(), list(), list(), TUnknown, 0, list(), list(), diags, 0)
   collectSigs(env, decls)
+  // Seed prelude/lib FUNCTION signatures so their calls are arg-type-checked exactly like user calls (an
+  // unsound gap otherwise: a wrong-typed argument to a stdlib function slipped through). Only functions
+  // are seeded — NOT prelude structs/enums — so field-access checking is unaffected (prelude nominal
+  // types like List keep their erased/opaque treatment, and property-getter accessors on them are not
+  // mis-flagged as missing fields). User decls are collected FIRST, so on a name collision inferIdent's
+  // first-match keeps the user's definition.
+  collectFunSigsOnly(env, preludeDeclList())
   var i = 0
   while (i < decls.len()) { env.curLine = lines.get(i); checkDecl(env, decls.get(i)); i = i + 1 }
   return diags

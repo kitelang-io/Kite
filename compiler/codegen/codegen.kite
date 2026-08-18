@@ -18,13 +18,17 @@ enum Instr {
   IMovImm(Int, Int); IMovImmK(Int, Int, Int);
   IAdd(Int, Int, Int); ISub(Int, Int, Int); IMul(Int, Int, Int);
   IDiv(Int, Int, Int); IMulSub(Int, Int, Int, Int);
+  IUDiv(Int, Int, Int); // unsigned divide (UDIV) — selected for unsigned operand types (Phase 3)
   IAnd(Int, Int, Int); IOr(Int, Int, Int); IXor(Int, Int, Int);
-  IShl(Int, Int, Int); IShr(Int, Int, Int);
+  IShl(Int, Int, Int); IShr(Int, Int, Int); ILShr(Int, Int, Int); // ILShr = logical (unsigned) >> (LSRV)
   INeg(Int, Int); IMov(Int, Int); IZero(Int);
   IAddImm(Int, Int, Int); ISubImm(Int, Int, Int); IStackFree(Int); IStackAlloc(Int);
   ISpSubReg(Int); ISpAddReg(Int); // sub/add sp, sp, Xm (extended-reg form: reg 31 == SP) — large frames
   ILoadLocal(Int, Int); IStoreLocal(Int, Int); ILoadOff(Int, Int, Int); IStoreOff(Int, Int, Int);
   ILoadByte(Int, Int, Int); IStoreByte(Int, Int, Int); ILoadTop(Int); IStoreTop(Int);
+  // sized memory (Phase 2): 16/32-bit zero-extending loads + width stores, and signed 8/16/32 loads.
+  ILoadHalf(Int, Int, Int); IStoreHalf(Int, Int, Int); ILoadWord(Int, Int, Int); IStoreWord(Int, Int, Int);
+  ILoadByteS(Int, Int, Int); ILoadHalfS(Int, Int, Int); ILoadWordS(Int, Int, Int);
   IPush(Int); IPop(Int); ICmp(Int, Int); ICset(Int, String);
   IJmp(Int); IJmpCond(String, Int); IJmpZero(Int, Int);
 
@@ -37,7 +41,8 @@ enum Instr {
   // floating point (scalar double, FP registers d0..): a Float value is a heap word holding the IEEE-754 double
   IFAdd(Int, Int, Int); IFSub(Int, Int, Int); IFMul(Int, Int, Int); IFDiv(Int, Int, Int);
   IFLoadD(Int, Int, Int); IFStoreD(Int, Int, Int); // ldr/str Dt, [Xn, #off]  (unbox / box a double)
-  IFCmp(Int, Int); IFToInt(Int, Int) // fcmp Dn,Dm ; fcvtzs Xd, Dn (truncate to int)
+  IFCmp(Int, Int); IFToInt(Int, Int); // fcmp Dn,Dm ; fcvtzs Xd, Dn (truncate to int)
+  IIntToF(Int, Int) // scvtf Dd, Xn (signed 64-bit int -> double)
 }
 
 // ============================================================================
@@ -50,6 +55,7 @@ enum Expr {
   EFLit(String); EFBin(String, Expr, Expr); // float literal ; float binary op (arith or compare)
   EUnary(String, Expr); EBin(String, Expr, Expr);
   ECall(String, List); EField(Expr, String); EWhen(Expr, List);
+  ECast(Expr, String); // `e as T` — numeric width/sign/float conversion (Phase 3)
   EBlock(List, Expr); EIf(Expr, Expr, Expr); ERet(Expr); EBrk; ECont; ENoRes
 }
 
@@ -219,14 +225,42 @@ fun genOr(ctx: Ctx, a: Expr, b: Expr): Int {
   return emit(ctx, ILabel(lend))
 }
 
+// The unsigned integer primitives (Phase 3): division, right-shift, and ordering compares must use
+// UDIV / LSRV / unsigned condition codes instead of the signed SDIV / ASRV / signed compares. Add / sub /
+// mul / bitwise / equality / left-shift are bit-identical for both signednesses, so they need no split.
+// The compiler's own sources are 100% `Int` (signed), so binUnsigned is always false for kcc itself and
+// the emitted bytes are unchanged — the split only fires on user unsigned-typed operands.
+fun isUnsignedTy(s: String): Bool {
+  return s == "U8" || s == "U16" || s == "U32" || s == "U64" || s == "USize" || s == "Byte"
+    || s == "UInt8" || s == "UInt16" || s == "UInt32" || s == "UInt64"
+}
+
+fun binUnsigned(ctx: Ctx, a: Expr, b: Expr): Bool {
+  return isUnsignedTy(typeNameOf(ctx, a)) || isUnsignedTy(typeNameOf(ctx, b))
+}
+
+// unsigned counterpart of opInstr for the operators whose lowering differs by signedness.
+fun uOpInstr(ctx: Ctx, op: String): Int {
+  if (op == "/") { return emit(ctx, IUDiv(0, 0, 1)) }
+  if (op == "%") { emit(ctx, IUDiv(2, 0, 1)); return emit(ctx, IMulSub(0, 2, 1, 0)) }
+  if (op == ">>") { return emit(ctx, ILShr(0, 0, 1)) }
+  if (op == "<") { emit(ctx, ICmp(0, 1)); return emit(ctx, ICset(0, "lo")) }
+  if (op == ">") { emit(ctx, ICmp(0, 1)); return emit(ctx, ICset(0, "hi")) }
+  if (op == "<=") { emit(ctx, ICmp(0, 1)); return emit(ctx, ICset(0, "ls")) }
+  if (op == ">=") { emit(ctx, ICmp(0, 1)); return emit(ctx, ICset(0, "hs")) }
+  return opInstr(ctx, op)
+}
+
 fun genBinary(ctx: Ctx, op: String, a: Expr, b: Expr): Int {
   if (op == "&&") { return genAnd(ctx, a, b) }
   if (op == "||") { return genOr(ctx, a, b) }
   // String `+` (concatenation) is desugared upstream in klower's lowerBin to the String_add operator
   // method (impl Add for String) before it reaches codegen, so a raw EBin("+") here is always a numeric
   // add. No String special-case is needed. (The compiler's own sources only ever `+` integers.)
+  val u = binUnsigned(ctx, a, b)
   genExpr(ctx, a); emit(ctx, IPush(0))
   genExpr(ctx, b); emit(ctx, IMov(1, 0)); emit(ctx, IPop(0))
+  if (u) { return uOpInstr(ctx, op) }
   return opInstr(ctx, op)
 }
 
@@ -274,11 +308,17 @@ fun typeNameOf(ctx: Ctx, e: Expr): String {
   return when (e) {
     EIdent(n) -> getLty(ctx, n)
     EStr(s) -> "String"
+    EFLit(t) -> "Double"
+    EFBin(op, l, r) -> "Double"
+    ECast(x, ty) -> ty
     ECall(nm, aa) -> {
       if (isStructName(ctx.gen, nm)) { nm }
       else { val ft = floorRetTag(nm); if (ft != "") { ft } else { funRetOf(ctx.gen, nm) } }
     }
     EField(b, f) -> fieldTypeOf(ctx.gen, typeNameOf(ctx, b), f)
+    // Arithmetic/bitwise result carries an operand's type so unsignedness propagates through nested
+    // expressions (`(a+b) >> c` stays unsigned when a/b are). Prefer an unsigned operand's type.
+    EBin(op, l, r) -> { val tl = typeNameOf(ctx, l); if (isUnsignedTy(tl)) { tl } else { val tr = typeNameOf(ctx, r); if (tr != "") { tr } else { tl } } }
     else -> ""
   }
 }
@@ -603,6 +643,47 @@ fun genFToInt(ctx: Ctx, a: Expr): Int { // toInt(float) : unbox + truncate
   genExpr(ctx, a); emit(ctx, IFLoadD(0, 0, 0)); return emit(ctx, IFToInt(0, 0))
 }
 
+fun genIToFloat(ctx: Ctx, a: Expr): Int { // toFloat(int) : scvtf + box  (fixes unsound int/float mixing)
+  genExpr(ctx, a); emit(ctx, IIntToF(0, 0)); return genBoxDouble(ctx)
+}
+
+fun isFloatTypeName(s: String): Bool { return s == "Double" || s == "Float" }
+
+// Storage width in bits for an integer/char cast target ("" -> 64 = word, the no-normalize case).
+fun castBits(ty: String): Int {
+  if (ty == "I8" || ty == "Int8" || ty == "U8" || ty == "UInt8" || ty == "Byte") { return 8 }
+  if (ty == "I16" || ty == "Int16" || ty == "U16" || ty == "UInt16") { return 16 }
+  if (ty == "I32" || ty == "Int32" || ty == "U32" || ty == "UInt32" || ty == "Char") { return 32 }
+  return 64
+}
+
+// int -> int normalization to the cast target's width: unsigned/char masks (zero-extend), signed
+// sign-extends via a left-then-arithmetic-right shift pair. x0 already holds the source word.
+fun genCastNarrow(ctx: Ctx, ty: String): Int {
+  val bits = castBits(ty)
+  if (bits >= 64) { return 0 } // word target: reinterpret, no bits change
+  if (isUnsignedTy(ty) || ty == "Char") {
+    loadImm(ctx, 1, pow2i(bits) - 1); return emit(ctx, IAnd(0, 0, 1)) // mask low `bits`
+  }
+  loadImm(ctx, 1, 64 - bits); emit(ctx, IShl(0, 0, 1)); return emit(ctx, IShr(0, 0, 1)) // sign-extend
+}
+
+fun pow2i(n: Int): Int { var r = 1; var i = 0; while (i < n) { r = r * 2; i = i + 1 }; return r }
+
+// `e as T`: numeric conversion. int<->int = width/sign normalize; int->float = scvtf+box;
+// float->int = unbox+fcvtzs (truncate toward zero); float->float = identity.
+fun genCast(ctx: Ctx, x: Expr, ty: String): Int {
+  val srcFloat = isFloatTypeName(typeNameOf(ctx, x))
+  val dstFloat = isFloatTypeName(ty)
+  if (dstFloat) {
+    if (srcFloat) { return genExpr(ctx, x) }
+    genExpr(ctx, x); emit(ctx, IIntToF(0, 0)); return genBoxDouble(ctx)
+  }
+  if (srcFloat) { genExpr(ctx, x); emit(ctx, IFLoadD(0, 0, 0)); return emit(ctx, IFToInt(0, 0)) }
+  genExpr(ctx, x)
+  return genCastNarrow(ctx, ty)
+}
+
 // ---- ARC runtime primitives (refcount stored in a hidden header word at [obj-8]) ----
 // genAllocHdr: precondition x0 = object size in bytes. Allocates malloc(size+16) with a 16-byte
 // hidden header: refcount at [base+0] (= [obj-16]) and a runtime TYPE-ID at [base+8] (= [obj-8]).
@@ -677,6 +758,29 @@ fun genRawStoreByte(ctx: Ctx, pE: Expr, offE: Expr, valE: Expr): Int {
   genExpr(ctx, valE); emit(ctx, IPush(0))
   emit(ctx, IPop(0)); emit(ctx, IPop(1)); emit(ctx, IPop(2)) // x0=val, x1=off, x2=p
   emit(ctx, IAdd(1, 2, 1)); emit(ctx, IStoreByte(0, 1, 0)) // (byte)*(p+off) = val
+  return emit(ctx, IZero(0))
+}
+
+// sized loads/stores (Phase 2): compute x0 = p + off, then a width-specific load/store at offset 0.
+// kind: 0 = load16 (zero-ext), 1 = load32 (zero-ext), 2 = load8 signed, 3 = load16 signed, 4 = load32 signed.
+fun genRawLoadSized(ctx: Ctx, pE: Expr, offE: Expr, kind: Int): Int {
+  genExpr(ctx, pE); emit(ctx, IPush(0))
+  genExpr(ctx, offE); emit(ctx, IPop(1)); emit(ctx, IAdd(0, 1, 0)) // x0 = p + off
+  if (kind == 0) { return emit(ctx, ILoadHalf(0, 0, 0)) }
+  if (kind == 1) { return emit(ctx, ILoadWord(0, 0, 0)) }
+  if (kind == 2) { return emit(ctx, ILoadByteS(0, 0, 0)) }
+  if (kind == 3) { return emit(ctx, ILoadHalfS(0, 0, 0)) }
+  return emit(ctx, ILoadWordS(0, 0, 0)) // kind == 4
+}
+
+// width store (Phase 2): *(p+off) = (truncated) val ; kind 0 = store16 (STRH), 1 = store32 (STR Wt).
+fun genRawStoreSized(ctx: Ctx, pE: Expr, offE: Expr, valE: Expr, kind: Int): Int {
+  genExpr(ctx, pE); emit(ctx, IPush(0))
+  genExpr(ctx, offE); emit(ctx, IPush(0))
+  genExpr(ctx, valE); emit(ctx, IPush(0))
+  emit(ctx, IPop(0)); emit(ctx, IPop(1)); emit(ctx, IPop(2)) // x0=val, x1=off, x2=p
+  emit(ctx, IAdd(1, 2, 1)) // x1 = p + off
+  if (kind == 0) { emit(ctx, IStoreHalf(0, 1, 0)) } else { emit(ctx, IStoreWord(0, 1, 0)) }
   return emit(ctx, IZero(0))
 }
 
@@ -787,10 +891,12 @@ fun genReleaseDisp(ctx: Ctx, p: Expr): Int {
 // single edit here (plus its lowering body, unavoidably, in genCall).
 fun intrinsicFloor(): List {
   val f = list()
-  f.push("toInt"); f.push("__abort"); f.push("__allocRC"); f.push("__retain"); f.push("__release")
+  f.push("toInt"); f.push("toFloat"); f.push("__abort"); f.push("__allocRC"); f.push("__retain"); f.push("__release")
   f.push("__decRefcount"); f.push("__freeObj"); f.push("__refcount"); f.push("__typeId")
   f.push("__rawAlloc"); f.push("__rawFree"); f.push("__rawRealloc"); f.push("__argv")
   f.push("__rawLoad"); f.push("__rawStore"); f.push("__rawLoadByte"); f.push("__rawStoreByte")
+  f.push("__rawLoad16"); f.push("__rawStore16"); f.push("__rawLoad32"); f.push("__rawStore32")
+  f.push("__rawLoad8S"); f.push("__rawLoad16S"); f.push("__rawLoad32S")
   f.push("__funcAddr"); f.push("__closGet"); f.push("__closNew"); f.push("__closCall")
   f.push("println"); f.push("print"); f.push("printlnF"); f.push("printF")
   f.push("eprintln"); f.push("eprint")
@@ -809,6 +915,9 @@ fun intrinsicFloor(): List {
 // floor names for %s).
 fun floorRetTag(nm: String): String {
   if (nm == "readFile" || nm == "__argv") { return "String" }
+  // "Float" (not "Double") so klower's lowerBin float-op routing (`tag == "Float"`) fires for a
+  // toFloat(x) operand; codegen's isFloatTypeName accepts both spellings, so genCast/typeNameOf agree.
+  if (nm == "toFloat") { return "Float" }
   if (nm == "writeFile" || nm == "fopenW" || nm == "fputByte" || nm == "fcloseF" || nm == "toInt") { return "Int" }
   if (nm == "String_eq") { return "Bool" }
   return ""
@@ -816,6 +925,7 @@ fun floorRetTag(nm: String): String {
 
 fun genCall(ctx: Ctx, name: String, args: List): Int {
   if (name == "toInt" && args.len() == 1) { return genFToInt(ctx, aAt(args, 0)) }
+  if (name == "toFloat" && args.len() == 1) { return genIToFloat(ctx, aAt(args, 0)) }
   if (name == "__abort" && args.len() == 0) { return emit(ctx, ICallSym("_abort")) }
   if (name == "__allocRC" && args.len() == 1) { return genAllocRC(ctx, aAt(args, 0)) }
   if (name == "__retain" && args.len() == 1) { return genRetain(ctx, aAt(args, 0)) }
@@ -832,6 +942,13 @@ fun genCall(ctx: Ctx, name: String, args: List): Int {
   if (name == "__rawStore" && args.len() == 3) { return genRawStore(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2)) }
   if (name == "__rawLoadByte" && args.len() == 2) { return genRawLoadByte(ctx, aAt(args, 0), aAt(args, 1)) }
   if (name == "__rawStoreByte" && args.len() == 3) { return genRawStoreByte(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2)) }
+  if (name == "__rawLoad16" && args.len() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 0) }
+  if (name == "__rawStore16" && args.len() == 3) { return genRawStoreSized(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2), 0) }
+  if (name == "__rawLoad32" && args.len() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 1) }
+  if (name == "__rawStore32" && args.len() == 3) { return genRawStoreSized(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2), 1) }
+  if (name == "__rawLoad8S" && args.len() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 2) }
+  if (name == "__rawLoad16S" && args.len() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 3) }
+  if (name == "__rawLoad32S" && args.len() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 4) }
   if (name == "__funcAddr" && args.len() == 1) { return genFuncAddr(ctx, aAt(args, 0)) }
   if (name == "__closGet" && args.len() == 2) { return genClosGet(ctx, aAt(args, 0), aAt(args, 1)) }
   if (name == "__closNew") { return genClosNew(ctx, args) }
@@ -956,6 +1073,7 @@ fun genExpr(ctx: Ctx, e: Expr): Int {
     EStr(s) -> { val lab = internStr(ctx, s); emit(ctx, ISymHi(0, lab)); emit(ctx, ISymLo(0, 0, lab)) }
     EUnary(op, x) -> { genExpr(ctx, x); if (op == "not !") { loadImm(ctx, 1, 0); emit(ctx, ICmp(0, 1)); emit(ctx, ICset(0, "eq")) } else { emit(ctx, INeg(0, 0)) } }
     EBin(op, l, r) -> genBinary(ctx, op, l, r)
+    ECast(x, ty) -> genCast(ctx, x, ty)
     ECall(nm, args) -> genCall(ctx, nm, args)
     EField(b, f) -> genField(ctx, b, f)
     EWhen(subj, arms) -> genWhenE(ctx, subj, arms)

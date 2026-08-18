@@ -1,0 +1,20 @@
+fun m() : Int
+  block
+    val a
+      cast U8
+        int 300
+    val b
+      cast I16
+        ident x
+    val c
+      cast Double
+        ident i
+    val d
+      cast U32
+        binary +
+          ident p
+          ident q
+    return
+      cast Int
+        ident a
+

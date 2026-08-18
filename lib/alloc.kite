@@ -1,3 +1,5 @@
 // kite::alloc — allocator layer. Re-exports (pub import) its own sub-modules; nothing of core. The
-// former kite::alloc::string module was folded into kite::core::string, so only collections remains.
+// former kite::alloc::string module was folded into kite::core::string, so only collections + the
+// opt-in packed byte arrays (kite::alloc::bytes) remain.
 pub import kite::alloc::collections
+pub import kite::alloc::bytes
