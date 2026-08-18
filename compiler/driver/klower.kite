@@ -54,35 +54,21 @@ fun localTag(lo: Lo, nm: String): String {
   while (i >= 0) { if (strEq(lo.locN.get(i), nm)) { return lo.locT.get(i) } ; i = i - 1 }
   return "?"
 }
-fun builtinRetTag(nm: String): String {
-  if (strEq(nm,"intToStr") || strEq(nm,"concat") || strEq(nm,"substr") || strEq(nm,"readFile") || strEq(nm,"__argv")) { return "String" }
-  if (strEq(nm,"strLen") || strEq(nm,"charAt") || strEq(nm,"listLen") || strEq(nm,"listPush") || strEq(nm,"listSet") || strEq(nm,"writeFile") || strEq(nm,"fopenW") || strEq(nm,"fputByte") || strEq(nm,"fcloseF")) { return "Int" }
-  if (strEq(nm,"strEq")) { return "Bool" }
-  return ""
-}
+// builtinRetTag: the return tag of a type-carrying INTRINSIC (no Kite body). Sourced from codegen's ONE
+// manifest floorRetTag so it can never drift from typeNameOf. The pure-Kite prelude functions
+// (intToStr/concat/substr/strLen/charAt/listLen/listPush/listSet) are no longer listed here — their tags
+// resolve through the collected fN/fR signatures in funRetTag below, so this stopped being a second copy.
+fun builtinRetTag(nm: String): String { return floorRetTag(nm) }
 // The INTRINSIC FLOOR: names with NO Kite definition anywhere. The compiler emits them directly (the
-// per-name dispatch in codegen's genCall) or folds them at lower time (comptime). This is the single
-// source of truth for "builtin with no body" — the M2 checker's isBuiltin (kcheck.kite) defers to it,
-// so the lowerer and the checker can never disagree about what the floor is. Everything else a program
-// can call is a real Kite function: a prelude module (preludeConfPaths) or the user's own source.
+// per-name dispatch in codegen's genCall) or folds them at lower time (comptime). The floor name set is
+// defined ONCE, in codegen's intrinsicFloor() — the machine-lowered names — and this predicate DERIVES
+// from it, adding only `comptime` (a lower-time-only fold that never reaches codegen). The M2 checker's
+// isBuiltin (kcheck.kite) defers to this predicate, so the lowerer, the checker, and codegen can never
+// disagree about the floor. Everything else a program can call is a real Kite function: a prelude module
+// (preludeConfPaths) or the user's own source.
 fun isIntrinsic(nm: String): Bool {
-  return
-    // formatted print
-    strEq(nm,"print") || strEq(nm,"println") || strEq(nm,"printF") || strEq(nm,"printlnF") ||
-    // raw memory
-    strEq(nm,"__rawAlloc") || strEq(nm,"__rawFree") || strEq(nm,"__rawRealloc") ||
-    strEq(nm,"__rawLoad") || strEq(nm,"__rawStore") || strEq(nm,"__rawLoadByte") || strEq(nm,"__rawStoreByte") ||
-    // ARC / object header
-    strEq(nm,"__allocRC") || strEq(nm,"__retain") || strEq(nm,"__release") || strEq(nm,"__refcount") ||
-    strEq(nm,"__decRefcount") || strEq(nm,"__freeObj") || strEq(nm,"__typeId") ||
-    // first-class functions / closures
-    strEq(nm,"__funcAddr") || strEq(nm,"__closNew") || strEq(nm,"__closGet") || strEq(nm,"__closCall") ||
-    // file I/O
-    strEq(nm,"readFile") || strEq(nm,"writeFile") || strEq(nm,"fopenW") || strEq(nm,"fputByte") || strEq(nm,"fcloseF") ||
-    // process / argv / abort
-    strEq(nm,"__abort") || strEq(nm,"__argv") ||
-    // float truncation + compile-time fold
-    strEq(nm,"toInt") || strEq(nm,"comptime")
+  if (strEq(nm, "comptime")) { return true }
+  return memListL(intrinsicFloor(), nm)
 }
 fun funRetTag(lo: Lo, nm: String): String {
   val b = builtinRetTag(nm)
@@ -522,7 +508,7 @@ fun ceBuildList(names: List, vals: List, funcs: List, es: List): Int {
 }
 fun ceEval(names: List, vals: List, funcs: List, e: FExpr): Int {
   return when (e) {
-    FEInt(t) -> parseIntK(t)
+    FEInt(t) -> parseIntK(litNum(t))
     FEChar(t) -> parseIntK(t)
     FEBool(b) -> if (strEq(b, "true")) { 1 } else { 0 }
     FEStr(t, r) -> t
@@ -766,7 +752,7 @@ fun lowerInterp(lo: Lo, parts: List): Expr {
 }
 fun lowerExpr(lo: Lo, e: FExpr): Expr {
   return when (e) {
-    FEInt(t) -> EInt(t)
+    FEInt(t) -> EInt(litNum(t))
     FEChar(t) -> EInt(t)
     FEBool(b) -> if (strEq(b, "true")) { EInt("1") } else { EInt("0") }
     FENull -> EInt("0")
@@ -987,7 +973,7 @@ fun lowerPat(p: FPat): Pat {
   return when (p) {
     FPWild -> PWild
     FPBind(s) -> PBindP(s)
-    FPInt(t) -> PIntP(t)
+    FPInt(t) -> PIntP(litNum(t))
     FPCharP(t) -> PIntP(t)
     FPBoolP(b) -> if (strEq(b, "true")) { PIntP("1") } else { PIntP("0") }
     FPNullP -> PIntP("0")

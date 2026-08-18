@@ -10,8 +10,9 @@
 **Under test:** `compiler/kparse` (built from `compiler/kparse.kite`)
 **Oracle (ground truth):** `_build/default/bin/main.exe parse FILE` (OCaml parser)
 **Method:** For every oracle-accepted probe `FILE.kite` (with sibling `FILE.ref` = oracle output),
-`cp FILE /tmp/kparse_input.kite ; ./compiler/kparse | grep -v ' -> exit code ' > /tmp/got.txt ; diff FILE.ref /tmp/got.txt`.
-Run serially (single writer of `/tmp/kparse_input.kite`).
+`./compiler/kparse FILE | grep -v ' -> exit code ' > got.txt ; diff FILE.ref got.txt`
+(kparse takes the source path from argv). Parallel-safe: the harness builds into a private `mktemp -d`
+and passes each probe as an argument — no shared `/tmp` writer.
 
 ## Summary counts
 

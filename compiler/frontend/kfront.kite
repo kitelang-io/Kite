@@ -40,6 +40,103 @@ fun hexDigitF(c: Int): Int {
   if (c >= 97 && c <= 102) { return c - 87 }   // a..f
   return c - 55                                 // A..F
 }
+fun isOctD(c: Int): Bool { return c >= 48 && c <= 55 }
+fun isBinD(c: Int): Bool { return c == 48 || c == 49 }
+// ---- integer literal type suffixes (STDLIB-REDESIGN §2a: 42u16, 100i64, 7L, ...) ----
+// The suffix is kept appended to the INT token's decimal text ("300" + "u16" -> "300u16"); litNum/litSuf
+// (below) split it back out so codegen/klower see a pure decimal while the checker reads the type.
+fun peekAlnum(lx: Lx): String {
+  var i = lx.pos
+  while (i < lx.n && isAlnum(charAt(lx.src, i))) { i = i + 1 }
+  return substr(lx.src, lx.pos, i - lx.pos)
+}
+fun isIntSuffixW(w: String): Bool {
+  return strEq(w,"L") || strEq(w,"i8") || strEq(w,"i16") || strEq(w,"i32") || strEq(w,"i64") ||
+      strEq(w,"u8") || strEq(w,"u16") || strEq(w,"u32") || strEq(w,"u64") || strEq(w,"isize") || strEq(w,"usize")
+}
+// consume + return a trailing integer suffix if one is present; else "" with lx.pos unchanged (so an
+// unrecognized trailing word lexes as its own identifier, exactly as before — purely additive).
+fun readIntSuffix(lx: Lx): String {
+  val w = peekAlnum(lx)
+  if (isIntSuffixW(w)) { var k = 0 ; while (k < strLen(w)) { adv(lx) ; k = k + 1 } ; return w }
+  return ""
+}
+// split a possibly-suffixed INT literal text: litNum("300u16")="300", litSuf("300u16")="u16".
+// Value is pure decimal (optional leading '-'), so the first non-digit begins the suffix.
+fun litNum(s: String): String {
+  var i = 0
+  if (strLen(s) >= 1 && charAt(s, 0) == 45) { i = 1 }         // leading '-'
+  while (i < strLen(s) && isDigit(charAt(s, i))) { i = i + 1 }
+  return substr(s, 0, i)
+}
+fun litSuf(s: String): String {
+  val n = strLen(litNum(s))
+  return substr(s, n, strLen(s) - n)
+}
+// map an integer suffix to its checker primitive-type name ("" -> no suffix).
+fun suffixTyName(suf: String): String {
+  if (strEq(suf, "")) { return "" }
+  if (strEq(suf, "L")) { return "Long" }
+  if (strEq(suf, "i8")) { return "I8" }      if (strEq(suf, "i16")) { return "I16" }
+  if (strEq(suf, "i32")) { return "I32" }    if (strEq(suf, "i64")) { return "I64" }
+  if (strEq(suf, "u8")) { return "U8" }      if (strEq(suf, "u16")) { return "U16" }
+  if (strEq(suf, "u32")) { return "U32" }    if (strEq(suf, "u64")) { return "U64" }
+  if (strEq(suf, "isize")) { return "ISize" }
+  if (strEq(suf, "usize")) { return "USize" }
+  return ""
+}
+// Read one numeric literal starting at cur: base prefixes (0x/0o/0b), digit separators ('_'), a float
+// fractional part and/or exponent, and an integer type suffix. Pushes an INT (kind 2, decimal[+suffix])
+// or FLOAT (kind 3, strtod-valid lexeme) token.
+fun readNum(lx: Lx, toks: List): Int {
+  val c = cur(lx)
+  if (c == 48 && (nxt(lx) == 120 || nxt(lx) == 88)) {          // 0x / 0X
+    adv(lx) ; adv(lx)
+    var hv = 0
+    while (isHexD(cur(lx)) || (cur(lx) == 95 && isHexD(nxt(lx)))) {
+      if (cur(lx) == 95) { adv(lx) } else { hv = hv * 16 + hexDigitF(cur(lx)) ; adv(lx) }
+    }
+    return push2(lx, toks, 2, concat(intToStr(hv), readIntSuffix(lx)))
+  }
+  if (c == 48 && (nxt(lx) == 111 || nxt(lx) == 79)) {          // 0o / 0O
+    adv(lx) ; adv(lx)
+    var ov = 0
+    while (isOctD(cur(lx)) || (cur(lx) == 95 && isOctD(nxt(lx)))) {
+      if (cur(lx) == 95) { adv(lx) } else { ov = ov * 8 + (cur(lx) - 48) ; adv(lx) }
+    }
+    return push2(lx, toks, 2, concat(intToStr(ov), readIntSuffix(lx)))
+  }
+  if (c == 48 && (nxt(lx) == 98 || nxt(lx) == 66)) {           // 0b / 0B
+    adv(lx) ; adv(lx)
+    var bv = 0
+    while (isBinD(cur(lx)) || (cur(lx) == 95 && isBinD(nxt(lx)))) {
+      if (cur(lx) == 95) { adv(lx) } else { bv = bv * 2 + (cur(lx) - 48) ; adv(lx) }
+    }
+    return push2(lx, toks, 2, concat(intToStr(bv), readIntSuffix(lx)))
+  }
+  var body = ""
+  while (isDigit(cur(lx)) || (cur(lx) == 95 && isDigit(nxt(lx)))) {
+    if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)) ; adv(lx) }
+  }
+  var isFloat = 0
+  if (cur(lx) == 46 && isDigit(nxt(lx))) {                     // '.' fractional
+    isFloat = 1
+    body = concat(body, ".") ; adv(lx)
+    while (isDigit(cur(lx)) || (cur(lx) == 95 && isDigit(nxt(lx)))) {
+      if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)) ; adv(lx) }
+    }
+  }
+  if ((cur(lx) == 101 || cur(lx) == 69) && (isDigit(nxt(lx)) || ((nxt(lx) == 43 || nxt(lx) == 45) && isDigit(at(lx, 2))))) {   // exponent e[+/-]d+
+    isFloat = 1
+    body = concat(body, "e") ; adv(lx)
+    if (cur(lx) == 43 || cur(lx) == 45) { body = concat(body, substr(lx.src, lx.pos, 1)) ; adv(lx) }
+    while (isDigit(cur(lx)) || (cur(lx) == 95 && isDigit(nxt(lx)))) {
+      if (cur(lx) == 95) { adv(lx) } else { body = concat(body, substr(lx.src, lx.pos, 1)) ; adv(lx) }
+    }
+  }
+  if (isFloat == 1) { return push2(lx, toks, 3, body) }
+  return push2(lx, toks, 2, concat(body, readIntSuffix(lx)))
+}
 
 fun skipTrivia(lx: Lx): Int {
   var go = 1
@@ -113,19 +210,7 @@ fun lex(src: String): List {
     if (c == 0) { go = 0 }
     else {
       if (isDigit(c)) {
-        if (c == 48 && (nxt(lx) == 120 || nxt(lx) == 88)) {   // 0x.. hex -> decimal token text
-          adv(lx) ; adv(lx)
-          var hv = 0
-          while (isHexD(cur(lx))) { hv = hv * 16 + hexDigitF(cur(lx)) ; adv(lx) }
-          push2(lx, toks, 2, intToStr(hv))
-        } else {
-          val s = lx.pos
-          while (isDigit(cur(lx))) { adv(lx) }
-          if (cur(lx) == 46 && isDigit(nxt(lx))) {
-            adv(lx) ; while (isDigit(cur(lx))) { adv(lx) }
-            push2(lx, toks, 3, substr(lx.src, s, lx.pos - s))
-          } else { push2(lx, toks, 2, substr(lx.src, s, lx.pos - s)) }
-        }
+        readNum(lx, toks)
       } else {
         if (isAlpha(c)) {
           val s = lx.pos
@@ -1119,6 +1204,10 @@ fun expStr(e: Int): String {                 // "e+06" / "e-05" (exponent >= 2 d
 // reproduce OCaml default float printing (%g, precision 6): 1.0->"1", 0.5->"0.5", 100.0->"100",
 // 1000000.0->"1e+06", 1.2345678->"1.23457". Input is a d+.d+ decimal lexeme.
 fun fmtFloat(raw: String): String {
+  // Exponent lexemes (1.5e3, 2e-4, 1e9) are already normalized enough; emit them verbatim rather than
+  // running them through the fixed-notation %g emulator (which assumes a plain d+.d+ lexeme).
+  var xi = 0
+  while (xi < strLen(raw)) { val xc = charAt(raw, xi) ; if (xc == 101 || xc == 69) { return raw } ; xi = xi + 1 }
   var dot = 0 - 1
   var i = 0
   while (i < strLen(raw)) { if (charAt(raw, i) == 46) { dot = i } ; i = i + 1 }

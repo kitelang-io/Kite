@@ -92,8 +92,8 @@ fun main(): Int {
   val p4instrs = genProgram(p4)
   val p4words = assembleExe(p4instrs)
   val p4entry = entryOffset(p4instrs, "_main")
-  writeBytes("/tmp/kp4", buildExe(p4words, p4entry, "_main", "kp4"))
-  println(concat("wrote /tmp/kp4  entry_off=", intToStr(p4entry)))
+  writeBytes("kp4", buildExe(p4words, p4entry, "_main", "kp4"))          // cwd-relative (no shared /tmp)
+  println(concat("wrote kp4  entry_off=", intToStr(p4entry)))
   println(concat("failures: ", intToStr(f)))
   return f
 }

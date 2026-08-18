@@ -141,8 +141,6 @@ fun opInstr(ctx: Ctx, op: String): Int {
   if (strEq(op, ">")) { emit(ctx, ICmp(0, 1)) ; return emit(ctx, ICset(0, "gt")) }
   if (strEq(op, "<=")) { emit(ctx, ICmp(0, 1)) ; return emit(ctx, ICset(0, "le")) }
   if (strEq(op, ">=")) { emit(ctx, ICmp(0, 1)) ; return emit(ctx, ICset(0, "ge")) }
-  if (strEq(op, "&&")) { return emit(ctx, IAnd(0, 0, 1)) }
-  if (strEq(op, "||")) { return emit(ctx, IOr(0, 0, 1)) }
   if (strEq(op, "&")) { return emit(ctx, IAnd(0, 0, 1)) }
   if (strEq(op, "|")) { return emit(ctx, IOr(0, 0, 1)) }
   if (strEq(op, "^")) { return emit(ctx, IXor(0, 0, 1)) }
@@ -228,7 +226,7 @@ fun typeNameOf(ctx: Ctx, e: Expr): String {
     EStr(s) -> "String"
     ECall(nm, aa) -> {
       if (isStructName(ctx.gen, nm)) { nm }
-      else { if (strEq(nm, "concat") || strEq(nm, "substr") || strEq(nm, "intToStr") || strEq(nm, "readFile") || strEq(nm, "__argv")) { "String" } else { funRetOf(ctx.gen, nm) } }
+      else { val ft = floorRetTag(nm) ; if (strEq(ft, "") == false) { ft } else { funRetOf(ctx.gen, nm) } }
     }
     EField(b, f) -> fieldTypeOf(ctx.gen, typeNameOf(ctx, b), f)
     else -> ""
@@ -336,96 +334,9 @@ fun genFieldAssign(ctx: Ctx, base: Expr, f: String, rhs: Expr): Int {
   return emit(ctx, IStoreOff(0, 1, fieldOff(ctx.gen, typeNameOf(ctx, base), f)))
 }
 
-// ---- boxed List builtins (header {len@0,cap@8,data@16}, ports of gen_list_*) --
-fun genListNew(ctx: Ctx): Int {
-  loadImm(ctx, 0, 24) ; genAllocHdr(ctx, 0 - 1) ; emit(ctx, IPush(0))   // list header {len,cap,data} is a ref-counted object
-  loadImm(ctx, 0, 32) ; emit(ctx, ICallSym("_malloc"))           // element data array stays header-less (internal buffer)
-  emit(ctx, ILoadTop(1)) ; emit(ctx, IStoreOff(0, 1, 16))
-  emit(ctx, IZero(0)) ; emit(ctx, IStoreOff(0, 1, 0))
-  loadImm(ctx, 0, 4) ; emit(ctx, IStoreOff(0, 1, 8))
-  return emit(ctx, IPop(0))
-}
-fun genListPush(ctx: Ctx, l: Expr, x: Expr): Int {
-  val store = concat("Lpush_", intToStr(fresh(ctx)))
-  genExpr(ctx, l) ; emit(ctx, IPush(0))
-  genExpr(ctx, x) ; emit(ctx, IPush(0))
-  emit(ctx, ILoadOff(1, 31, 16)) ; emit(ctx, ILoadOff(0, 1, 0)) ; emit(ctx, ILoadOff(2, 1, 8))
-  emit(ctx, ICmp(0, 2)) ; emit(ctx, IJmpCondL("ne", store))
-  emit(ctx, IAdd(2, 2, 2)) ; emit(ctx, IStoreOff(2, 1, 8))
-  emit(ctx, ILoadOff(0, 1, 16))
-  loadImm(ctx, 3, 8) ; emit(ctx, IMul(1, 2, 3))
-  emit(ctx, ICallSym("_realloc"))
-  emit(ctx, ILoadOff(1, 31, 16)) ; emit(ctx, IStoreOff(0, 1, 16))
-  emit(ctx, ILabel(store))
-  emit(ctx, ILoadOff(1, 31, 16)) ; emit(ctx, ILoadOff(0, 1, 0)) ; emit(ctx, ILoadOff(2, 1, 16))
-  loadImm(ctx, 3, 8) ; emit(ctx, IMul(4, 0, 3))
-  emit(ctx, IAdd(2, 2, 4)) ; emit(ctx, ILoadOff(3, 31, 0)) ; emit(ctx, IStoreOff(3, 2, 0))
-  emit(ctx, IAddImm(0, 0, 1)) ; emit(ctx, IStoreOff(0, 1, 0))
-  emit(ctx, IStackFree(32))
-  return emit(ctx, IZero(0))
-}
-fun genListGet(ctx: Ctx, l: Expr, i: Expr): Int {
-  genExpr(ctx, l) ; emit(ctx, IPush(0))
-  genExpr(ctx, i)
-  emit(ctx, ILoadTop(1)) ; emit(ctx, ILoadOff(1, 1, 16))
-  loadImm(ctx, 2, 8) ; emit(ctx, IMul(0, 0, 2))
-  emit(ctx, IAdd(1, 1, 0)) ; emit(ctx, ILoadOff(0, 1, 0))
-  return emit(ctx, IStackFree(16))
-}
-fun genListSet(ctx: Ctx, l: Expr, i: Expr, x: Expr): Int {
-  genExpr(ctx, l) ; emit(ctx, IPush(0))
-  genExpr(ctx, i) ; emit(ctx, IPush(0))
-  genExpr(ctx, x)
-  emit(ctx, ILoadOff(1, 31, 16)) ; emit(ctx, ILoadOff(1, 1, 16)) ; emit(ctx, ILoadOff(2, 31, 0))
-  loadImm(ctx, 3, 8) ; emit(ctx, IMul(2, 2, 3))
-  emit(ctx, IAdd(1, 1, 2)) ; emit(ctx, IStoreOff(0, 1, 0))
-  return emit(ctx, IStackFree(32))
-}
-fun genListLen(ctx: Ctx, l: Expr): Int {
-  genExpr(ctx, l)
-  return emit(ctx, ILoadOff(0, 0, 0))
-}
-
-// ---- string builtins (ports of the Fledge intrinsics; all leak) ------------
-fun genStrLen(ctx: Ctx, a: Expr): Int { genExpr(ctx, a) ; return emit(ctx, ICallSym("_strlen")) }
-fun genCharAt(ctx: Ctx, a: Expr, i: Expr): Int {
-  genExpr(ctx, a) ; emit(ctx, IPush(0)) ; genExpr(ctx, i)
-  emit(ctx, IPop(1)) ; emit(ctx, IAdd(0, 1, 0))
-  return emit(ctx, ILoadByte(0, 0, 0))
-}
-fun genStrEq(ctx: Ctx, a: Expr, b: Expr): Int {
-  genExpr(ctx, a) ; emit(ctx, IPush(0)) ; genExpr(ctx, b)
-  emit(ctx, IMov(1, 0)) ; emit(ctx, IPop(0)) ; emit(ctx, ICallSym("_strcmp"))
-  loadImm(ctx, 1, 0) ; emit(ctx, ICmp(0, 1)) ; return emit(ctx, ICset(0, "eq"))
-}
-fun genConcat(ctx: Ctx, a: Expr, b: Expr): Int {
-  genExpr(ctx, a) ; emit(ctx, IPush(0)) ; genExpr(ctx, b) ; emit(ctx, IPush(0))
-  emit(ctx, ILoadOff(0, 31, 16)) ; emit(ctx, ICallSym("_strlen")) ; emit(ctx, IPush(0))
-  emit(ctx, ILoadOff(0, 31, 16)) ; emit(ctx, ICallSym("_strlen")) ; emit(ctx, IPush(0))
-  emit(ctx, ILoadOff(1, 31, 16)) ; emit(ctx, IAdd(0, 0, 1)) ; emit(ctx, IAddImm(0, 0, 1))
-  emit(ctx, ICallSym("_malloc")) ; emit(ctx, IPush(0))
-  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, ILoadOff(1, 31, 64)) ; emit(ctx, ILoadOff(2, 31, 32)) ; emit(ctx, ICallSym("_memcpy"))
-  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, ILoadOff(1, 31, 32)) ; emit(ctx, IAdd(0, 0, 1))
-  emit(ctx, ILoadOff(1, 31, 48)) ; emit(ctx, ILoadOff(2, 31, 16)) ; emit(ctx, IAddImm(2, 2, 1)) ; emit(ctx, ICallSym("_memcpy"))
-  emit(ctx, ILoadOff(0, 31, 0)) ; return emit(ctx, IStackFree(80))
-}
-fun genSubstr(ctx: Ctx, s: Expr, st: Expr, len: Expr): Int {
-  genExpr(ctx, s) ; emit(ctx, IPush(0)) ; genExpr(ctx, st) ; emit(ctx, IPush(0)) ; genExpr(ctx, len) ; emit(ctx, IPush(0))
-  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, IAddImm(0, 0, 1)) ; emit(ctx, ICallSym("_malloc")) ; emit(ctx, IPush(0))
-  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, ILoadOff(1, 31, 48)) ; emit(ctx, ILoadOff(2, 31, 32)) ; emit(ctx, IAdd(1, 1, 2))
-  emit(ctx, ILoadOff(2, 31, 16)) ; emit(ctx, ICallSym("_memcpy"))
-  emit(ctx, ILoadOff(0, 31, 0)) ; emit(ctx, ILoadOff(1, 31, 16)) ; emit(ctx, IAdd(0, 0, 1)) ; emit(ctx, IStoreByte(31, 0, 0))
-  emit(ctx, ILoadOff(0, 31, 0)) ; return emit(ctx, IStackFree(64))
-}
-fun genIntToStr(ctx: Ctx, n: Expr): Int {
-  genExpr(ctx, n) ; emit(ctx, IPush(0))
-  loadImm(ctx, 0, 24) ; emit(ctx, ICallSym("_malloc")) ; emit(ctx, IPush(0))
-  emit(ctx, IStackAlloc(16))
-  emit(ctx, ILoadOff(0, 31, 32)) ; emit(ctx, IStoreTop(0))
-  emit(ctx, ILoadOff(0, 31, 16)) ; loadImm(ctx, 1, 24)
-  emit(ctx, ISymHi(2, "Lfmt_ld")) ; emit(ctx, ISymLo(2, 2, "Lfmt_ld")) ; emit(ctx, ICallSym("_snprintf"))
-  emit(ctx, IStackFree(16)) ; emit(ctx, ILoadOff(0, 31, 0)) ; return emit(ctx, IStackFree(32))
-}
+// ---- file / I/O builtins (the List/string builtins genListNew/…/genSubstr and genIntToStr were all
+// removed — those names are pure-Kite prelude functions now and route through the default ICallSym path
+// in genCall; genIntToStr was the sole consumer of the Lfmt_ld "%ld" cstring, also removed). ----------
 fun genReadFile(ctx: Ctx, path: Expr): Int {
   genExpr(ctx, path)
   val lr = internStr(ctx, "r") ; emit(ctx, ISymHi(1, lr)) ; emit(ctx, ISymLo(1, 1, lr))
@@ -739,8 +650,38 @@ fun genReleaseDisp(ctx: Ctx, p: Expr): Int {
   }
   return genRelease(ctx, p)
 }
-// The names dispatched specially below are the INTRINSIC FLOOR — they have no Kite body. isIntrinsic()
-// (klower.kite) enumerates exactly this set (+ comptime, folded at lower time); keep the two in sync.
+// intrinsicFloor(): THE SINGLE SOURCE OF TRUTH for the intrinsic-floor NAME SET — the builtins with no
+// Kite body, which genCall (below) lowers directly to machine code. Both membership consumers derive from
+// this ONE list instead of keeping a hand-synced copy: klower's isIntrinsic (which adds only `comptime`,
+// a lower-time-only fold that never reaches codegen) and — through isIntrinsic — the checker's isBuiltin.
+// genCall's per-name arms below are the inherent lowering BODIES (something must emit __rawAlloc etc.);
+// they realize exactly these names in the same order. Adding/removing an intrinsic's MEMBERSHIP is now a
+// single edit here (plus its lowering body, unavoidably, in genCall).
+fun intrinsicFloor(): List {
+  val f = list()
+  f.push("toInt") ; f.push("__abort") ; f.push("__allocRC") ; f.push("__retain") ; f.push("__release")
+  f.push("__decRefcount") ; f.push("__freeObj") ; f.push("__refcount") ; f.push("__typeId")
+  f.push("__rawAlloc") ; f.push("__rawFree") ; f.push("__rawRealloc") ; f.push("__argv")
+  f.push("__rawLoad") ; f.push("__rawStore") ; f.push("__rawLoadByte") ; f.push("__rawStoreByte")
+  f.push("__funcAddr") ; f.push("__closGet") ; f.push("__closNew") ; f.push("__closCall")
+  f.push("println") ; f.push("print") ; f.push("printlnF") ; f.push("printF")
+  f.push("readFile") ; f.push("writeFile") ; f.push("fopenW") ; f.push("fputByte") ; f.push("fcloseF")
+  return f
+}
+// floorRetTag: THE SINGLE return-type manifest for the type-carrying intrinsics — floor builtins with no
+// Kite body whose result type the compiler must still know (for %s-vs-%ld print selection and type
+// propagation). Both former copies collapse onto this ONE lookup: klower's builtinRetTag returns it, and
+// codegen's typeNameOf consults it before funRetOf. The pure-Kite prelude functions (concat/substr/
+// intToStr/strLen/charAt/listLen/listPush/listSet) are DELIBERATELY absent — their return types already
+// resolve through the collected signature tables (funRetTag's fN/fR, funRetOf's gen.funN), so listing
+// them would just re-create the stale duplicate this step removes. strEq is listed explicitly (its
+// prelude body would also resolve it, but it is the one type-carrying comparison the floor names for %s).
+fun floorRetTag(nm: String): String {
+  if (strEq(nm,"readFile") || strEq(nm,"__argv")) { return "String" }
+  if (strEq(nm,"writeFile") || strEq(nm,"fopenW") || strEq(nm,"fputByte") || strEq(nm,"fcloseF") || strEq(nm,"toInt")) { return "Int" }
+  if (strEq(nm,"strEq")) { return "Bool" }
+  return ""
+}
 fun genCall(ctx: Ctx, name: String, args: List): Int {
   if (strEq(name, "toInt") && args.len() == 1) { return genFToInt(ctx, aAt(args, 0)) }
   if (strEq(name, "__abort") && args.len() == 0) { return emit(ctx, ICallSym("_abort")) }
@@ -767,20 +708,10 @@ fun genCall(ctx: Ctx, name: String, args: List): Int {
   if (strEq(name, "print") && args.len() == 1) { genPrintln(ctx, aAt(args, 0), "Lfmt_print_s", "Lfmt_print") ; return 0 }
   if (strEq(name, "printlnF") && args.len() == 1) { return genPrintFloat(ctx, aAt(args, 0), "Lfmt_println_f") }
   if (strEq(name, "printF") && args.len() == 1) { return genPrintFloat(ctx, aAt(args, 0), "Lfmt_print_f") }
-  // List is no longer a builtin: listNew/listPush/listGet/listSet/listLen are pure-Kite functions,
-  // injected as the implicit prelude (compiler/prelude.conf names lib/alloc/collections/list.kite),
-  // implemented on the raw memory primitives. They resolve through the default call path below.
-  // genListNew/genListPush/etc remain defined but unused (kept for reference).
-  // strLen/charAt are no longer builtins — they are pure-Kite prelude functions (lib/core/string.kite)
-  // on the raw byte primitives; they resolve through the default call path below. genStrLen/genCharAt
-  // remain defined but unused (kept for reference).
-  // strEq is now a pure-Kite prelude function (lib/core/string.kite); resolves via the default path.
-  // (Its return type stays registered as Bool in klower's typeOf.) genStrEq kept but unused.
-  // concat/substr are now pure-Kite prelude functions (lib/core/string.kite) on the raw byte primitives;
-  // they resolve via the default call path. Their return type stays registered as String in klower's
-  // typeOf. genConcat/genSubstr remain defined but unused.
-  // intToStr is now a pure-Kite prelude function (lib/core/string.kite); resolves via the default path.
-  // Its return type stays registered as String in klower's typeOf. genIntToStr kept but unused.
+  // List/string ops (listNew/listPush/listGet/listSet/listLen, strLen/charAt/strEq/concat/substr/
+  // intToStr) are pure-Kite prelude functions (lib/core/string.kite, lib/alloc/collections/list.kite)
+  // on the raw memory/byte primitives; they resolve through the default ICallSym path below. Their
+  // former machine lowerings were deleted.
   if (strEq(name, "readFile") && args.len() == 1) { return genReadFile(ctx, aAt(args, 0)) }
   if (strEq(name, "writeFile") && args.len() == 2) { return genWriteFile(ctx, aAt(args, 0), aAt(args, 1)) }
   if (strEq(name, "fopenW") && args.len() == 1) { return genFopenW(ctx, aAt(args, 0)) }

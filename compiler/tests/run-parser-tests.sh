@@ -13,10 +13,9 @@
 export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 ROOT=${0:A:h:h:h}
 cd "$ROOT" || exit 1
-KP=/tmp/kfront_kite
 
 echo "building the Kite parser (kfront + kprint) via the self-hosted seed ..."
-TMPD=$(mktemp -d); KCC="$TMPD/kcc"
+TMPD=$(mktemp -d); KCC="$TMPD/kcc"; KP="$TMPD/kfront_kite"   # private temp dir -> parallel-safe
 "$ROOT/bootstrap/kite-seed" compiler/kitec.kite "$KCC" >"$TMPD/build.log" 2>&1
 [ -f "$KCC" ] || { echo "SEED BUILD FAILED"; cat "$TMPD/build.log"; rm -rf "$TMPD"; exit 1; }
 chmod +x "$KCC"
@@ -24,11 +23,10 @@ chmod +x "$KCC"
   || { echo "PARSER BUILD FAILED"; tail -5 "$TMPD/kp_build.log"; rm -rf "$TMPD"; exit 1; }
 chmod +x "$KP"
 
-# run KP on $1; write the AST dump (minus the driver's exit-code line) to $2; leave KP's raw exit in KPRC
-# (KP returns the number of top-level decls it parsed; 139 means it crashed).
+# run KP on $1 (passed via argv, no shared /tmp); write the AST dump (minus the driver's exit-code line)
+# to $2; leave KP's raw exit in KPRC (KP returns the number of top-level decls it parsed; 139 = crash).
 run_kp() {
-  cp "$1" /tmp/kparse_input.kite
-  "$KP" 2>/dev/null | grep -v ' -> exit code ' > "$2"
+  "$KP" "$1" 2>/dev/null | grep -v ' -> exit code ' > "$2"
   KPRC=${pipestatus[1]}
 }
 

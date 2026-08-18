@@ -374,7 +374,9 @@ fun lexAll(src: String): Int {
   return count
 }
 
-fun main(): Int {
-  val src = readFile("/tmp/klex_input.kite")
+// Reads the source path from argv (macOS entry ABI: argc in x0, argv in x1), so it is parallel-safe.
+fun main(argc: Int, argv: Int): Int {
+  if (argc < 2) { println("usage: klex <file.kite>") ; return 1 }
+  val src = readFile(__argv(argv, 1))
   return lexAll(src)                                           // exit code = token count (mod 256)
 }
