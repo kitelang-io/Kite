@@ -1,4 +1,4 @@
-import "lib/alloc/deque.kite"
+import "lib/alloc/collections/deque.kite"
 fun main(): Int {
   var acc = 0
   val d = Deque::<Int>(0, 0, 0, RawBuf(0))

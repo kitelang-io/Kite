@@ -4,7 +4,7 @@
 // resolved `box.v.get(0)` to the DROPPED template method (never lowered) and jumped to a bad address. This
 // exercises the field through a struct field, a class field, a U16 field (packed stride 2), and a re-bind of
 // a field to a typed local — every declaration position the rewrite now covers. Exit code is a checksum (5).
-import "lib/alloc/vec.kite"
+import "lib/alloc/collections/vec.kite"
 
 struct SBox(val v: Vec<Int>)
 struct WBox(val v: Vec<U16>)

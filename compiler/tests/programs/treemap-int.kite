@@ -1,4 +1,4 @@
-import "lib/alloc/treemap.kite"
+import "lib/alloc/collections/treemap.kite"
 fun main(): Int {
   var acc = 0
   val t = TreeMap::<Int, Int>(0 - 1, 0, 0, 0, 0, 0, 0, 0)

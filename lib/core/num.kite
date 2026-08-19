@@ -1,0 +1,122 @@
+// kite::core::num — the numeric primitives' LIBRARY HOME (STDLIB-REDESIGN §2a/§3d).
+//
+// Every scalar the compiler recognizes is DECLARED here, in lib, not hardcoded in the checker. Each
+// `@prim("<kind>", <bits>)` marker names one primitive and carries its machine classification:
+//
+//   kind: "sint" signed-int · "uint" unsigned-int · "float" · "bool" · "char" · "string"
+//         "unit" · "never" (bottom) · "reserved" (I128/U128 — recognized, not yet implemented)
+//   bits: storage width (8/16/32/64); word types are 64. Consulted only for the integer tower.
+//
+// The checker's `buildPReg` collects these during the prelude pass (exactly like @lang/@arc), and
+// `primKind`/`primBits`/`primIsInt`/`primIsSigned`/… READ that table instead of a baked strEq switch.
+// The markers are signature-only: the type-checker skips them (no body) and codegen emits nothing of
+// substance — they exist purely to carry the classification a primitive's name maps to. A2: registers
+// are always 64-bit words; the width lives in the TYPE, so a U16 computes in an X-register like an Int.
+//
+// Canonical doc names are I8..I64 / U8..U64 / ISize / USize / Double / Never; the older aliases
+// (Int8.., UInt8.., Float, Nothing, Byte, Long) stay recognized so no existing source regresses.
+
+// ---- signed integer tower ----
+@prim("sint", 64) fun Int()
+@prim("sint", 64) fun Long()
+@prim("sint", 64) fun ISize()
+@prim("sint", 8) fun I8()
+@prim("sint", 16) fun I16()
+@prim("sint", 32) fun I32()
+@prim("sint", 64) fun I64()
+@prim("sint", 8) fun Int8()
+@prim("sint", 16) fun Int16()
+@prim("sint", 32) fun Int32()
+@prim("sint", 64) fun Int64()
+
+// ---- unsigned integer tower ----
+@prim("uint", 64) fun USize()
+@prim("uint", 8) fun Byte()
+@prim("uint", 8) fun U8()
+@prim("uint", 16) fun U16()
+@prim("uint", 32) fun U32()
+@prim("uint", 64) fun U64()
+@prim("uint", 8) fun UInt8()
+@prim("uint", 16) fun UInt16()
+@prim("uint", 32) fun UInt32()
+@prim("uint", 64) fun UInt64()
+
+// ---- floating point ----
+@prim("float", 64) fun Double()
+@prim("float", 32) fun Float()
+
+// ---- non-integer scalars ----
+@prim("bool", 8) fun Bool()
+@prim("char", 32) fun Char()
+@prim("string", 64) fun String()
+@prim("unit", 0) fun Unit()
+
+// ---- bottom + reserved ----
+@prim("never", 0) fun Never()
+@prim("never", 0) fun Nothing()
+@prim("reserved", 128) fun I128()
+@prim("reserved", 128) fun U128()
+
+// ======================================================================================
+// Associated constants — each numeric type's SURFACE, library-defined (STDLIB-REDESIGN §2a).
+//
+// These are Kite's stand-in for Rust's `i64::MAX` / `u8::MAX` / `i32::BITS`: the bounds and width of
+// each scalar, written in the library rather than baked into the compiler. Spelled as free functions
+// under the `<Type>_<CONST>` convention — exactly how an associated constant mangles — so `Int_MAX()`
+// reads as `Int::MAX`. Bare integer arithmetic (registers are 64-bit words), so word-width MIN is
+// computed as `0 - MAX - 1` rather than written as an out-of-range literal.
+
+// signed word (Int == I64 == ISize)
+fun Int_BITS(): Int { return 64 }
+
+fun Int_MAX(): Int { return 9223372036854775807 }
+
+fun Int_MIN(): Int { return 0 - 9223372036854775807 - 1 }
+
+// signed fixed widths
+fun I8_BITS(): Int { return 8 }
+
+fun I8_MAX(): Int { return 127 }
+
+fun I8_MIN(): Int { return 0 - 128 }
+
+fun I16_BITS(): Int { return 16 }
+
+fun I16_MAX(): Int { return 32767 }
+
+fun I16_MIN(): Int { return 0 - 32768 }
+
+fun I32_BITS(): Int { return 32 }
+
+fun I32_MAX(): Int { return 2147483647 }
+
+fun I32_MIN(): Int { return 0 - 2147483648 }
+
+fun I64_BITS(): Int { return 64 }
+
+fun I64_MAX(): Int { return 9223372036854775807 }
+
+fun I64_MIN(): Int { return 0 - 9223372036854775807 - 1 }
+
+// unsigned fixed widths (MIN is 0; U64_MAX exceeds the i64 word, so it is deferred with I128/U128)
+fun U8_BITS(): Int { return 8 }
+
+fun U8_MAX(): Int { return 255 }
+
+fun U8_MIN(): Int { return 0 }
+
+fun U16_BITS(): Int { return 16 }
+
+fun U16_MAX(): Int { return 65535 }
+
+fun U16_MIN(): Int { return 0 }
+
+fun U32_BITS(): Int { return 32 }
+
+fun U32_MAX(): Int { return 4294967295 }
+
+fun U32_MIN(): Int { return 0 }
+
+fun U64_BITS(): Int { return 64 }
+
+fun U64_MIN(): Int { return 0 }

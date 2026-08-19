@@ -1,7 +1,7 @@
-// Phase 2 regression: sized memory + packed arrays (kite::alloc::bytes) over the 16/32-bit load/store
+// Phase 2 regression: sized memory + packed arrays (kite::alloc::collections::bytes) over the 16/32-bit load/store
 // and signed-load intrinsics. Verifies width truncation on store, zero- vs sign-extension on load, and
 // that packed neighbours (stride 1/2/4) do not corrupt each other. Exit code is a checksum of results.
-import kite::alloc::bytes
+import kite::alloc::collections::bytes
 
 fun main(): Int {
   var acc = 0

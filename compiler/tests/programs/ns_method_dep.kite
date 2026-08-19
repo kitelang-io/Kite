@@ -1,0 +1,20 @@
+// Dependency module for ns-method-sugar.kite. Defines a type with a method, an inherent impl method, and a
+// trait whose DEFAULT method body calls a MODULE-LOCAL free function (`boost`). Imported via a NAMESPACE
+// path so the module pipeline (klower collectModuleDecls) must scope-rename the trait's default body — the
+// bug this fixture guards: before the fix the synthesized `Counter_score` emitted a bare `boost` call
+// (undefined symbol under the module pipeline) while the quoted/flat include linked fine.
+fun boost(n: Int): Int { return n + 3 }
+
+struct Counter(val v: Int) {
+  fun value(self): Int { return self.v }
+}
+
+trait Scored {
+  fun raw(self): Int
+  // DEFAULT body references the module-local free function `boost` — must be module-scope renamed.
+  fun score(self): Int { return boost(self.raw()) }
+}
+
+impl Scored for Counter {
+  fun raw(self): Int { return self.value() * 2 }
+}

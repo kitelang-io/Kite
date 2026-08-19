@@ -40,6 +40,7 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/generic-struct.kite:198 compiler/tests/programs/generic-map.kite:17
        compiler/tests/programs/arc-refcount.kite:32 compiler/tests/programs/arc-free.kite:7
        compiler/tests/programs/arc-deep.kite:211 compiler/tests/programs/stdlib-demo.kite:223
+       compiler/tests/programs/arc-isunique.kite:101
        compiler/tests/programs/nullable-ops.kite:127 compiler/tests/programs/trait-dispatch.kite:25
        compiler/tests/programs/class-arc.kite:21 compiler/tests/programs/comptime.kite:38
        compiler/tests/programs/import-demo.kite:86 compiler/tests/programs/features-combined.kite:59
@@ -60,6 +61,7 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/bool-not-call.kite:7
        compiler/tests/programs/question-operator.kite:117
        compiler/tests/programs/for-in-seq.kite:233
+       compiler/tests/programs/index-target-tier.kite:157
        compiler/tests/programs/panic-assert.kite:42
        compiler/tests/programs/big-frame-later-globals.kite:42
        compiler/tests/programs/untyped-param-retty.kite:5
@@ -73,7 +75,10 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/treemap-grow.kite:3 compiler/tests/programs/treeset-grow.kite:3
        compiler/tests/programs/hashset-int.kite:11 compiler/tests/programs/treeset-int.kite:9
        compiler/tests/programs/array-int.kite:6 compiler/tests/programs/deque-int.kite:11
-       compiler/tests/programs/collections-cow.kite:14)
+       compiler/tests/programs/collections-cow.kite:14
+       compiler/tests/programs/ns-mono-vec.kite:12
+       compiler/tests/programs/ns-method-sugar.kite:18
+       compiler/tests/programs/string-escapes.kite:255 compiler/tests/programs/char-utf8.kite:127)
 for t in $TESTS; do
   if check "${t%:*}" "${t##*:}"; then pass=$((pass+1)); else fail=$((fail+1)); fi
 done

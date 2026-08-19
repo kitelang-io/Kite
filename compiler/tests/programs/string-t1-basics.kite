@@ -1,0 +1,57 @@
+// String-T1 (Phase 9) end-to-end: the boxed `class String(len,data)` surface. Compiled with `--string-t1`
+// (see run-string-t1-tests.sh) so String is the reference-counted boxed representation, not the T0 C-string.
+// Every check must hold or `ok` drops to 0; main returns 77 iff all pass (the runner asserts exit 77).
+fun eqStr(a: String, b: String): Int { return if (a == b) { 1 } else { 0 } }
+
+fun main(): Int {
+  var ok = 1
+
+  // (1) THE representation flip: an embedded \x00 is a real byte, so len is the true byte count (3), not
+  // the strlen-truncated 2 the T0 NUL-terminated C-string would report. This is the leak-end's precondition.
+  val e = "a\x00b"
+  if (e.len() != 3) { ok = 0 }
+  if (e.byteAt(1) != 0) { ok = 0 }
+  if (e.byteAt(2) != 98) { ok = 0 }
+
+  // (2) concat (`+` -> String_add) boxes a fresh owned result.
+  val c = "foo" + "bar"
+  if (c.len() != 6) { ok = 0 }
+  if (eqStr(c, "foobar") != 1) { ok = 0 }
+
+  // (3) substr -> a non-owning StrView window; toStr() materializes an owned String.
+  val v = c.substr(1, 3)
+  if (v.len() != 3) { ok = 0 }
+  if (v.byteAt(0) != 111) { ok = 0 }
+  if (eqStr(v.toStr(), "oob") != 1) { ok = 0 }
+
+  // (4) Int_toStr boxes; interpolation ($x) routes through the show/concat roles.
+  if (eqStr(Int_toStr(42), "42") != 1) { ok = 0 }
+  if (eqStr(Int_toStr(0), "0") != 1) { ok = 0 }
+  if (eqStr(Int_toStr(0 - 5), "-5") != 1) { ok = 0 }
+  val x = 7
+  if (eqStr("x=$x!", "x=7!") != 1) { ok = 0 }
+
+  // (5) ordering (Ord) + equality (Eq) over the byte window.
+  if (eqStr("abc", "abc") != 1) { ok = 0 }
+  if (eqStr("abc", "abd") != 0) { ok = 0 }
+  if ((if ("abc" < "abd") { 1 } else { 0 }) != 1) { ok = 0 }
+  if ((if ("abcd" < "abc") { 1 } else { 0 }) != 0) { ok = 0 }
+
+  // (6) StrBuilder assembles onto one buffer and finish() seals it into an owned String.
+  val sb = strNew()
+  sb.pushStr("Ka")
+  sb.pushInt(9)
+  sb.pushChar(33)
+  val fin = sb.finish()
+  if (fin.len() != 4) { ok = 0 }
+  if (eqStr(fin, "Ka9!") != 1) { ok = 0 }
+
+  // (7) aliasing co-owns (retain); moving does not over-retain.
+  val a = "hello"
+  if (__refcount(a) != 1) { ok = 0 }
+  val al = a
+  if (__refcount(a) != 2) { ok = 0 }
+  println(al)
+
+  return if (ok == 1) { 77 } else { 0 }
+}

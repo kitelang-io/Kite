@@ -1,9 +1,9 @@
-// kite::alloc::collections::map — the language-primitive RawMap: an insertion-ordered key->value map that
+// kite::alloc::collections::internal::rawmap — the language-primitive RawMap: an insertion-ordered key->value map that
 // backs the {..} literal and the m[k] / m[k]=v index sugar. Storage is two parallel word-lists
 // {keys@0, vals@8}: keys[i] pairs with vals[i]. String-keyed methods (get/set/has/size/keys) are the
 // m.get/set/... surface AND back m["k"]/m["k"]=v; an Int-keyed path (getI/setI) backs m[intKey].
 // Following Kotlin, a type's convention methods (the desugar landing points) live WITH the type; the
-// {..} constructor is the top-level rawMap() factory (like IntBuf's intBuf()). Auto-included via
+// {..} constructor is the top-level map() factory (like IntBuf's list()). Auto-included via
 // compiler/prelude.conf; names are global (unmangled).
 //
 // @arc(manual): RawMap, like IntBuf, is EXEMPT from automatic ARC — keys/vals are type-erased word Lists whose
@@ -39,4 +39,4 @@ class RawMap(var keys: IntBuf, var vals: IntBuf) {
 
 // @lang("map.new"): the {..} literal constructor. A fresh empty RawMap over two empty word-lists.
 @lang("map.new")
-fun rawMap(): RawMap { return RawMap(intBuf(), intBuf()) }
+fun map(): RawMap { return RawMap(list(), list()) }

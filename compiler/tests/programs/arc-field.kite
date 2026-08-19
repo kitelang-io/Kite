@@ -9,7 +9,7 @@ class Box(var item: Res) {
 }
 
 fun main(): Int {
-  val log = intBuf()
+  val log = list()
   log.push(0)
   val b = Box(Res(1, log))
   b.item = Res(2, log)

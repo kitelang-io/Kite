@@ -9,12 +9,12 @@ class Res(val id: Int, val log: IntBuf) {
 fun useIt(r: Res): Int { return r.id }
 
 fun main(): Int {
-  val log = intBuf()
+  val log = list()
   log.push(0)
   useIt(Res(1, log))
   useIt(Res(2, log))
   val afterBorrow = log.get(0)
-  val keep = intBuf()
+  val keep = list()
   keep.push(Res(3, log))
   val afterStore = log.get(0)
   return afterBorrow * 10 + afterStore

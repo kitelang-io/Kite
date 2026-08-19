@@ -1,4 +1,4 @@
-// lib/alloc/hashmap.kite — the monomorphized, insertion-ordered HashMap<K,V> (kite::alloc::hashmap), the
+// lib/alloc/collections/hashmap.kite — the monomorphized, insertion-ordered HashMap<K,V> (kite::alloc::collections::hashmap), the
 // Phase-7 hashed map. `@mono` makes it a TEMPLATE specialized per concrete (K,V): the key type's `hash`
 // and `==` are chosen at instantiation (String -> String_hash/String_eq content semantics, Int -> Int_hash
 // + machine compare), packed inline by sizeOf<K>()/sizeOf<V>() stride — direct calls, no by-type-id
@@ -10,10 +10,10 @@
 // `get` returns Option (miss = None, ending the silent-0), `getOr` the non-optional read. `remove`
 // compacts the entry vector (keeping order dense) and rebuilds the buckets, so iteration never sees a hole.
 //
-// Consumed via QUOTED includes (the @mono instantiation pass runs only on the flat/quoted pipeline).
+// Importable via `import kite::alloc::collections::hashmap` (the module pipeline runs the @mono instantiation pass).
 // Construct empty: `HashMap::<Int, String>(0, 0, 0, 0, 0, 0)`.
-import "lib/core/panic.kite"
-import "lib/core/hashable.kite"
+import kite::core::panic
+import kite::core::hashable
 
 // Storage words: n live entries; ecap entry-vector capacity; bcap bucket count (power of two, 0 until first
 // set); keys/vals packed entry buffers; buckets a word array of (entryIndex+1), 0 = empty slot.

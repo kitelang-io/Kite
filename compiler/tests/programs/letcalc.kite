@@ -19,7 +19,7 @@ fun isIdent(c: Int): Bool { return isAlpha(c) || isDigit(c) }
 
 // ---- lexer: String -> IntBuf<Tok> -------------------------------------------
 fun lex(src: String): IntBuf {
-  val toks = intBuf()
+  val toks = list()
   val n = src.len()
   var i = 0
   while (i < n) {
@@ -147,7 +147,7 @@ fun parseExpr(p: P): Int {
 
 // ---- program: `val NAME = expr`* then a final expression ------------------
 fun run(src: String): Int {
-  val env = Env(intBuf(), intBuf())
+  val env = Env(list(), list())
   val p = P(lex(src), 0, env)
   while (peekKind(p) == 10) { // 'val'
     advance(p) // consume 'val'

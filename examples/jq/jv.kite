@@ -41,7 +41,7 @@ fun arrGet(j: Json, i: Int): Option {
 
 // the stream `.[]` yields: an array's elements or an object's values, in insertion order (jq semantics).
 fun jsonValues(j: Json): IntBuf {
-  val out = intBuf()
+  val out = list()
   when (j) {
     JArr(xs) -> { for (x in xs) { out.push(x) } }
     JObj(es) -> { for (e in es) { out.push(entryValue(e)) } }

@@ -1,13 +1,13 @@
-// lib/alloc/deque.kite — the monomorphized, CoW value-semantics double-ended queue Deque<T>
-// (kite::alloc::deque), Phase-7. A growable ring buffer packed by sizeOf<T>() stride: O(1) push/pop at
+// lib/alloc/collections/deque.kite — the monomorphized, CoW value-semantics double-ended queue Deque<T>
+// (kite::alloc::collections::deque), Phase-7. A growable ring buffer packed by sizeOf<T>() stride: O(1) push/pop at
 // BOTH ends. `head` is the front index into the buffer; element i is at (head + i) mod cap. Growth doubles
 // the buffer and linearizes (front -> 0). popFront/popBack/first/last return Option (empty is valid);
 // get(i) panics on OOB. `@value`: the handle {n, cap, head, buf} is copied on bind and a writer
 // (pushBack/pushFront) clones the shared ring first (ensureUnique) so mutating a copy never corrupts the
-// original (STDLIB-REDESIGN §124). Consumed via QUOTED includes. Construct empty: `Deque::<Int>(0, 0, 0,
+// original (STDLIB-REDESIGN §124). Importable via `import kite::alloc::collections::deque`. Construct empty: `Deque::<Int>(0, 0, 0,
 // RawBuf(0))`.
-import "lib/core/panic.kite"
-import "lib/alloc/rawbuf.kite"
+import kite::core::panic
+import kite::alloc::collections::internal::rawbuf
 
 // n live count; cap ring capacity (0 until first push); head front index; buf the packed ring buffer.
 @mono

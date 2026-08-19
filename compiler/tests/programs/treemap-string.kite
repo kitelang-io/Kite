@@ -1,4 +1,4 @@
-import "lib/alloc/treemap.kite"
+import "lib/alloc/collections/treemap.kite"
 fun eqs(a: String, b: String): Bool { return a.eq(b) }
 fun main(): Int {
   var acc = 0

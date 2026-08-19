@@ -1,0 +1,93 @@
+// kite::core::char — the String-T1 char tier (§2c): UTF-8 encode/decode over the byte-oriented String,
+// plus ASCII classification, as extension methods. `Char` is `Int` (a 32-bit Unicode scalar) in both tiers;
+// the compiler's own `charAt`/`byteAt` stay byte-oriented, and these helpers are the explicit decode/encode
+// bridge to scalars. Convention-by-name: the bodies are the mangled `Int_`/`String_`/`StrBuilder_` methods,
+// so `lead.utf8SeqLen()` / `cp.charUtf8Len()` / `s.decodeUtf8At(i)` / `sb.encodeUtf8(cp)` / `s.utf8CharCount()`
+// and `c.isDigit()` / `c.toUpper()` resolve here via UFCS on the receiver's type.
+// Not in the default prelude (import kite::core::char to use them) — purely additive, zero self-host cost.
+//
+// The bodies call their siblings and the String queries by DIRECT name (Int_isUpper(c), String_byteAt(s,i))
+// rather than method sugar: a module-mangled free function is reached by its mangled name under a namespace
+// import while method dispatch resolves against the flat/global registry, so intra-module method sugar would
+// not bind (the same convention kite::core::string / kite::core::math follow internally).
+
+// Number of UTF-8 bytes in the sequence whose lead byte is `lead` (1..4; 1 for a continuation/invalid byte).
+fun Int_utf8SeqLen(lead: Int): Int {
+  if (lead < 128) { return 1 }
+  if (lead < 224) { return 2 }
+  if (lead < 240) { return 3 }
+  return 4
+}
+
+// Bytes needed to UTF-8 encode the scalar `cp`.
+fun Int_charUtf8Len(cp: Int): Int {
+  if (cp < 128) { return 1 }
+  if (cp < 2048) { return 2 }
+  if (cp < 65536) { return 3 }
+  return 4
+}
+
+// Decode the Unicode scalar starting at byte offset `i` of the byte-string `s`. The caller advances by
+// `String_byteAt(s, i).utf8SeqLen()`. Continuation bytes contribute their low 6 bits (b - 128). Byte access
+// goes through String_byteAt so this is representation-agnostic: T0 (`s` is the raw pointer) and T1 (`s` is
+// the boxed {len,data} — String_byteAt loads `s.data`) both decode correctly.
+fun String_decodeUtf8At(s: String, i: Int): Int {
+  val b = String_byteAt(s, i)
+  if (b < 128) { return b }
+  if (b < 224) {
+    return (b - 192) * 64 + (String_byteAt(s, i + 1) - 128)
+  }
+  if (b < 240) {
+    return (b - 224) * 4096 + (String_byteAt(s, i + 1) - 128) * 64 + (String_byteAt(s, i + 2) - 128)
+  }
+  return (b - 240) * 262144 + (String_byteAt(s, i + 1) - 128) * 4096 + (String_byteAt(s, i + 2) - 128) * 64 + (String_byteAt(s, i + 3) - 128)
+}
+
+// Append the UTF-8 encoding of the scalar `cp` onto a StrBuilder; returns the builder so pushes chain.
+// StrBuilder's pushByte is a struct method (global, NOT module-mangled), so it is reached via method sugar
+// on the `sb` receiver — the one internal call kept as `sb.push*` since a struct method has no free name.
+fun StrBuilder_encodeUtf8(sb: StrBuilder, cp: Int): StrBuilder {
+  if (cp < 128) { sb.pushByte(cp) }
+  else { if (cp < 2048) {
+      sb.pushByte(192 + (cp / 64))
+      sb.pushByte(128 + (cp - (cp / 64) * 64))
+    }
+    else { if (cp < 65536) {
+        sb.pushByte(224 + (cp / 4096))
+        sb.pushByte(128 + ((cp / 64) - (cp / 4096) * 64))
+        sb.pushByte(128 + (cp - (cp / 64) * 64))
+      }
+      else {
+        sb.pushByte(240 + (cp / 262144))
+        sb.pushByte(128 + ((cp / 4096) - (cp / 262144) * 64))
+        sb.pushByte(128 + ((cp / 64) - (cp / 4096) * 64))
+        sb.pushByte(128 + (cp - (cp / 64) * 64))
+      } } }
+  return sb
+}
+
+// Count the Unicode scalars in a UTF-8 byte-string (O(n), one step per lead byte).
+fun String_utf8CharCount(s: String): Int {
+  val n = String_len(s)
+  var i = 0
+  var count = 0
+  while (i < n) { i = i + Int_utf8SeqLen(String_byteAt(s, i)); count = count + 1 }
+  return count
+}
+
+// --- ASCII classification (the byte tier), as methods on the byte/scalar Int ---
+fun Int_isDigit(c: Int): Bool { return c >= 48 && c <= 57 }
+
+fun Int_isUpper(c: Int): Bool { return c >= 65 && c <= 90 }
+
+fun Int_isLower(c: Int): Bool { return c >= 97 && c <= 122 }
+
+fun Int_isAlpha(c: Int): Bool { return Int_isUpper(c) || Int_isLower(c) }
+
+fun Int_isAlnum(c: Int): Bool { return Int_isAlpha(c) || Int_isDigit(c) }
+
+fun Int_isSpace(c: Int): Bool { return c == 32 || c == 9 || c == 10 || c == 13 }
+
+fun Int_toUpper(c: Int): Int { if (Int_isLower(c)) { return c - 32 } return c }
+
+fun Int_toLower(c: Int): Int { if (Int_isUpper(c)) { return c + 32 } return c }

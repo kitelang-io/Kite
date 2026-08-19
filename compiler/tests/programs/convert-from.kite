@@ -1,25 +1,26 @@
-// Phase 3 regression: From/Into (lossless widening) + TryFrom (fallible narrowing -> Option).
-import kite::core::convert
+// Phase 3 regression: From/Into (lossless widening) + TryFrom (fallible narrowing -> Option), as
+// extension methods on the source type (x.toWiderN() / x.toNarrowerN()).
+import "lib/core/convert.kite"
 import kite::core::option
 
 fun main(): Int {
   var acc = 0
 
   // lossless unsigned widening preserves the value.
-  if (u16FromU8(200 as U8) == 200) { acc = acc + 1 }               // 1
-  if (u64FromU32(4294967295 as U32) == 4294967295) { acc = acc + 1 } // 2
+  if ((200 as U8).toU16() == 200) { acc = acc + 1 }               // 1
+  if ((4294967295 as U32).toU64() == 4294967295) { acc = acc + 1 } // 2
 
   // lossless signed widening preserves sign (0xFF as I8 = -1 stays -1).
-  if (i16FromI8(0xFF as I8) == (0 - 1)) { acc = acc + 1 }          // 3
-  if (i32FromI16(0x8000 as I16) == (0 - 32768)) { acc = acc + 1 }  // 4
+  if ((0xFF as I8).toI16() == (0 - 1)) { acc = acc + 1 }          // 3
+  if ((0x8000 as I16).toI32() == (0 - 32768)) { acc = acc + 1 }   // 4
 
   // TryFrom: in-range narrows to Some, out-of-range to None.
-  if (isSome(u8TryFromU16(200 as U16))) { acc = acc + 1 }          // 5
-  if (isNone(u8TryFromU16(300 as U16))) { acc = acc + 1 }          // 6
-  if (optGetOr(u8TryFromU16(200 as U16), 0) == 200) { acc = acc + 1 } // 7
-  if (isNone(u16TryFromU32(70000 as U32))) { acc = acc + 1 }       // 8
-  if (isSome(u32TryFromU64(4294967295 as U64))) { acc = acc + 1 }  // 9
-  if (isNone(u32TryFromU64((1u64 << 40)))) { acc = acc + 1 }       // 10
+  if (isSome((200 as U16).toU8())) { acc = acc + 1 }              // 5
+  if (isNone((300 as U16).toU8())) { acc = acc + 1 }              // 6
+  if (optGetOr((200 as U16).toU8(), 0) == 200) { acc = acc + 1 }  // 7
+  if (isNone((70000 as U32).toU16())) { acc = acc + 1 }           // 8
+  if (isSome((4294967295 as U64).toU32())) { acc = acc + 1 }      // 9
+  if (isNone(((1u64 << 40) as U64).toU32())) { acc = acc + 1 }    // 10
 
   return acc                                                        // 10
 }

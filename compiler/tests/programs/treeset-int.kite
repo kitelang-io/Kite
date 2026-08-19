@@ -1,4 +1,4 @@
-import "lib/alloc/treeset.kite"
+import "lib/alloc/collections/treeset.kite"
 fun main(): Int {
   var acc = 0
   val s = TreeSet::<Int>(0 - 1, 0, 0, 0, 0, 0, 0)

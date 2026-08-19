@@ -1,4 +1,4 @@
-import "lib/alloc/vec.kite"
+import "lib/alloc/collections/vec.kite"
 fun main(): Int {
   val v = Vec::<Int>(0, 0, RawBuf(0))
   v.push(10) v.push(20) v.push(30)

@@ -5,7 +5,7 @@ fun main(): Int {
   val ns = rangeList(6)
   val sq = ns.map({ n -> n * n })
   val s = sq.filter({ n -> n >= 9 }).sum()
-  val g = gcdI(48, 36)
-  val p = powI(2, 10)
+  val g = Int_gcd(48, 36)
+  val p = Int_pow(2, 10)
   return s + g + (p % 1000)
 }

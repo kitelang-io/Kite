@@ -57,7 +57,7 @@ fun parseValue(p: Parser): Json {
 
 fun parseArray(p: Parser): Json {
   bump(p) // '['
-  val xs = intBuf()
+  val xs = list()
   skipWs(p)
   if (peek(p) == 93) { bump(p) return JArr(xs) } // empty ']'
   var go = true
@@ -72,7 +72,7 @@ fun parseArray(p: Parser): Json {
 
 fun parseObject(p: Parser): Json {
   bump(p) // '{'
-  val es = intBuf()
+  val es = list()
   skipWs(p)
   if (peek(p) == 125) { bump(p) return JObj(es) } // empty '}'
   var go = true

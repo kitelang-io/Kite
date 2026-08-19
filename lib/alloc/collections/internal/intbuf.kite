@@ -1,4 +1,4 @@
-// lib/alloc/collections/list.kite — the language-primitive IntBuf (kite::alloc::collections::list).
+// lib/alloc/collections/internal/intbuf.kite — the language-primitive IntBuf (kite::alloc::collections::internal::intbuf).
 // The growable word-list {len@0, cap@8, data@16} that backs the [..] literal, built on the compiler
 // raw-memory intrinsics. In alloc because it OWNS a heap allocation; a sibling of vec/map (RawMap lives in
 // the sibling map module). Following Kotlin, a type's convention methods (the desugar landing points)
@@ -26,7 +26,7 @@ class IntBuf(var n: Int, var cap: Int, var data: Int) {
   @lang("map.putList")
   fun push(self, x: consuming Int): Int {
     // grow-if-full. Guard cap==0 explicitly: 0*2 is still 0, so a lazily-allocated (cap 0) IntBuf would
-    // realloc 0 bytes and write OOB at offset 0, then never grow (n==cap forever). Today intBuf() starts
+    // realloc 0 bytes and write OOB at offset 0, then never grow (n==cap forever). Today list() starts
     // cap at 4 so this can't happen, but the guard keeps push correct if a cap-0 constructor is added.
     if (self.n == self.cap) {
       if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
@@ -53,8 +53,8 @@ class IntBuf(var n: Int, var cap: Int, var data: Int) {
   // The element type is the erased machine word (Int); the closure params carry function types so the
   // parser records the real RETURN type (an untyped last param would absorb it), which makes chaining
   // like `xs.map(f).sum()` resolve the receiver correctly.
-  fun map(self, f: (Int) -> Int): IntBuf { val out = intBuf() var i = 0 while (i < self.n) { out.push(f(self.get(i))) i = i + 1 } return out }
-  fun filter(self, pred: (Int) -> Bool): IntBuf { val out = intBuf() var i = 0 while (i < self.n) { val x = self.get(i) if (pred(x)) { out.push(x) } i = i + 1 } return out }
+  fun map(self, f: (Int) -> Int): IntBuf { val out = list() var i = 0 while (i < self.n) { out.push(f(self.get(i))) i = i + 1 } return out }
+  fun filter(self, pred: (Int) -> Bool): IntBuf { val out = list() var i = 0 while (i < self.n) { val x = self.get(i) if (pred(x)) { out.push(x) } i = i + 1 } return out }
   fun fold(self, acc: Int, f: (Int, Int) -> Int): Int { var a = acc var i = 0 while (i < self.n) { a = f(a, self.get(i)) i = i + 1 } return a }
   // find returns a std Option<elem> (kite::core::option, in the prelude) — Some(x) for the first match, else None.
   fun find(self, pred: (Int) -> Bool): Option { var i = 0 while (i < self.n) { val x = self.get(i) if (pred(x)) { return Some(x) } i = i + 1 } return None }
@@ -62,9 +62,9 @@ class IntBuf(var n: Int, var cap: Int, var data: Int) {
 }
 
 @lang("list.new")
-fun intBuf(): IntBuf { return IntBuf(0, 4, __rawAlloc(4 * 8)) }
+fun list(): IntBuf { return IntBuf(0, 4, __rawAlloc(4 * 8)) }
 
-// rangeList(n) — the list [0, 1, .., n-1]. A top-level IntBuf factory (no receiver), sibling to intBuf().
-fun rangeList(n: Int): IntBuf { val out = intBuf() var i = 0 while (i < n) { out.push(i) i = i + 1 } return out }
+// rangeList(n) — the list [0, 1, .., n-1]. A top-level IntBuf factory (no receiver), sibling to list().
+fun rangeList(n: Int): IntBuf { val out = list() var i = 0 while (i < n) { out.push(i) i = i + 1 } return out }
 
-// RawMap moved to its own prelude module (kite::alloc::collections::map) as a method-ified class.
+// RawMap moved to its own prelude module (kite::alloc::collections::internal::rawmap) as a method-ified class.

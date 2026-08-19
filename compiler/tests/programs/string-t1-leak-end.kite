@@ -1,0 +1,29 @@
+// String-T1 (Phase 9) leak-end proof. Under the T0 primitive String, every string allocation (concat,
+// substr, intToStr, a literal binding) leaked forever — @arc(manual), never freed. Under T1, String is a
+// real ref-counted class whose `deinit { __rawFree(data) }` runs on the last release, so a String local is
+// freed at scope exit. This asserts that freeing actually happens, with an exit code (no leak detector needed).
+//
+// probeAlloc allocates a boxed String local, captures its data pointer, and returns just the number. The
+// String is released when probeAlloc returns -> refcount 0 -> deinit -> __rawFree(data). Because macOS's
+// small-block allocator hands back the most-recently-freed same-size block (LIFO free list), a subsequent
+// same-size allocation reuses that exact address: the captured pointer STAYS STABLE across iterations iff the
+// buffer was really freed each time. Had it leaked, the allocator would climb to fresh addresses every call.
+fun probeAlloc(): Int {
+  val s = "abcdefgh"
+  val d = s.data
+  return d
+}
+
+fun main(): Int {
+  var prev = 0
+  var stable = 1
+  var i = 0
+  while (i < 4000) {
+    val p = probeAlloc()
+    if (i > 2) { if (p != prev) { stable = 0 } }
+    prev = p
+    i = i + 1
+  }
+  // 0 = every String's data buffer was freed (leak ended); 1 = the pointer climbed (still leaking).
+  return if (stable == 1) { 0 } else { 1 }
+}

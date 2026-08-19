@@ -1,4 +1,4 @@
-import "lib/alloc/hashmap.kite"
+import "lib/alloc/collections/hashmap.kite"
 fun main(): Int {
   var acc = 0
   val m = HashMap::<String, Int>(0, 0, 0, 0, 0, 0)

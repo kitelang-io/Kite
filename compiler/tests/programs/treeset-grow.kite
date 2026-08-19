@@ -3,7 +3,7 @@
 // stale-base-pointer store hazard used to orphan the node whose add forced the realloc, so
 // size() over-counted while contains missed the orphans. Assert every element is present AND the
 // in-order walk (min+higher) visits exactly size() elements. Exit 3 on full success.
-import "lib/alloc/treeset.kite"
+import "lib/alloc/collections/treeset.kite"
 fun main(): Int {
   var acc = 0
   val s = TreeSet::<Int>(0 - 1, 0, 0, 0, 0, 0, 0)

@@ -1,10 +1,10 @@
-// lib/alloc/array.kite — the monomorphized, CoW value-semantics fixed-length Array<T> (kite::alloc::array),
+// lib/alloc/collections/array.kite — the monomorphized, CoW value-semantics fixed-length Array<T> (kite::alloc::collections::array),
 // Phase-7. A packed, bounds-checked, fixed-`len` buffer. Storage packs by sizeOf<T>() stride. `@value`:
 // the handle {n, buf} is copied on bind and a writer (set/fill) clones the shared RawBuf first
 // (ensureUnique), so mutating a copy never corrupts the original (STDLIB-REDESIGN §124). `get`/`set`
 // panic on an out-of-range index. Construct: `Array::<Int>(n, RawBuf(__rawAlloc(n * sizeOf::<Int>())))`.
-import "lib/core/panic.kite"
-import "lib/alloc/rawbuf.kite"
+import kite::core::panic
+import kite::alloc::collections::internal::rawbuf
 
 @mono
 @value

@@ -1,0 +1,21 @@
+// String-T1 literal escapes: \xNN (a raw byte) and \u{H...} (a Unicode scalar, UTF-8 encoded).
+// Char literals decode at lex time to a code point (Char is a 32-bit scalar = Int); string literals
+// decode in the backend's strBytesK to the emitted __cstring bytes. Each check contributes a distinct
+// bit so any wrong decode changes the exit code. All-pass -> 255.
+fun main(): Int {
+  var acc = 0
+  // --- char literals (decoded in kfront.lexChar) ---
+  if ('\x41' == 65) { acc = acc + 1 }         // \xNN hex byte -> 'A'
+  if ('\u{7A}' == 122) { acc = acc + 2 }       // \u{..} -> 'z'
+  if ('\u{1F600}' == 128512) { acc = acc + 4 } // astral code point stays a 32-bit scalar
+  // --- string \x (decoded in arm64.strBytesK) ---
+  val s = "\x41\x42"
+  if (s.len() == 2) { acc = acc + 8 }
+  if (s.charAt(0) == 65) { acc = acc + 16 }
+  if (s.charAt(1) == 66) { acc = acc + 32 }
+  // --- string \u multi-byte UTF-8: U+20AC (euro) -> E2 82 AC ---
+  val e = "\u{20AC}"
+  if (e.len() == 3) { acc = acc + 64 }
+  if (e.charAt(0) == 226 && e.charAt(1) == 130 && e.charAt(2) == 172) { acc = acc + 128 }
+  return acc // 255 iff every escape decoded correctly
+}
