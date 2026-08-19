@@ -99,14 +99,14 @@ fun encode(i: Instr): Int {
 fun adrWord(d: Int, rel: Int): Int { return w32(0x10000000 | ((rel & 3) << 29) | (((rel >> 2) & 0x7ffff) << 5) | d) }
 
 // ---- two-pass assembler: a labeled Instr list -> machine words -------------
-struct LabelMap(val names: List, val offs: List)
+struct LabelMap(val names: IntBuf, val offs: IntBuf)
 
 fun isWordI(i: Instr): Bool { return when (i) { ILabel(nm) -> false; else -> true } }
 
 // pass 1: byte offset of each label
-fun buildLabels(instrs: List): LabelMap {
-  val names = list()
-  val offs = list()
+fun buildLabels(instrs: IntBuf): LabelMap {
+  val names = intBuf()
+  val offs = intBuf()
   var off = 0
   var i = 0
   while (i < instrs.len()) {
@@ -140,9 +140,9 @@ fun encodeAt(i: Instr, here: Int, lm: LabelMap): Int {
 }
 
 // pass 2: encode every word-producing instruction (labels resolved)
-fun assemble(instrs: List): List {
+fun assemble(instrs: IntBuf): IntBuf {
   val lm = buildLabels(instrs)
-  val words = list()
+  val words = intBuf()
   var here = 0
   var i = 0
   while (i < instrs.len()) {
@@ -168,9 +168,9 @@ fun encodeAtExe(i: Instr, here: Int, lm: LabelMap): Int {
   }
 }
 
-fun assembleExe(instrs: List): List {
+fun assembleExe(instrs: IntBuf): IntBuf {
   val lm = buildLabels(instrs)
-  val words = list()
+  val words = intBuf()
   var here = 0
   var i = 0
   while (i < instrs.len()) {
@@ -181,17 +181,17 @@ fun assembleExe(instrs: List): List {
   return words
 }
 
-fun entryOffset(instrs: List, sym: String): Int { return findLabel(buildLabels(instrs), sym) }
+fun entryOffset(instrs: IntBuf, sym: String): Int { return findLabel(buildLabels(instrs), sym) }
 
 // ---- relocation-tracking assembly: words + relocs (for the boxed/import path) --
 struct Reloc(val off: Int, val sym: String, val kind: Int) // kind 0=BR26 1=PAGE21 2=PAGEOFF12
 
-struct AsmR(val words: List, val relocs: List)
+struct AsmR(val words: IntBuf, val relocs: IntBuf)
 
-fun assembleReloc(instrs: List): AsmR {
+fun assembleReloc(instrs: IntBuf): AsmR {
   val lm = buildLabels(instrs)
-  val words = list()
-  val relocs = list()
+  val words = intBuf()
+  val relocs = intBuf()
   var here = 0
   var i = 0
   while (i < instrs.len()) {
@@ -215,15 +215,15 @@ fun assembleReloc(instrs: List): AsmR {
   return AsmR(words, relocs)
 }
 
-fun idxOfStr(l: List, s: String): Int {
+fun idxOfStr(l: IntBuf, s: String): Int {
   var i = 0
   while (i < l.len()) { val e: String = l.get(i); if (e == s) { return i }; i = i + 1 }
   return 0
 }
 
 // unique external (undefined) BR26 symbols, in first-appearance order
-fun externalsOf(relocs: List): List {
-  val out = list()
+fun externalsOf(relocs: IntBuf): IntBuf {
+  val out = intBuf()
   var i = 0
   while (i < relocs.len()) {
     val r: Reloc = relocs.get(i)
@@ -233,16 +233,16 @@ fun externalsOf(relocs: List): List {
   return out
 }
 
-fun idxOfStr2(l: List, s: String): Int {
+fun idxOfStr2(l: IntBuf, s: String): Int {
   var i = 0
   while (i < l.len()) { val e: String = l.get(i); if (e == s) { return i }; i = i + 1 }
   return 0 - 1
 }
 
 // ---- __cstring section: fixed printf formats + interned user strings --------
-struct CstrSec(val bytes: List, val labN: List, val labOff: List)
+struct CstrSec(val bytes: IntBuf, val labN: IntBuf, val labOff: IntBuf)
 
-fun addC(bytes: List, labN: List, labOff: List, label: String, sb: List): Int {
+fun addC(bytes: IntBuf, labN: IntBuf, labOff: IntBuf, label: String, sb: IntBuf): Int {
   labN.push(label); labOff.push(bytes.len())
   var i = 0
   while (i < sb.len()) { bytes.push(sb.get(i)); i = i + 1 }
@@ -250,8 +250,8 @@ fun addC(bytes: List, labN: List, labOff: List, label: String, sb: List): Int {
   return 0
 }
 
-fun buildCstr(cstrN: List, cstrV: List): CstrSec {
-  val bytes = list(); val labN = list(); val labOff = list()
+fun buildCstr(cstrN: IntBuf, cstrV: IntBuf): CstrSec {
+  val bytes = intBuf(); val labN = intBuf(); val labOff = intBuf()
   addC(bytes, labN, labOff, "Lfmt_println", strBytesK("%ld\n"))
   addC(bytes, labN, labOff, "Lfmt_print", strBytesK("%ld"))
   addC(bytes, labN, labOff, "Lfmt_println_s", strBytesK("%s\n"))
@@ -283,7 +283,7 @@ fun chk(name: String, got: Int, want: String): Int {
 }
 
 // compile a program (list of Func) to words, and diff against an expected hex list
-fun checkProg(name: String, funcs: List, want: List): Int {
+fun checkProg(name: String, funcs: IntBuf, want: IntBuf): Int {
   val words = assemble(genProgram(funcs))
   var fails = 0
   if (words.len() != want.len()) {
@@ -304,8 +304,8 @@ fun checkProg(name: String, funcs: List, want: List): Int {
   return fails
 }
 
-fun splitWords(s: String): List {
-  val out = list()
+fun splitWords(s: String): IntBuf {
+  val out = intBuf()
   val n = s.len()
   var i = 0
   var start = 0
@@ -332,9 +332,9 @@ fun parseHexK(s: String): Int {
   return v
 }
 
-fun hexListK(s: String): List {
+fun hexListK(s: String): IntBuf {
   val parts = splitWords(s)
-  val out = list()
+  val out = intBuf()
   var i = 0
   while (i < parts.len()) { out.push(parseHexK(parts.get(i))); i = i + 1 }
   return out
@@ -356,10 +356,10 @@ fun ssig1(x: Int): Int { return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10) }
 
 fun add32(a: Int, b: Int): Int { return (a + b) & 0xffffffff }
 
-fun sha256H(msg: List): List {
+fun sha256H(msg: IntBuf): IntBuf {
   val K = hexListK("428a2f98 71374491 b5c0fbcf e9b5dba5 3956c25b 59f111f1 923f82a4 ab1c5ed5 d807aa98 12835b01 243185be 550c7dc3 72be5d74 80deb1fe 9bdc06a7 c19bf174 e49b69c1 efbe4786 0fc19dc6 240ca1cc 2de92c6f 4a7484aa 5cb0a9dc 76f988da 983e5152 a831c66d b00327c8 bf597fc7 c6e00bf3 d5a79147 06ca6351 14292967 27b70a85 2e1b2138 4d2c6dfc 53380d13 650a7354 766a0abb 81c2c92e 92722c85 a2bfe8a1 a81a664b c24b8b70 c76c51a3 d192e819 d6990624 f40e3585 106aa070 19a4c116 1e376c08 2748774c 34b0bcb5 391c0cb3 4ed8aa4a 5b9cca4f 682e6ff3 748f82ee 78a5636f 84c87814 8cc70208 90befffa a4506ceb bef9a3f7 c67178f2")
   val H = hexListK("6a09e667 bb67ae85 3c6ef372 a54ff53a 510e527f 9b05688c 1f83d9ab 5be0cd19")
-  val data = list()
+  val data = intBuf()
   var i = 0
   val len = msg.len()
   while (i < len) { data.push(msg.get(i)); i = i + 1 }
@@ -372,7 +372,7 @@ fun sha256H(msg: List): List {
   var blk = 0
   while (blk < nblocks) {
     val base = blk * 64
-    val W = list()
+    val W = intBuf()
     var t = 0
     while (t < 16) {
       val o = base + t * 4
@@ -409,43 +409,43 @@ fun sha256H(msg: List): List {
   return H
 }
 
-fun u8(b: List, v: Int): Int { b.push(v & 0xff); return 0 }
+fun u8(b: IntBuf, v: Int): Int { b.push(v & 0xff); return 0 }
 
-fun u16(b: List, v: Int): Int { u8(b, v); u8(b, v >> 8); return 0 }
+fun u16(b: IntBuf, v: Int): Int { u8(b, v); u8(b, v >> 8); return 0 }
 
-fun u32b(b: List, v: Int): Int { u8(b, v); u8(b, v >> 8); u8(b, v >> 16); u8(b, v >> 24); return 0 }
+fun u32b(b: IntBuf, v: Int): Int { u8(b, v); u8(b, v >> 8); u8(b, v >> 16); u8(b, v >> 24); return 0 }
 
-fun u64b(b: List, v: Int): Int { u32b(b, v & 0xffffffff); u32b(b, (v >> 32) & 0xffffffff); return 0 }
+fun u64b(b: IntBuf, v: Int): Int { u32b(b, v & 0xffffffff); u32b(b, (v >> 32) & 0xffffffff); return 0 }
 
-fun be32(b: List, v: Int): Int { u8(b, v >> 24); u8(b, v >> 16); u8(b, v >> 8); u8(b, v); return 0 }
+fun be32(b: IntBuf, v: Int): Int { u8(b, v >> 24); u8(b, v >> 16); u8(b, v >> 8); u8(b, v); return 0 }
 
-fun be64(b: List, v: Int): Int { be32(b, (v >> 32) & 0xffffffff); be32(b, v & 0xffffffff); return 0 }
+fun be64(b: IntBuf, v: Int): Int { be32(b, (v >> 32) & 0xffffffff); be32(b, v & 0xffffffff); return 0 }
 
-fun writeStrB(b: List, s: String): Int { var i = 0; while (i < s.len()) { u8(b, s.charAt(i)); i = i + 1 }; return 0 }
+fun writeStrB(b: IntBuf, s: String): Int { var i = 0; while (i < s.len()) { u8(b, s.charAt(i)); i = i + 1 }; return 0 }
 
-fun fixedB(b: List, n: Int, s: String): Int {
+fun fixedB(b: IntBuf, n: Int, s: String): Int {
   writeStrB(b, s)
   var i = s.len()
   while (i < n) { u8(b, 0); i = i + 1 }
   return 0
 }
 
-fun padToB(b: List, target: Int): Int { while (b.len() < target) { u8(b, 0) }; return 0 }
+fun padToB(b: IntBuf, target: Int): Int { while (b.len() < target) { u8(b, 0) }; return 0 }
 
 fun alignUp(n: Int, a: Int): Int { return ((n + a - 1) / a) * a }
 
-fun subBytes(l: List, start: Int, len: Int): List {
-  val out = list()
+fun subBytes(l: IntBuf, start: Int, len: Int): IntBuf {
+  val out = intBuf()
   var i = 0
   while (i < len) { out.push(l.get(start + i)); i = i + 1 }
   return out
 }
 
-fun strBytesK(s: String): List {
+fun strBytesK(s: String): IntBuf {
   // Unescape backslash sequences to raw bytes, matching Fledge's lexer exactly
   // (\n \t \r \\ \" \$ \0). A string value carrying a real byte (Fledge already
   // unescaped) has no backslash, so it passes through — both stages converge.
-  val out = list()
+  val out = intBuf()
   var i = 0
   val n = s.len()
   while (i < n) {
@@ -466,7 +466,7 @@ fun strBytesK(s: String): List {
   return out
 }
 
-fun buildExe(words: List, entryOff: Int, symName: String, ident: String): List {
+fun buildExe(words: IntBuf, entryOff: Int, symName: String, ident: String): IntBuf {
   val vmpage = 0x4000
   val textBase = 0x100000000
   val nwords = words.len()
@@ -496,7 +496,7 @@ fun buildExe(words: List, entryOff: Int, symName: String, ident: String): List {
   val entryoff = textOff + entryOff
   val linkeditFilesize = (sigStart + superLen) - linkeditFileoff
   val linkeditVmsize = alignUp(linkeditFilesize, vmpage)
-  val b = list()
+  val b = intBuf()
   u32b(b, 0xFEEDFACF); u32b(b, 0x0100000C); u32b(b, 0); u32b(b, 0x2)
   u32b(b, ncmds); u32b(b, sizeofcmds); u32b(b, 0x00200085); u32b(b, 0)
   u32b(b, 0x19); u32b(b, 72); fixedB(b, 16, "__PAGEZERO")
@@ -542,7 +542,7 @@ fun buildExe(words: List, entryOff: Int, symName: String, ident: String): List {
   u8(b, 0); writeStrB(b, symName); u8(b, 0)
   padToB(b, stroff + strsize)
   padToB(b, sigStart)
-  val hashes = list()
+  val hashes = intBuf()
   var p = 0
   while (p < ncodeslots) {
     val start = p * 4096
@@ -553,7 +553,7 @@ fun buildExe(words: List, entryOff: Int, symName: String, ident: String): List {
     while (k < 8) { be32(hashes, hval.get(k)); k = k + 1 }
     p = p + 1
   }
-  val cd = list()
+  val cd = intBuf()
   be32(cd, 0xfade0c02); be32(cd, cdLen); be32(cd, 0x00020400); be32(cd, 0x00000002)
   be32(cd, cdHashoffset); be32(cd, 88); be32(cd, 0); be32(cd, ncodeslots)
   be32(cd, codeLimit); u8(cd, 32); u8(cd, 2); u8(cd, 0); u8(cd, 12)
@@ -568,7 +568,7 @@ fun buildExe(words: List, entryOff: Int, symName: String, ident: String): List {
   return b
 }
 
-fun writeBytes(path: String, bytes: List): Int {
+fun writeBytes(path: String, bytes: IntBuf): Int {
   val fp = fopenW(path)
   var i = 0
   while (i < bytes.len()) { fputByte(bytes.get(i), fp); i = i + 1 }
@@ -579,7 +579,7 @@ fun writeBytes(path: String, bytes: List): Int {
 // full Mach-O writer: handles cstring relocations (PAGE21/PAGEOFF12) and libc
 // imports (BR26 -> __stubs -> __got, dyld chained-fixup binds). nimp=0 collapses
 // to the no-import layout. `words` = user code words (patched + stubs appended).
-fun buildExeFull(words: List, relocs: List, cs: CstrSec, externals: List, entryOff: Int, symName: String, ident: String): List {
+fun buildExeFull(words: IntBuf, relocs: IntBuf, cs: CstrSec, externals: IntBuf, entryOff: Int, symName: String, ident: String): IntBuf {
   val vmpage = 0x4000
   val textBase = 0x100000000
   val nimp = externals.len()
@@ -643,14 +643,14 @@ fun buildExeFull(words: List, relocs: List, cs: CstrSec, externals: List, entryO
   val strsize = alignUp(1 + symName.len() + 1, 8)
   val nsyms = 1
   // chained fixups payload
-  val cf = list()
+  val cf = intBuf()
   if (hasData == false) {
     u32b(cf, 0); u32b(cf, 0x20); u32b(cf, 0x30); u32b(cf, 0x30)
     u32b(cf, 0); u32b(cf, 1); u32b(cf, 0); u32b(cf, 0)
     u32b(cf, 3); u32b(cf, 0); u32b(cf, 0); u32b(cf, 0); u32b(cf, 0); u32b(cf, 0)
   } else {
-    val pool = list(); pool.push(0)
-    val poolOff = list()
+    val pool = intBuf(); pool.push(0)
+    val poolOff = intBuf()
     var pi = 0
     while (pi < nimp) {
       poolOff.push(pool.len())
@@ -691,7 +691,7 @@ fun buildExeFull(words: List, relocs: List, cs: CstrSec, externals: List, entryO
   if (hasData) { linkeditVmaddr = dataconstVmaddr + dataconstVmsize }
   val entryoff = textOff + entryOff
 
-  val b = list()
+  val b = intBuf()
   u32b(b, 0xFEEDFACF); u32b(b, 0x0100000C); u32b(b, 0); u32b(b, 0x2)
   u32b(b, ncmds); u32b(b, sizeofcmds); u32b(b, 0x00200085); u32b(b, 0)
   u32b(b, 0x19); u32b(b, 72); fixedB(b, 16, "__PAGEZERO")
@@ -754,7 +754,7 @@ fun buildExeFull(words: List, relocs: List, cs: CstrSec, externals: List, entryO
   u8(b, 0); writeStrB(b, symName); u8(b, 0)
   padToB(b, stroff + strsize)
   padToB(b, sigStart)
-  val hashes = list()
+  val hashes = intBuf()
   var p = 0
   while (p < ncodeslots) {
     val start = p * 4096
@@ -764,7 +764,7 @@ fun buildExeFull(words: List, relocs: List, cs: CstrSec, externals: List, entryO
     var k = 0; while (k < 8) { be32(hashes, hval.get(k)); k = k + 1 }
     p = p + 1
   }
-  val cd = list()
+  val cd = intBuf()
   be32(cd, 0xfade0c02); be32(cd, cdLen); be32(cd, 0x00020400); be32(cd, 0x00000002)
   be32(cd, 88 + identLen); be32(cd, 88); be32(cd, 0); be32(cd, ncodeslots)
   be32(cd, codeLimit); u8(cd, 32); u8(cd, 2); u8(cd, 0); u8(cd, 12)

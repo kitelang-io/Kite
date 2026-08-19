@@ -14,13 +14,13 @@ fun main(): Int {
   var acc = 0
 
   // Vec<Int> stored in a STRUCT field, method called through the field.
-  val a = Vec::<Int>(0, 4, __rawAlloc(4 * sizeOf::<Int>()))
+  val a = Vec::<Int>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<Int>())))
   a.push(77)
   val sb = SBox(a)
   if (sb.v.get(0) == 77) { acc = acc + 1 }           // 1
 
   // Vec<U16> STRUCT field: packed stride-2 storage survives being stored in the field.
-  val b = Vec::<U16>(0, 4, __rawAlloc(4 * sizeOf::<U16>()))
+  val b = Vec::<U16>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<U16>())))
   b.push(300)
   b.push(70000)                                       // 70000 & 0xffff = 4464
   val wb = WBox(b)
@@ -32,7 +32,7 @@ fun main(): Int {
   if (w.get(1) == 4464) { acc = acc + 1 }             // 4
 
   // Vec<Int> stored in a CLASS field, method called through the field.
-  val c = Vec::<Int>(0, 4, __rawAlloc(4 * sizeOf::<Int>()))
+  val c = Vec::<Int>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<Int>())))
   c.push(31)
   val cb = CBox(c)
   if (cb.v.get(0) == 31) { acc = acc + 1 }            // 5

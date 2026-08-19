@@ -1,0 +1,25 @@
+// Regression: TreeSet must not lose elements once it grows past its initial 8-node arena.
+// Descending insert of 100 distinct elements forces cap doublings (8->16->32->64->128); the
+// stale-base-pointer store hazard used to orphan the node whose add forced the realloc, so
+// size() over-counted while contains missed the orphans. Assert every element is present AND the
+// in-order walk (min+higher) visits exactly size() elements. Exit 3 on full success.
+import "lib/alloc/treeset.kite"
+fun main(): Int {
+  var acc = 0
+  val s = TreeSet::<Int>(0 - 1, 0, 0, 0, 0, 0, 0)
+  var i = 100
+  while (i >= 1) { s.add(i) i = i - 1 }
+  var present = 0
+  i = 1
+  while (i <= 100) { if (s.contains(i)) { present = present + 1 } i = i + 1 }
+  if (s.size() == 100) { acc = acc + 1 }
+  if (present == 100) { acc = acc + 1 }
+  var walked = 0
+  var cur = s.min()
+  var go = 1
+  while (go == 1) {
+    when (cur) { Some(x) -> { walked = walked + 1 cur = s.higher(x) }; None -> { go = 0 } }
+  }
+  if (walked == 100) { acc = acc + 1 }
+  return acc
+}

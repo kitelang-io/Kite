@@ -1,7 +1,7 @@
 // ARC on CLASS-TYPED FIELD STORES: `box.item = new` must release the old field value and keep the new
 // one at +1 (fresh ctor). Two overwrites => the two overwritten Res objects get deinit'd => log[0]==2
 // at the read, before the enclosing Box is released. Returns 2*10 + 3 = 23.
-class Res(val id: Int, val log: List) {
+class Res(val id: Int, val log: IntBuf) {
   deinit { self.log.set(0, self.log.get(0) + 1) }
 }
 
@@ -9,7 +9,7 @@ class Box(var item: Res) {
 }
 
 fun main(): Int {
-  val log = list()
+  val log = intBuf()
   log.push(0)
   val b = Box(Res(1, log))
   b.item = Res(2, log)

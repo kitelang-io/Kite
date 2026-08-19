@@ -58,13 +58,22 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/map-class.kite:166
        compiler/tests/programs/operator-overload.kite:210 compiler/tests/programs/string-methods.kite:114
        compiler/tests/programs/bool-not-call.kite:7
+       compiler/tests/programs/question-operator.kite:117
+       compiler/tests/programs/for-in-seq.kite:233
+       compiler/tests/programs/panic-assert.kite:42
        compiler/tests/programs/big-frame-later-globals.kite:42
        compiler/tests/programs/untyped-param-retty.kite:5
        compiler/tests/programs/sized-arrays.kite:12
        compiler/tests/programs/unsigned-ops.kite:7 compiler/tests/programs/cast-as.kite:11 compiler/tests/programs/to-float.kite:5 compiler/tests/programs/overflow-family.kite:16 compiler/tests/programs/convert-from.kite:10
        compiler/tests/programs/derive.kite:18 compiler/tests/programs/derive-enum.kite:20
        compiler/tests/programs/strbuilder.kite:10
-       compiler/tests/programs/mono-vec.kite:12 compiler/tests/programs/mono-vec-field.kite:5 compiler/tests/programs/mono-vec-return.kite:7)
+       compiler/tests/programs/mono-vec.kite:12 compiler/tests/programs/mono-vec-field.kite:5 compiler/tests/programs/mono-vec-return.kite:7
+       compiler/tests/programs/vec-collection.kite:10 compiler/tests/programs/hashmap-int.kite:12 compiler/tests/programs/hashmap-string.kite:9
+       compiler/tests/programs/treemap-int.kite:13 compiler/tests/programs/treemap-string.kite:6
+       compiler/tests/programs/treemap-grow.kite:3 compiler/tests/programs/treeset-grow.kite:3
+       compiler/tests/programs/hashset-int.kite:11 compiler/tests/programs/treeset-int.kite:9
+       compiler/tests/programs/array-int.kite:6 compiler/tests/programs/deque-int.kite:11
+       compiler/tests/programs/collections-cow.kite:14)
 for t in $TESTS; do
   if check "${t%:*}" "${t##*:}"; then pass=$((pass+1)); else fail=$((fail+1)); fi
 done

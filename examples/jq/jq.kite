@@ -1,7 +1,7 @@
 // jq.kite — the jq query language (a subset): lexing + parsing to a filter list, then evaluation.
 // jq's real engine (src/lexer.l + src/parser.y compile to bytecode run by src/execute.c) is a stack VM;
 // this port keeps the same surface language but evaluates by tree-walking a list of filters, where each
-// filter maps one input value to a STREAM of outputs (a List<Json>) and `|` flat-maps the pipeline.
+// filter maps one input value to a STREAM of outputs (a IntBuf<Json>) and `|` flat-maps the pipeline.
 //
 // Supported: `.` (identity), `.field`, `.a.b`, `.[N]` (index, negatives from the end), `.[]`/`[]`
 // (iterate), `|` (pipe), and the builtins `length`, `keys`, `add`.
@@ -11,7 +11,7 @@ import "examples/jq/builtin.kite"
 
 enum Filter { FIdentity; FField(String); FIndex(Int); FIterate; FLength; FKeys; FAdd }
 
-// ---------------- lex + parse: query text -> List<Filter> ----------------
+// ---------------- lex + parse: query text -> IntBuf<Filter> ----------------
 struct QParser(val src: String, var pos: Int)
 
 fun qpeek(p: QParser): Int { if (p.pos >= p.src.len()) { return 0 - 1 } return p.src.charAt(p.pos) }
@@ -34,7 +34,7 @@ fun readInt(p: QParser): Int {
   return if (neg) { 0 - n } else { n }
 }
 
-fun parseBracket(p: QParser, out: List): Int {
+fun parseBracket(p: QParser, out: IntBuf): Int {
   qbump(p) // '['
   if (qpeek(p) == 93) { qbump(p) out.push(FIterate) return 0 } // '[]'
   val n = readInt(p)
@@ -43,7 +43,7 @@ fun parseBracket(p: QParser, out: List): Int {
   return 0
 }
 
-fun pushWord(out: List, w: String): Int {
+fun pushWord(out: IntBuf, w: String): Int {
   if (w == "length") { out.push(FLength) }
   else { if (w == "keys") { out.push(FKeys) }
     else { if (w == "add") { out.push(FAdd) }
@@ -51,8 +51,8 @@ fun pushWord(out: List, w: String): Int {
   return 0
 }
 
-fun parseQuery(src: String): List {
-  val filters = list()
+fun parseQuery(src: String): IntBuf {
+  val filters = intBuf()
   val p = QParser(src, 0)
   var go = true
   while (go) {
@@ -75,8 +75,8 @@ fun parseQuery(src: String): List {
 
 // ---------------- evaluation ----------------
 // apply ONE filter to ONE input value, producing a stream (0+ outputs).
-fun applyFilter(f: Filter, input: Json): List {
-  val out = list()
+fun applyFilter(f: Filter, input: Json): IntBuf {
+  val out = intBuf()
   when (f) {
     FIdentity -> out.push(input)
     FField(name) -> when (objGet(input, name)) { Some(v) -> out.push(v) None -> out.push(JNull) }
@@ -90,11 +90,11 @@ fun applyFilter(f: Filter, input: Json): List {
 }
 
 // run the pipeline: start with [root], then flat-map each filter across the whole stream.
-fun runQuery(filters: List, root: Json): List {
-  var stream = list()
+fun runQuery(filters: IntBuf, root: Json): IntBuf {
+  var stream = intBuf()
   stream.push(root)
   for (f in filters) {
-    val next = list()
+    val next = intBuf()
     for (v in stream) { for (o in applyFilter(f, v)) { next.push(o) } }
     stream = next
   }

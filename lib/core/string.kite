@@ -115,7 +115,7 @@ impl Ord for String {
 }
 
 // String hash (Hash, kite::core::cmp): FNV-1a over the bytes, 64-bit machine word (wraps naturally on the
-// register). The key contract a hashed Map/Set needs for String keys (Eq + Hash). FNV-1a: h = 14695981039346656037;
+// register). The key contract a hashed RawMap/Set needs for String keys (Eq + Hash). FNV-1a: h = 14695981039346656037;
 // for each byte b: h = (h ^ b) * 1099511628211. Both constants are the standard 64-bit FNV primes.
 impl Hash for String {
   fun hash(self): Int {

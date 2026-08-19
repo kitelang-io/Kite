@@ -1,7 +1,7 @@
 import kite::collections
 
 @derive(Eq, Ord)
-class Registry < K: Hash + Eq, V > (pub val store: Map<K, V>, var count: Int) where V: Clone {
+class Registry < K: Hash + Eq, V > (pub val store: RawMap<K, V>, var count: Int) where V: Clone {
   deinit { println("bye ${count}") }
   fun get(self, key: K): V? = store[key]
   fun put(mut self, key: K, value: V): Bool {
@@ -13,13 +13,13 @@ class Registry < K: Hash + Eq, V > (pub val store: Map<K, V>, var count: Int) wh
 
 trait Codec<T>: Show where T: Clone {
   type Wire
-  fun encode(self, x: T): List<Int>
-  fun decode(self, bytes: List<Int>): T = self.zero()
+  fun encode(self, x: T): IntBuf<Int>
+  fun decode(self, bytes: IntBuf<Int>): T = self.zero()
 }
 
 impl < T > Codec<T>for Json<T>where T: Serialize {
   type Wire = String
-  fun encode(self, x: T): List<Int> = [x.hash(), 0xff & 1]
+  fun encode(self, x: T): IntBuf<Int> = [x.hash(), 0xff & 1]
 }
 
 enum Node<T>{ Leaf(value: T); Branch(Node<T>, Node<T>); Empty }

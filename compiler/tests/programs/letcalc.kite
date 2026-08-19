@@ -3,7 +3,7 @@
 // evaluator and type checker both need. A program is a run of `val NAME = expr`
 // bindings followed by a final expression:
 //     val a = 2 + 3   val b = a * 4   a + b     ==> 25
-// Lexed into a List<Tok>, then interpreted against an Env of parallel
+// Lexed into a IntBuf<Tok>, then interpreted against an Env of parallel
 // name/value lists. Compiled by Fledge and run natively.
 
 // kinds: 0 int  1 +  2 -  3 *  4 /  5 (  6 )  7 EOF  8 ident  9 '='  10 'val'
@@ -17,9 +17,9 @@ fun isAlpha(c: Int): Bool { return (c >= 97 && c <= 122) || (c >= 65 && c <= 90)
 
 fun isIdent(c: Int): Bool { return isAlpha(c) || isDigit(c) }
 
-// ---- lexer: String -> List<Tok> -------------------------------------------
-fun lex(src: String): List {
-  val toks = list()
+// ---- lexer: String -> IntBuf<Tok> -------------------------------------------
+fun lex(src: String): IntBuf {
+  val toks = intBuf()
   val n = src.len()
   var i = 0
   while (i < n) {
@@ -61,7 +61,7 @@ fun lex(src: String): List {
 }
 
 // ---- environment: parallel name / value lists -----------------------------
-struct Env(val names: List, val vals: List)
+struct Env(val names: IntBuf, val vals: IntBuf)
 
 fun define(env: Env, name: String, value: Int): Int {
   env.names.push(name)
@@ -82,7 +82,7 @@ fun lookup(env: Env, name: String): Int {
 }
 
 // ---- cursor over the token list -------------------------------------------
-struct P(val toks: List, var pos: Int, val env: Env)
+struct P(val toks: IntBuf, var pos: Int, val env: Env)
 
 fun peekKind(p: P): Int {
   if (p.pos >= p.toks.len()) { return 7 }
@@ -147,7 +147,7 @@ fun parseExpr(p: P): Int {
 
 // ---- program: `val NAME = expr`* then a final expression ------------------
 fun run(src: String): Int {
-  val env = Env(list(), list())
+  val env = Env(intBuf(), intBuf())
   val p = P(lex(src), 0, env)
   while (peekKind(p) == 10) { // 'val'
     advance(p) // consume 'val'

@@ -1,15 +1,15 @@
-class Res(val id: Int, val log: List) {
+class Res(val id: Int, val log: IntBuf) {
   deinit { self.log.set(0, self.log.get(0) + 1) }
 }
 
-fun f(flag: Int, log: List): Int {
+fun f(flag: Int, log: IntBuf): Int {
   val r = Res(5, log)
   if (flag == 1) { return r.id }
   return 0
 }
 
 fun main(): Int {
-  val log = list()
+  val log = intBuf()
   log.push(0)
   val a = f(1, log)
   val b = f(0, log)

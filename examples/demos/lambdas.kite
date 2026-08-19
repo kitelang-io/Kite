@@ -1,4 +1,4 @@
-fun demo(xs: List<Int>): Int {
+fun demo(xs: IntBuf<Int>): Int {
   val evens = xs.filter { it % 2 == 0 }.map { it * it }.fold(0) { a, x -> a + x }
   val g = { a: Int, b: Int -> a + b }
   val h = { -> 42 }

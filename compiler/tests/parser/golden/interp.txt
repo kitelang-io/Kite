@@ -43,7 +43,7 @@ fun longExpr(a: Int, b: Int) : Int
           ident b
           ident b
 
-fun pipeline(xs: List) : List
+fun pipeline(xs: IntBuf) : IntBuf
   block
     return
       call

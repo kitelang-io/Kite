@@ -1,0 +1,59 @@
+// Phase-7 regression: CoW value semantics for Vec/Array/Deque (STDLIB-REDESIGN §124). Mutating a bound
+// COPY must never corrupt the original — the aliasing UAF/leak hazard the phase eliminates. Pre-CoW these
+// were reference-aliased classes, so `val b = a; b.set(0, 999); a.get(0)` returned 999 (this fixture would
+// exit with the wrong accumulator). Each assertion adds a distinct weight so a specific regression is legible.
+import "lib/alloc/vec.kite"
+import "lib/alloc/array.kite"
+import "lib/alloc/deque.kite"
+
+// a value-type argument is passed by COPY: this mutation must not reach the caller's binding.
+fun clobber(v: Vec<Int>): Int { v.set(0, 999) v.push(88) return 0 }
+
+fun main(): Int {
+  var acc = 0
+
+  // pass-by-value: the callee mutates its own copy, the caller's Vec is untouched.
+  val p = Vec::<Int>(0, 0, RawBuf(0))
+  p.push(1) p.push(2)
+  clobber(p)
+  if (p.get(0) == 1) { acc = acc + 1 }         // caller element intact after callee mutation
+  if (p.len() == 2) { acc = acc + 1 }          // caller length intact after callee push
+
+  // Vec: copy shares the buffer until the copy writes (copy-on-write).
+  val v = Vec::<Int>(0, 0, RawBuf(0))
+  v.push(1) v.push(2) v.push(3)
+  val vc = v
+  vc.set(0, 999)
+  vc.push(4)
+  if (v.get(0) == 1) { acc = acc + 1 }        // original element untouched
+  if (v.len() == 3) { acc = acc + 1 }         // original length untouched
+  if (vc.get(0) == 999) { acc = acc + 1 }     // copy mutated
+  if (vc.len() == 4) { acc = acc + 1 }        // copy grew independently
+
+  // A second copy taken AFTER mutation is isolated from both prior handles.
+  val vc2 = vc
+  vc2.set(1, 77)
+  if (vc.get(1) == 2) { acc = acc + 1 }       // vc unaffected by vc2
+  if (vc2.get(1) == 77) { acc = acc + 1 }
+
+  // Array: fixed-length copy-on-write.
+  val a = Array::<Int>(3, RawBuf(__rawAlloc(3 * sizeOf::<Int>())))
+  a.fill(5)
+  val ac = a
+  ac.set(2, 42)
+  if (a.get(2) == 5) { acc = acc + 1 }        // array original intact
+  if (ac.get(2) == 42) { acc = acc + 1 }      // copy mutated
+
+  // Deque: ring-buffer copy-on-write across growth on the copy.
+  val d = Deque::<Int>(0, 0, 0, RawBuf(0))
+  d.pushBack(1) d.pushBack(2)
+  val dc = d
+  var i = 0
+  while (i < 20) { dc.pushBack(100 + i) i = i + 1 }   // forces grow + relinearize on the copy
+  if (d.len() == 2) { acc = acc + 1 }          // deque original length intact
+  if (d.get(1) == 2) { acc = acc + 1 }         // deque original element intact
+  if (dc.len() == 22) { acc = acc + 1 }        // copy grew
+  if (dc.get(0) == 1) { acc = acc + 1 }        // copy front preserved through growth
+
+  return acc
+}

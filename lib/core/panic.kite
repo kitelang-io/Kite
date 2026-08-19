@@ -1,0 +1,21 @@
+// kite::core::panic — the abort funnel for the target-tier collections (Phase 7). A bounds violation or
+// a broken invariant is a HARD failure: render a diagnostic to stderr and abort the process (exit 134, no
+// core-dump games). This is the interim before Phase 8's `__panicAt(loc, msg)` carries a source location;
+// today the message alone is emitted. `eprintln`/`__abort` are the compiler's stderr + abort floor
+// intrinsics, always available (no import needed).
+//
+// panic returns Int only so it can sit in expression position (a bounds-check arm) under the type-checker;
+// __abort() never returns, so the trailing `return 0` is unreachable.
+fun panic(msg: String): Int {
+  eprintln("panic: " + msg)
+  __abort()
+  return 0
+}
+
+// Out-of-bounds funnel: the collections call this on an index outside [0, len). Kept separate so the
+// message is uniform ("index I out of bounds for length N") across Vec/Array/Deque.
+fun panicOOB(kind: String, idx: Int, len: Int): Int {
+  eprintln("panic: " + (kind + (": index " + (idx.toStr() + (" out of bounds for length " + len.toStr())))))
+  __abort()
+  return 0
+}

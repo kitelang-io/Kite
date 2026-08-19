@@ -1,0 +1,55 @@
+// lib/alloc/array.kite — the monomorphized, CoW value-semantics fixed-length Array<T> (kite::alloc::array),
+// Phase-7. A packed, bounds-checked, fixed-`len` buffer. Storage packs by sizeOf<T>() stride. `@value`:
+// the handle {n, buf} is copied on bind and a writer (set/fill) clones the shared RawBuf first
+// (ensureUnique), so mutating a copy never corrupts the original (STDLIB-REDESIGN §124). `get`/`set`
+// panic on an out-of-range index. Construct: `Array::<Int>(n, RawBuf(__rawAlloc(n * sizeOf::<Int>())))`.
+import "lib/core/panic.kite"
+import "lib/alloc/rawbuf.kite"
+
+@mono
+@value
+class Array<T>(var n: Int, var buf: RawBuf) {
+  fun ensureUnique(self): Int {
+    if (__refcount(self.buf) > 1) {
+      val bytes = self.n * sizeOf::<T>()
+      val nd = if (bytes == 0) { 0 } else { __rawAlloc(bytes) }
+      var i = 0
+      while (i < bytes) { __rawStoreByte(nd, i, __rawLoadByte(self.buf.data, i)) i = i + 1 }
+      val old = self.buf
+      self.buf = RawBuf(nd)
+      rawBufDrop(old)
+    }
+    return 0
+  }
+  fun copy(self): Array<T> {
+    __retain(self.buf)
+    return Array::<T>(self.n, self.buf)
+  }
+  fun len(self): Int { return self.n }
+  fun get(self, i: Int): T {
+    if (i < 0 || i >= self.n) { panicOOB("Array.get", i, self.n) }
+    return __packedGet::<T>(self.buf.data, i)
+  }
+  fun getOr(self, i: Int, dflt: T): T {
+    if (i < 0 || i >= self.n) { return dflt }
+    return __packedGet::<T>(self.buf.data, i)
+  }
+  fun set(self, i: Int, x: consuming T): Int {
+    if (i < 0 || i >= self.n) { panicOOB("Array.set", i, self.n) }
+    self.ensureUnique()
+    __packedSet::<T>(self.buf.data, i, x)
+    return 0
+  }
+  fun fill(self, x: T): Int {
+    self.ensureUnique()
+    var i = 0
+    while (i < self.n) { __packedSet::<T>(self.buf.data, i, x) i = i + 1 }
+    return 0
+  }
+  fun indexOf(self, x: T): Option {
+    var i = 0
+    while (i < self.n) { if (__packedGet::<T>(self.buf.data, i) == x) { return Some(i) } i = i + 1 }
+    return None
+  }
+  fun contains(self, x: T): Bool { return isSome(self.indexOf(x)) }
+}

@@ -1,6 +1,6 @@
 // stage1/toklist.kite — a mini arithmetic compiler in Kite whose lexer and parser
 // are DECOUPLED by a real token list (the interface the full Kite front-end uses):
-//   source String  ->  lex  ->  List<Tok>  ->  parse  ->  enum Ast  ->  evalAst.
+//   source String  ->  lex  ->  IntBuf<Tok>  ->  parse  ->  enum Ast  ->  evalAst.
 // Compiled by Fledge (stage-0) and run natively.
 
 // Token kinds.
@@ -14,9 +14,9 @@ fun isDigit(c: Int): Bool { return c >= 48 && c <= 57 }
 
 fun isSpace(c: Int): Bool { return c == 32 }
 
-// ---- lexer: String -> List<Tok> -------------------------------------------
-fun lex(src: String): List {
-  val toks = list()
+// ---- lexer: String -> IntBuf<Tok> -------------------------------------------
+fun lex(src: String): IntBuf {
+  val toks = intBuf()
   val n = src.len()
   var i = 0
   while (i < n) {
@@ -48,8 +48,8 @@ fun lex(src: String): List {
   return toks
 }
 
-// ---- parser: List<Tok> -> Ast, via a mutable cursor -----------------------
-struct PS(val toks: List, var pos: Int)
+// ---- parser: IntBuf<Tok> -> Ast, via a mutable cursor -----------------------
+struct PS(val toks: IntBuf, var pos: Int)
 
 fun peekKind(ps: PS): Int {
   if (ps.pos >= ps.toks.len()) { return 7 }

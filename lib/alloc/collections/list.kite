@@ -1,32 +1,32 @@
-// lib/alloc/collections/list.kite — the language-primitive List (kite::alloc::collections::list).
+// lib/alloc/collections/list.kite — the language-primitive IntBuf (kite::alloc::collections::list).
 // The growable word-list {len@0, cap@8, data@16} that backs the [..] literal, built on the compiler
-// raw-memory intrinsics. In alloc because it OWNS a heap allocation; a sibling of vec/map (Map lives in
+// raw-memory intrinsics. In alloc because it OWNS a heap allocation; a sibling of vec/map (RawMap lives in
 // the sibling map module). Following Kotlin, a type's convention methods (the desugar landing points)
 // live WITH the type, not in a separate sugar library; the [..] constructor is top-level like Kotlin
 // listOf(). Names are global (unmangled): the prelude injects them.
 //
-// List is a real CLASS: {n: count, cap: capacity, data: heap word-buffer}. listNew builds it with the
-// class constructor and the ops read/write its fields. NOTE: List is EXEMPT from automatic ARC (see
+// IntBuf is a real CLASS: {n: count, cap: capacity, data: heap word-buffer}. listNew builds it with the
+// class constructor and the ops read/write its fields. NOTE: IntBuf is EXEMPT from automatic ARC (see
 // isBuiltinNominal in klower.kite) — its elements are type-erased Int words that listPush can't retain,
 // and the compiler nests lists-in-lists (structF/funP/variantTys), so a naive release would free an
-// inner list while the outer still holds its raw pointer (UAF). So List stays leak-managed as before;
+// inner list while the outer still holds its raw pointer (UAF). So IntBuf stays leak-managed as before;
 // the class only gives it a visible layout + methods.
 // Methods live IN the class body (self-style, like Vec) — these ARE the real implementation AND the
 // desugar landing points, mangled to List_push / List_get / List_set / List_len / List_length by the
 // method system. The [..] literal lowering and a[i]/for-in desugar (klower's roleSym) resolve directly
 // to these mangled methods — there are NO free-function delegates anymore (pure method-ification).
 // `push`/`get`/`set`/`len`, plus a `length` getter alias (so `xs.length` no-parens resolves here).
-// @arc(manual): List is exempt from automatic ARC — its elements are type-erased words push can't
+// @arc(manual): IntBuf is exempt from automatic ARC — its elements are type-erased words push can't
 // retain, and the compiler nests lists-in-lists, so a naive deep-release would UAF. Leak-managed.
 @arc(manual)
-class List(var n: Int, var cap: Int, var data: Int) {
+class IntBuf(var n: Int, var cap: Int, var data: Int) {
   // @lang("list.push"): the [..] literal desugar appends elements via this method (emitted List_push).
   // @lang("map.putList"): the {..} map desugar also appends into a parallel word-list via this method.
   @lang("list.push")
   @lang("map.putList")
   fun push(self, x: consuming Int): Int {
-    // grow-if-full. Guard cap==0 explicitly: 0*2 is still 0, so a lazily-allocated (cap 0) List would
-    // realloc 0 bytes and write OOB at offset 0, then never grow (n==cap forever). Today list() starts
+    // grow-if-full. Guard cap==0 explicitly: 0*2 is still 0, so a lazily-allocated (cap 0) IntBuf would
+    // realloc 0 bytes and write OOB at offset 0, then never grow (n==cap forever). Today intBuf() starts
     // cap at 4 so this can't happen, but the guard keeps push correct if a cap-0 constructor is added.
     if (self.n == self.cap) {
       if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
@@ -53,8 +53,8 @@ class List(var n: Int, var cap: Int, var data: Int) {
   // The element type is the erased machine word (Int); the closure params carry function types so the
   // parser records the real RETURN type (an untyped last param would absorb it), which makes chaining
   // like `xs.map(f).sum()` resolve the receiver correctly.
-  fun map(self, f: (Int) -> Int): List { val out = list() var i = 0 while (i < self.n) { out.push(f(self.get(i))) i = i + 1 } return out }
-  fun filter(self, pred: (Int) -> Bool): List { val out = list() var i = 0 while (i < self.n) { val x = self.get(i) if (pred(x)) { out.push(x) } i = i + 1 } return out }
+  fun map(self, f: (Int) -> Int): IntBuf { val out = intBuf() var i = 0 while (i < self.n) { out.push(f(self.get(i))) i = i + 1 } return out }
+  fun filter(self, pred: (Int) -> Bool): IntBuf { val out = intBuf() var i = 0 while (i < self.n) { val x = self.get(i) if (pred(x)) { out.push(x) } i = i + 1 } return out }
   fun fold(self, acc: Int, f: (Int, Int) -> Int): Int { var a = acc var i = 0 while (i < self.n) { a = f(a, self.get(i)) i = i + 1 } return a }
   // find returns a std Option<elem> (kite::core::option, in the prelude) — Some(x) for the first match, else None.
   fun find(self, pred: (Int) -> Bool): Option { var i = 0 while (i < self.n) { val x = self.get(i) if (pred(x)) { return Some(x) } i = i + 1 } return None }
@@ -62,9 +62,9 @@ class List(var n: Int, var cap: Int, var data: Int) {
 }
 
 @lang("list.new")
-fun list(): List { return List(0, 4, __rawAlloc(4 * 8)) }
+fun intBuf(): IntBuf { return IntBuf(0, 4, __rawAlloc(4 * 8)) }
 
-// rangeList(n) — the list [0, 1, .., n-1]. A top-level List factory (no receiver), sibling to list().
-fun rangeList(n: Int): List { val out = list() var i = 0 while (i < n) { out.push(i) i = i + 1 } return out }
+// rangeList(n) — the list [0, 1, .., n-1]. A top-level IntBuf factory (no receiver), sibling to intBuf().
+fun rangeList(n: Int): IntBuf { val out = intBuf() var i = 0 while (i < n) { out.push(i) i = i + 1 } return out }
 
-// Map moved to its own prelude module (kite::alloc::collections::map) as a method-ified class.
+// RawMap moved to its own prelude module (kite::alloc::collections::map) as a method-ified class.

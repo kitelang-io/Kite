@@ -1,5 +1,5 @@
 // builtin.kite — jq's named builtins (length, keys, add). Mirrors the numeric/collection parts of
-// jq's src/builtin.c. `add` folds with the standard library's `List.fold` method (prelude).
+// jq's src/builtin.c. `add` folds with the standard library's `IntBuf.fold` method (prelude).
 import kite::core::option
 import kite::alloc::collections
 import "examples/jq/jv.kite"
@@ -35,7 +35,7 @@ fun strLess(a: String, b: String): Bool {
 
 // keys: a SORTED array of an object's keys (jq's `keys` sorts; `keys_unsorted` preserves order).
 fun keysOf(j: Json): Json {
-  val ks = list()
+  val ks = intBuf()
   when (j) {
     JObj(es) -> { for (e in es) { ks.push(entryKey(e)) } }
     else -> 0
@@ -48,7 +48,7 @@ fun keysOf(j: Json): Json {
     ks.set(d + 1, key)
     i += 1
   }
-  val out = list()
+  val out = intBuf()
   for (k in ks) { out.push(JStr(k)) }
   return JArr(out)
 }

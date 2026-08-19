@@ -4,7 +4,7 @@ fun record(acc: Acc, v: Int): Int { acc.total = acc.total + v acc.count = acc.co
 
 fun mean(acc: Acc): Int { if (acc.count == 0) { return 0 } return acc.total / acc.count }
 
-fun each(xs: List, f: (Int) -> Int): Int { for (v in xs) { f(v) } return 0 }
+fun each(xs: IntBuf, f: (Int) -> Int): Int { for (v in xs) { f(v) } return 0 }
 
 fun main(): Int {
   val a = Acc(0, 0)

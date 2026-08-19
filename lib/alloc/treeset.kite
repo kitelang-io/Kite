@@ -1,0 +1,125 @@
+// lib/alloc/treeset.kite — the monomorphized ordered set TreeSet<T> (kite::alloc::treeset). The set analogue
+// of TreeMap<K,V>: a binary search tree over parallel packed element + child-index buffers, ordered by the
+// concrete T's `<`/`==` (String content order, Int machine order). A STANDALONE template (a monomorphized
+// template cannot nest a TreeMap<T,Unit>).
+//
+// Navigation returns Option: min/max/floor(<=x)/ceil(>=x)/higher(>x)/lower(<x); ordered iteration = `min()`
+// then `higher(prev)`. (Self-balancing is a deferred optimization; ordering is exact.) Consumed via QUOTED
+// includes. Construct empty: `TreeSet::<Int>(0 - 1, 0, 0, 0, 0, 0, 0)`.
+import "lib/core/panic.kite"
+
+@mono
+@arc(manual)
+class TreeSet<T>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var elems: Int, var left: Int, var right: Int) {
+  fun newNode(self, x: T): Int {
+    if (self.nalloc == self.cap) {
+      if (self.cap == 0) { self.cap = 8 } else { self.cap = self.cap * 2 }
+      self.elems = __rawRealloc(self.elems, self.cap * sizeOf::<T>())
+      self.left = __rawRealloc(self.left, self.cap * 8)
+      self.right = __rawRealloc(self.right, self.cap * 8)
+    }
+    val idx = self.nalloc
+    __packedSet::<T>(self.elems, idx, x)
+    __rawStore(self.left, idx * 8, 0 - 1)
+    __rawStore(self.right, idx * 8, 0 - 1)
+    self.nalloc = self.nalloc + 1
+    self.n = self.n + 1
+    return idx
+  }
+  fun addAt(self, node: Int, x: T): Int {
+    if (node < 0) { return self.newNode(x) }
+    val nx: T = __packedGet::<T>(self.elems, node)
+    if (x == nx) { return node }
+    if (x < nx) { val nl = self.addAt(__rawLoad(self.left, node * 8), x) __rawStore(self.left, node * 8, nl) }
+    else { val nr = self.addAt(__rawLoad(self.right, node * 8), x) __rawStore(self.right, node * 8, nr) }
+    return node
+  }
+  fun add(self, x: consuming T): Int { self.root = self.addAt(self.root, x) return 0 }
+  fun contains(self, x: T): Bool {
+    var node = self.root
+    while (node >= 0) {
+      val nx: T = __packedGet::<T>(self.elems, node)
+      if (x == nx) { return true }
+      if (x < nx) { node = __rawLoad(self.left, node * 8) } else { node = __rawLoad(self.right, node * 8) }
+    }
+    return false
+  }
+  fun removeAt(self, node: Int, x: T): Int {
+    if (node < 0) { return 0 - 1 }
+    val nx: T = __packedGet::<T>(self.elems, node)
+    if (x < nx) { val nl = self.removeAt(__rawLoad(self.left, node * 8), x) __rawStore(self.left, node * 8, nl) return node }
+    if (nx < x) { val nr = self.removeAt(__rawLoad(self.right, node * 8), x) __rawStore(self.right, node * 8, nr) return node }
+    val l = __rawLoad(self.left, node * 8)
+    val r = __rawLoad(self.right, node * 8)
+    if (l < 0) { return r }
+    if (r < 0) { return l }
+    var succ = r
+    while (__rawLoad(self.left, succ * 8) >= 0) { succ = __rawLoad(self.left, succ * 8) }
+    __packedSet::<T>(self.elems, node, __packedGet::<T>(self.elems, succ))
+    val sx: T = __packedGet::<T>(self.elems, succ)
+    val nr2 = self.removeAt(r, sx)
+    __rawStore(self.right, node * 8, nr2)
+    return node
+  }
+  fun remove(self, x: T): Bool {
+    if (self.contains(x) == false) { return false }
+    self.root = self.removeAt(self.root, x)
+    self.n = self.n - 1
+    return true
+  }
+  fun min(self): Option {
+    if (self.root < 0) { return None }
+    var node = self.root
+    while (__rawLoad(self.left, node * 8) >= 0) { node = __rawLoad(self.left, node * 8) }
+    return Some(__packedGet::<T>(self.elems, node))
+  }
+  fun max(self): Option {
+    if (self.root < 0) { return None }
+    var node = self.root
+    while (__rawLoad(self.right, node * 8) >= 0) { node = __rawLoad(self.right, node * 8) }
+    return Some(__packedGet::<T>(self.elems, node))
+  }
+  fun floor(self, x: T): Option {
+    var node = self.root
+    var best = 0 - 1
+    while (node >= 0) {
+      val nx: T = __packedGet::<T>(self.elems, node)
+      if (x < nx) { node = __rawLoad(self.left, node * 8) } else { best = node node = __rawLoad(self.right, node * 8) }
+    }
+    if (best < 0) { return None }
+    return Some(__packedGet::<T>(self.elems, best))
+  }
+  fun ceil(self, x: T): Option {
+    var node = self.root
+    var best = 0 - 1
+    while (node >= 0) {
+      val nx: T = __packedGet::<T>(self.elems, node)
+      if (nx < x) { node = __rawLoad(self.right, node * 8) } else { best = node node = __rawLoad(self.left, node * 8) }
+    }
+    if (best < 0) { return None }
+    return Some(__packedGet::<T>(self.elems, best))
+  }
+  fun higher(self, x: T): Option {
+    var node = self.root
+    var best = 0 - 1
+    while (node >= 0) {
+      val nx: T = __packedGet::<T>(self.elems, node)
+      if (x < nx) { best = node node = __rawLoad(self.left, node * 8) } else { node = __rawLoad(self.right, node * 8) }
+    }
+    if (best < 0) { return None }
+    return Some(__packedGet::<T>(self.elems, best))
+  }
+  fun lower(self, x: T): Option {
+    var node = self.root
+    var best = 0 - 1
+    while (node >= 0) {
+      val nx: T = __packedGet::<T>(self.elems, node)
+      if (nx < x) { best = node node = __rawLoad(self.right, node * 8) } else { node = __rawLoad(self.left, node * 8) }
+    }
+    if (best < 0) { return None }
+    return Some(__packedGet::<T>(self.elems, best))
+  }
+  fun size(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
+  fun clear(self): Int { self.root = 0 - 1 self.n = 0 self.nalloc = 0 return 0 }
+}

@@ -19,7 +19,7 @@ fun longExpr(a: Int, b: Int): Int {
   b * b
 }
 
-fun pipeline(xs: List): List {
+fun pipeline(xs: IntBuf): IntBuf {
   // leading-dot method chain across lines stays one expression
   return xs
   .filter(positive)

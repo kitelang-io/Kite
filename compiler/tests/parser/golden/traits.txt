@@ -84,7 +84,7 @@ fun maxOf<T: Ord>(a: T, b: T) : T
         else
           ident b
 
-fun collectInts<I>(it: inout I) : List<Int> where I: Iterator
+fun collectInts<I>(it: inout I) : IntBuf<Int> where I: Iterator
   block
     var out
       call

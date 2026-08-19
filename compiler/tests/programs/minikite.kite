@@ -2,9 +2,9 @@
 // written in Kite, compiled by Fledge, run natively.
 //
 //   source String
-//     -> lex   : String -> List<Tok>            (real Kite tokens: keywords, idents,
+//     -> lex   : String -> IntBuf<Tok>            (real Kite tokens: keywords, idents,
 //                                                 int literals, 1- and 2-char operators)
-//     -> parse : List<Tok> -> List<Func>        (a real multi-variant AST)
+//     -> parse : IntBuf<Tok> -> IntBuf<Func>        (a real multi-variant AST)
 //     -> eval  : walk the AST with an Env + a function table
 //
 // Handles: fun declarations with params, calls (incl. recursion), val/var locals,
@@ -21,15 +21,15 @@
 // 40 =   99 EOF
 struct Tok(val kind: Int, val ival: Int, val text: String)
 
-// --- AST (payloads carry Int / String / child-Expr / List for variable arity) ---
-enum Expr { ENum(Int); EVar(String); EBin(Int, Expr, Expr); ECall(String, List) }
+// --- AST (payloads carry Int / String / child-Expr / IntBuf for variable arity) ---
+enum Expr { ENum(Int); EVar(String); EBin(Int, Expr, Expr); ECall(String, IntBuf) }
 
 enum Stmt {
-  SVal(String, Expr); SReturn(Expr); SIf(Expr, List, List); SExpr(Expr);
-  SWhile(Expr, List); SAssign(String, Expr)
+  SVal(String, Expr); SReturn(Expr); SIf(Expr, IntBuf, IntBuf); SExpr(Expr);
+  SWhile(Expr, IntBuf); SAssign(String, Expr)
 }
 
-struct Func(val name: String, val params: List, val body: List)
+struct Func(val name: String, val params: IntBuf, val body: IntBuf)
 
 // ===========================================================================
 // Lexer
@@ -75,8 +75,8 @@ fun opKind(c: Int): Int {
   return 99
 }
 
-fun lex(src: String): List {
-  val toks = list()
+fun lex(src: String): IntBuf {
+  val toks = intBuf()
   val n = src.len()
   var i = 0
   while (i < n) {
@@ -117,7 +117,7 @@ fun lex(src: String): List {
 // ===========================================================================
 // Parser: token list -> AST
 // ===========================================================================
-struct P(val toks: List, var pos: Int)
+struct P(val toks: IntBuf, var pos: Int)
 
 fun peekKind(p: P): Int {
   if (p.pos >= p.toks.len()) { return 99 }
@@ -143,8 +143,8 @@ fun isAdd(k: Int): Bool { return k == 10 || k == 11 }
 
 fun isMul(k: Int): Bool { return k == 12 || k == 13 || k == 14 }
 
-fun parseArgs(p: P): List {
-  val args = list()
+fun parseArgs(p: P): IntBuf {
+  val args = intBuf()
   if (peekKind(p) != 3) {
     var more = 1
     while (more == 1) {
@@ -211,8 +211,8 @@ fun parseExpr(p: P): Expr {
   return left
 }
 
-fun parseBlock(p: P): List {
-  val b = list()
+fun parseBlock(p: P): IntBuf {
+  val b = intBuf()
   while (peekKind(p) != 5 && peekKind(p) != 99) { b.push(parseStmt(p)) }
   return b
 }
@@ -251,7 +251,7 @@ fun parseStmt(p: P): Stmt {
     advance(p) // consume '{'
     val thenB = parseBlock(p)
     advance(p) // consume '}'
-    var elseB = list()
+    var elseB = intBuf()
     if (peekKind(p) == 35) {
       advance(p) // consume 'else'
       advance(p) // consume '{'
@@ -268,7 +268,7 @@ fun parseFunc(p: P): Func {
   val name = peekText(p)
   advance(p) // consume name
   advance(p) // consume '('
-  val params = list()
+  val params = intBuf()
   if (peekKind(p) != 3) {
     var more = 1
     while (more == 1) {
@@ -284,8 +284,8 @@ fun parseFunc(p: P): Func {
   return Func(name, params, body)
 }
 
-fun parseProgram(p: P): List {
-  val fns = list()
+fun parseProgram(p: P): IntBuf {
+  val fns = intBuf()
   while (peekKind(p) == 30) { fns.push(parseFunc(p)) }
   return fns
 }
@@ -293,7 +293,7 @@ fun parseProgram(p: P): List {
 // ===========================================================================
 // Interpreter: walk the AST
 // ===========================================================================
-struct Env(val names: List, val vals: List)
+struct Env(val names: IntBuf, val vals: IntBuf)
 
 struct Ret(var done: Int, var value: Int)
 
@@ -331,7 +331,7 @@ fun combine(op: Int, a: Int, b: Int): Int {
   return 0
 }
 
-fun findFunc(funcs: List, name: String): Func {
+fun findFunc(funcs: IntBuf, name: String): Func {
   var i = 0
   var hit = 0
   while (i < funcs.len()) {
@@ -343,8 +343,8 @@ fun findFunc(funcs: List, name: String): Func {
   return r
 }
 
-fun callFunc(f: Func, args: List, caller: Env, funcs: List): Int {
-  val local = Env(list(), list())
+fun callFunc(f: Func, args: IntBuf, caller: Env, funcs: IntBuf): Int {
+  val local = Env(intBuf(), intBuf())
   var i = 0
   while (i < f.params.len()) {
     val pname: String = f.params.get(i)
@@ -357,7 +357,7 @@ fun callFunc(f: Func, args: List, caller: Env, funcs: List): Int {
   return ret.value
 }
 
-fun evalExpr(e: Expr, env: Env, funcs: List): Int {
+fun evalExpr(e: Expr, env: Env, funcs: IntBuf): Int {
   return when (e) {
     ENum(n) -> n
     EVar(x) -> lookup(env, x)
@@ -369,20 +369,20 @@ fun evalExpr(e: Expr, env: Env, funcs: List): Int {
 
 fun setRet(ret: Ret, v: Int): Int { ret.value = v; ret.done = 1; return 0 }
 
-fun evalIf(cond: Expr, thenB: List, elseB: List, env: Env, funcs: List, ret: Ret): Int {
+fun evalIf(cond: Expr, thenB: IntBuf, elseB: IntBuf, env: Env, funcs: IntBuf, ret: Ret): Int {
   if (evalExpr(cond, env, funcs) != 0) { evalStmts(thenB, env, funcs, ret) }
   else { evalStmts(elseB, env, funcs, ret) }
   return 0
 }
 
-fun evalWhile(cond: Expr, body: List, env: Env, funcs: List, ret: Ret): Int {
+fun evalWhile(cond: Expr, body: IntBuf, env: Env, funcs: IntBuf, ret: Ret): Int {
   while (evalExpr(cond, env, funcs) != 0 && ret.done == 0) {
     evalStmts(body, env, funcs, ret)
   }
   return 0
 }
 
-fun evalStmt(s: Stmt, env: Env, funcs: List, ret: Ret): Int {
+fun evalStmt(s: Stmt, env: Env, funcs: IntBuf, ret: Ret): Int {
   return when (s) {
     SVal(name, e) -> define(env, name, evalExpr(e, env, funcs))
     SReturn(e) -> setRet(ret, evalExpr(e, env, funcs))
@@ -394,7 +394,7 @@ fun evalStmt(s: Stmt, env: Env, funcs: List, ret: Ret): Int {
   }
 }
 
-fun evalStmts(stmts: List, env: Env, funcs: List, ret: Ret): Int {
+fun evalStmts(stmts: IntBuf, env: Env, funcs: IntBuf, ret: Ret): Int {
   var i = 0
   while (i < stmts.len() && ret.done == 0) {
     val s: Stmt = stmts.get(i)
@@ -407,8 +407,8 @@ fun evalStmts(stmts: List, env: Env, funcs: List, ret: Ret): Int {
 fun run(src: String): Int {
   val p = P(lex(src), 0)
   val funcs = parseProgram(p)
-  val top = Env(list(), list())
-  return callFunc(findFunc(funcs, "main"), list(), top, funcs)
+  val top = Env(intBuf(), intBuf())
+  return callFunc(findFunc(funcs, "main"), intBuf(), top, funcs)
 }
 
 fun main(): Int {

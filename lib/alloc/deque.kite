@@ -1,0 +1,93 @@
+// lib/alloc/deque.kite — the monomorphized, CoW value-semantics double-ended queue Deque<T>
+// (kite::alloc::deque), Phase-7. A growable ring buffer packed by sizeOf<T>() stride: O(1) push/pop at
+// BOTH ends. `head` is the front index into the buffer; element i is at (head + i) mod cap. Growth doubles
+// the buffer and linearizes (front -> 0). popFront/popBack/first/last return Option (empty is valid);
+// get(i) panics on OOB. `@value`: the handle {n, cap, head, buf} is copied on bind and a writer
+// (pushBack/pushFront) clones the shared ring first (ensureUnique) so mutating a copy never corrupts the
+// original (STDLIB-REDESIGN §124). Consumed via QUOTED includes. Construct empty: `Deque::<Int>(0, 0, 0,
+// RawBuf(0))`.
+import "lib/core/panic.kite"
+import "lib/alloc/rawbuf.kite"
+
+// n live count; cap ring capacity (0 until first push); head front index; buf the packed ring buffer.
+@mono
+@value
+class Deque<T>(var n: Int, var cap: Int, var head: Int, var buf: RawBuf) {
+  // CoW: clone the whole ring (cap slots, head layout preserved) away from other owners before a write.
+  fun ensureUnique(self): Int {
+    if (__refcount(self.buf) > 1) {
+      val bytes = self.cap * sizeOf::<T>()
+      val nd = if (bytes == 0) { 0 } else { __rawAlloc(bytes) }
+      var i = 0
+      while (i < bytes) { __rawStoreByte(nd, i, __rawLoadByte(self.buf.data, i)) i = i + 1 }
+      val old = self.buf
+      self.buf = RawBuf(nd)
+      rawBufDrop(old)
+    }
+    return 0
+  }
+  fun copy(self): Deque<T> {
+    __retain(self.buf)
+    return Deque::<T>(self.n, self.cap, self.head, self.buf)
+  }
+  fun ensureCap(self): Int {
+    if (self.n == self.cap) {
+      var nc = self.cap
+      if (nc == 0) { nc = 8 } else { nc = nc * 2 }
+      val nd = __rawAlloc(nc * sizeOf::<T>())
+      var i = 0
+      while (i < self.n) {
+        __packedSet::<T>(nd, i, __packedGet::<T>(self.buf.data, (self.head + i) % self.cap))
+        i = i + 1
+      }
+      self.buf.data = nd
+      self.cap = nc
+      self.head = 0
+    }
+    return 0
+  }
+  fun pushBack(self, x: consuming T): Int {
+    self.ensureUnique()
+    self.ensureCap()
+    val pos = (self.head + self.n) % self.cap
+    __packedSet::<T>(self.buf.data, pos, x)
+    self.n = self.n + 1
+    return 0
+  }
+  fun pushFront(self, x: consuming T): Int {
+    self.ensureUnique()
+    self.ensureCap()
+    self.head = (self.head + self.cap - 1) % self.cap
+    __packedSet::<T>(self.buf.data, self.head, x)
+    self.n = self.n + 1
+    return 0
+  }
+  fun popFront(self): Option {
+    if (self.n == 0) { return None }
+    val x = __packedGet::<T>(self.buf.data, self.head)
+    self.head = (self.head + 1) % self.cap
+    self.n = self.n - 1
+    return Some(x)
+  }
+  fun popBack(self): Option {
+    if (self.n == 0) { return None }
+    val pos = (self.head + self.n - 1) % self.cap
+    self.n = self.n - 1
+    return Some(__packedGet::<T>(self.buf.data, pos))
+  }
+  fun get(self, i: Int): T {
+    if (i < 0 || i >= self.n) { panicOOB("Deque.get", i, self.n) }
+    return __packedGet::<T>(self.buf.data, (self.head + i) % self.cap)
+  }
+  fun first(self): Option {
+    if (self.n == 0) { return None }
+    return Some(__packedGet::<T>(self.buf.data, self.head))
+  }
+  fun last(self): Option {
+    if (self.n == 0) { return None }
+    return Some(__packedGet::<T>(self.buf.data, (self.head + self.n - 1) % self.cap))
+  }
+  fun len(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
+  fun clear(self): Int { self.n = 0 self.head = 0 return 0 }
+}

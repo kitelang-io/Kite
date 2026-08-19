@@ -1,4 +1,4 @@
-fun fold(xs: List, init: Int, f: (Int, Int) -> Int): Int {
+fun fold(xs: IntBuf, init: Int, f: (Int, Int) -> Int): Int {
   var acc = init
   for (v in xs) { acc = f(acc, v) }
   return acc

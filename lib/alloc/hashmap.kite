@@ -1,0 +1,128 @@
+// lib/alloc/hashmap.kite — the monomorphized, insertion-ordered HashMap<K,V> (kite::alloc::hashmap), the
+// Phase-7 hashed map. `@mono` makes it a TEMPLATE specialized per concrete (K,V): the key type's `hash`
+// and `==` are chosen at instantiation (String -> String_hash/String_eq content semantics, Int -> Int_hash
+// + machine compare), packed inline by sizeOf<K>()/sizeOf<V>() stride — direct calls, no by-type-id
+// dynamic dispatch and no witness table.
+//
+// INSERTION-ORDERED BY CONSTRUCTION: entries live in a parallel key/value vector in the order first
+// inserted; a separate open-addressing (linear-probe) bucket array maps hash -> entry index. Iteration
+// (`keyAt`/`valAt` over `0..size`) walks the entries, so a JSON object round-trips key order for free.
+// `get` returns Option (miss = None, ending the silent-0), `getOr` the non-optional read. `remove`
+// compacts the entry vector (keeping order dense) and rebuilds the buckets, so iteration never sees a hole.
+//
+// Consumed via QUOTED includes (the @mono instantiation pass runs only on the flat/quoted pipeline).
+// Construct empty: `HashMap::<Int, String>(0, 0, 0, 0, 0, 0)`.
+import "lib/core/panic.kite"
+import "lib/core/hashable.kite"
+
+// Storage words: n live entries; ecap entry-vector capacity; bcap bucket count (power of two, 0 until first
+// set); keys/vals packed entry buffers; buckets a word array of (entryIndex+1), 0 = empty slot.
+@mono
+@arc(manual)
+class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var vals: Int, var buckets: Int) {
+  // rebuild the bucket array from the current dense entry vector (0..n). Called after a grow or a remove.
+  fun rehashAll(self): Int {
+    var b = 0
+    while (b < self.bcap) { __rawStore(self.buckets, b * 8, 0) b = b + 1 }
+    var e = 0
+    while (e < self.n) {
+      val k: K = __packedGet::<K>(self.keys, e)
+      var idx = k.hash() & (self.bcap - 1)
+      var go = 1
+      while (go == 1) {
+        if (__rawLoad(self.buckets, idx * 8) == 0) { __rawStore(self.buckets, idx * 8, e + 1) go = 0 }
+        else { idx = (idx + 1) & (self.bcap - 1) }
+      }
+      e = e + 1
+    }
+    return 0
+  }
+  // entry index for key k, or -1. Probes the bucket chain; a String key compares by content (String_eq via
+  // the `==` desugar on the concrete K), a scalar key by machine compare.
+  fun findIdx(self, k: K): Int {
+    if (self.bcap == 0) { return 0 - 1 }
+    var idx = k.hash() & (self.bcap - 1)
+    var go = 1
+    while (go == 1) {
+      val slot = __rawLoad(self.buckets, idx * 8)
+      if (slot == 0) { go = 0 }
+      else {
+        val e = slot - 1
+        if (__packedGet::<K>(self.keys, e) == k) { return e }
+        idx = (idx + 1) & (self.bcap - 1)
+      }
+    }
+    return 0 - 1
+  }
+  fun ensureEntries(self): Int {
+    if (self.n == self.ecap) {
+      if (self.ecap == 0) { self.ecap = 8 } else { self.ecap = self.ecap * 2 }
+      self.keys = __rawRealloc(self.keys, self.ecap * sizeOf::<K>())
+      self.vals = __rawRealloc(self.vals, self.ecap * sizeOf::<V>())
+    }
+    return 0
+  }
+  fun set(self, k: consuming K, v: consuming V): Int {
+    if (self.bcap == 0) { self.bcap = 8 self.buckets = __rawAlloc(self.bcap * 8) self.rehashAll() }
+    val e = self.findIdx(k)
+    if (e >= 0) { __packedSet::<V>(self.vals, e, v) return 0 }
+    if ((self.n + 1) * 4 >= self.bcap * 3) {
+      self.bcap = self.bcap * 2
+      self.buckets = __rawRealloc(self.buckets, self.bcap * 8)
+      self.rehashAll()
+    }
+    self.ensureEntries()
+    val ni = self.n
+    __packedSet::<K>(self.keys, ni, k)
+    __packedSet::<V>(self.vals, ni, v)
+    self.n = ni + 1
+    var idx = k.hash() & (self.bcap - 1)
+    var go = 1
+    while (go == 1) {
+      if (__rawLoad(self.buckets, idx * 8) == 0) { __rawStore(self.buckets, idx * 8, ni + 1) go = 0 }
+      else { idx = (idx + 1) & (self.bcap - 1) }
+    }
+    return 0
+  }
+  fun get(self, k: K): Option {
+    val e = self.findIdx(k)
+    if (e < 0) { return None }
+    return Some(__packedGet::<V>(self.vals, e))
+  }
+  fun getOr(self, k: K, dflt: V): V {
+    val e = self.findIdx(k)
+    if (e < 0) { return dflt }
+    return __packedGet::<V>(self.vals, e)
+  }
+  fun has(self, k: K): Bool { return self.findIdx(k) >= 0 }
+  fun remove(self, k: K): Option {
+    val e = self.findIdx(k)
+    if (e < 0) { return None }
+    val old = __packedGet::<V>(self.vals, e)
+    var i = e
+    while (i < self.n - 1) {
+      __packedSet::<K>(self.keys, i, __packedGet::<K>(self.keys, i + 1))
+      __packedSet::<V>(self.vals, i, __packedGet::<V>(self.vals, i + 1))
+      i = i + 1
+    }
+    self.n = self.n - 1
+    self.rehashAll()
+    return Some(old)
+  }
+  fun size(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
+  fun clear(self): Int {
+    self.n = 0
+    var b = 0
+    while (b < self.bcap) { __rawStore(self.buckets, b * 8, 0) b = b + 1 }
+    return 0
+  }
+  fun keyAt(self, i: Int): K {
+    if (i < 0 || i >= self.n) { panicOOB("HashMap.keyAt", i, self.n) }
+    return __packedGet::<K>(self.keys, i)
+  }
+  fun valAt(self, i: Int): V {
+    if (i < 0 || i >= self.n) { panicOOB("HashMap.valAt", i, self.n) }
+    return __packedGet::<V>(self.vals, i)
+  }
+}

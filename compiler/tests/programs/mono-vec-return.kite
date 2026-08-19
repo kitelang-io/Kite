@@ -10,14 +10,14 @@
 import "lib/alloc/vec.kite"
 
 fun makeInts(): Vec<Int> {
-  val v = Vec::<Int>(0, 4, __rawAlloc(4 * sizeOf::<Int>()))
+  val v = Vec::<Int>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<Int>())))
   v.push(42)
   v.push(99)
   return v
 }
 
 fun makeBytes(): Vec<U8> {
-  val v = Vec::<U8>(0, 4, __rawAlloc(4 * sizeOf::<U8>()))
+  val v = Vec::<U8>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<U8>())))
   v.push(200)
   v.push(300)                                          // 300 & 0xff = 44
   return v

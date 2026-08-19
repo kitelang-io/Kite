@@ -58,10 +58,10 @@ fun kwS(w: String): Int {
   return 1
 }
 
-fun pushT(t: List, k: Int, s: String): Int { t.push(TokS(k, s)); return 0 }
+fun pushT(t: IntBuf, k: Int, s: String): Int { t.push(TokS(k, s)); return 0 }
 
-fun lexS(src: String): List {
-  val t = list()
+fun lexS(src: String): IntBuf {
+  val t = intBuf()
   val l = LxS(src, src.len(), 0)
   var go = 1
   while (go == 1) {
@@ -91,7 +91,7 @@ fun lexS(src: String): List {
   return t
 }
 
-fun lexOpS(l: LxS, t: List): Int {
+fun lexOpS(l: LxS, t: IntBuf): Int {
   val c = cS(l); aS(l); val d = cS(l)
   if (c == 40) { return pushT(t, 20, "") }
   if (c == 41) { return pushT(t, 21, "") }
@@ -116,7 +116,7 @@ fun lexOpS(l: LxS, t: List): Int {
 }
 
 // --- scalar parser (produces kenc.kite's Expr/Stmt/Func) ---
-struct PC(val toks: List, var pos: Int)
+struct PC(val toks: IntBuf, var pos: Int)
 
 fun pkS(p: PC): Int { val t: TokS = p.toks.get(p.pos); return t.kind }
 
@@ -148,8 +148,8 @@ fun opS(k: Int): String {
   return "?"
 }
 
-fun pArgsS(p: PC): List {
-  val a = list()
+fun pArgsS(p: PC): IntBuf {
+  val a = intBuf()
   if (pkS(p) != 21) {
     var more = 1
     while (more == 1) { a.push(pExprS(p)); if (pkS(p) == 24) { eS(p) } else { more = 0 } }
@@ -205,7 +205,7 @@ fun pPatS(p: PC): Pat {
   if (isUpperS(nm)) {
     if (pkS(p) == 20) {
       eS(p)
-      val subs = list()
+      val subs = intBuf()
       if (pkS(p) != 21) {
         var more = 1
         while (more == 1) { subs.push(pPatS(p)); if (pkS(p) == 24) { eS(p) } else { more = 0 } }
@@ -222,7 +222,7 @@ fun pWhenS(p: PC): Expr {
   eS(p); eS(p) // 'when' '('
   val subj = pExprS(p); eS(p) // ')'
   eS(p) // '{'
-  val arms = list()
+  val arms = intBuf()
   while (pkS(p) != 23 && pkS(p) != 0) {
     if (pkS(p) == 16) { eS(p); eS(p); arms.push(Arm(1, PWild, pExprS(p))) } // else ->
     else { val pat = pPatS(p); eS(p); arms.push(Arm(0, pat, pExprS(p))) } // pat ->
@@ -297,7 +297,7 @@ fun pStmtS(p: PC): Stmt {
 
 fun pBlockS(p: PC): Expr {
   eS(p) // '{'
-  val stmts = list()
+  val stmts = intBuf()
   var res = ENoRes
   var go = 1
   while (go == 1) {
@@ -316,10 +316,10 @@ fun pBlockS(p: PC): Expr {
   return EBlock(stmts, res)
 }
 
-fun pFnS(p: PC, funN: List, funRet: List): Func {
+fun pFnS(p: PC, funN: IntBuf, funRet: IntBuf): Func {
   eS(p); val nm = ptS(p); eS(p); eS(p) // 'fun' name '('
-  val params = list()
-  val paramTys = list()
+  val params = intBuf()
+  val paramTys = intBuf()
   if (pkS(p) != 21) {
     var more = 1
     while (more == 1) {
@@ -338,9 +338,9 @@ fun pFnS(p: PC, funN: List, funRet: List): Func {
   return Func(nm, params, paramTys, pBlockS(p))
 }
 
-struct PR(val funcs: List, val structN: List, val structF: List, val structFT: List, val variantN: List, val variantTag: List, val funN: List, val funRet: List)
+struct PR(val funcs: IntBuf, val structN: IntBuf, val structF: IntBuf, val structFT: IntBuf, val variantN: IntBuf, val variantTag: IntBuf, val funN: IntBuf, val funRet: IntBuf)
 
-fun pEnumS(p: PC, variantN: List, variantTag: List): Int {
+fun pEnumS(p: PC, variantN: IntBuf, variantTag: IntBuf): Int {
   eS(p) // 'enum'
   eS(p) // enum name
   eS(p) // '{'
@@ -362,12 +362,12 @@ fun pEnumS(p: PC, variantN: List, variantTag: List): Int {
   return 0
 }
 
-fun pStructS(p: PC, structN: List, structF: List, structFT: List): Int {
+fun pStructS(p: PC, structN: IntBuf, structF: IntBuf, structFT: IntBuf): Int {
   eS(p) // 'struct'
   val name = ptS(p); eS(p)
   eS(p) // '('
-  val fields = list()
-  val ftys = list()
+  val fields = intBuf()
+  val ftys = intBuf()
   if (pkS(p) != 21) {
     var more = 1
     while (more == 1) {
@@ -384,11 +384,11 @@ fun pStructS(p: PC, structN: List, structF: List, structFT: List): Int {
   return 0
 }
 
-fun parseAll(toks: List): PR {
+fun parseAll(toks: IntBuf): PR {
   val p = PC(toks, 0)
-  val funcs = list(); val structN = list(); val structF = list(); val structFT = list()
-  val variantN = list(); val variantTag = list()
-  val funN = list(); val funRet = list()
+  val funcs = intBuf(); val structN = intBuf(); val structF = intBuf(); val structFT = intBuf()
+  val variantN = intBuf(); val variantTag = intBuf()
+  val funN = intBuf(); val funRet = intBuf()
   var go = 1
   while (go == 1) {
     val k = pkS(p)

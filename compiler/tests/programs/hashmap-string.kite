@@ -1,0 +1,19 @@
+import "lib/alloc/hashmap.kite"
+fun main(): Int {
+  var acc = 0
+  val m = HashMap::<String, Int>(0, 0, 0, 0, 0, 0)
+  m.set("apple", 1) m.set("banana", 2) m.set("cherry", 3)
+  // content equality: a freshly-built equal string must hit
+  val k = "ban" + "ana"
+  when (m.get(k)) { Some(v) -> { if (v == 2) { acc = acc + 1 } }; None -> 0 }
+  if (m.getOr("cherry", 0) == 3) { acc = acc + 1 }
+  when (m.get("missing")) { Some(v) -> 0; None -> { acc = acc + 1 } }
+  m.set("apple", 11)                      // update in place
+  if (m.getOr("apple", 0) == 11) { acc = acc + 1 }
+  if (m.size() == 3) { acc = acc + 1 }
+  if (m.keyAt(0).eq("apple")) { acc = acc + 1 }   // insertion order preserved
+  when (m.remove("banana")) { Some(v) -> { if (v == 2) { acc = acc + 1 } }; None -> 0 }
+  if (m.size() == 2) { acc = acc + 1 }
+  when (m.get("banana")) { Some(v) -> 0; None -> { acc = acc + 1 } }
+  return acc
+}

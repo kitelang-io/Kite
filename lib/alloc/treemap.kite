@@ -1,0 +1,149 @@
+// lib/alloc/treemap.kite — the monomorphized ordered map TreeMap<K,V> (kite::alloc::treemap), the Phase-7
+// sorted map. `@mono` specializes it per concrete (K,V); the key ORDER is the concrete K's `<`/`==`, chosen
+// at instantiation (String -> String_cmp content order, Int -> machine compare), so in-order navigation is
+// sorted for free. A binary search tree over parallel packed node buffers (key/val by sizeOf stride, left/
+// right child-index words; -1 = nil). Delete uses the in-order-successor splice.
+//
+// Navigation returns Option: get/min/max/floor(<=k)/ceil(>=k)/higher(>k)/lower(<k). Ordered iteration =
+// `min()` then `higher(prev)` to exhaustion. (Self-balancing LLRB rotations are a deferred optimization;
+// ordering/semantics are exact, worst-case depth is not yet bounded.)
+//
+// Consumed via QUOTED includes (the @mono pass runs only on the flat/quoted pipeline).
+// Construct empty: `TreeMap::<Int, Int>(0 - 1, 0, 0, 0, 0, 0, 0, 0)`.
+import "lib/core/panic.kite"
+
+// root node index (-1 = empty); n live entries; nalloc high-water node slots (freed nodes are not reused);
+// cap node-array capacity; keys/vals packed node payloads; left/right child-index word arrays.
+@mono
+@arc(manual)
+class TreeMap<K, V>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var keys: Int, var vals: Int, var left: Int, var right: Int) {
+  fun newNode(self, k: K, v: V): Int {
+    if (self.nalloc == self.cap) {
+      if (self.cap == 0) { self.cap = 8 } else { self.cap = self.cap * 2 }
+      self.keys = __rawRealloc(self.keys, self.cap * sizeOf::<K>())
+      self.vals = __rawRealloc(self.vals, self.cap * sizeOf::<V>())
+      self.left = __rawRealloc(self.left, self.cap * 8)
+      self.right = __rawRealloc(self.right, self.cap * 8)
+    }
+    val idx = self.nalloc
+    __packedSet::<K>(self.keys, idx, k)
+    __packedSet::<V>(self.vals, idx, v)
+    __rawStore(self.left, idx * 8, 0 - 1)
+    __rawStore(self.right, idx * 8, 0 - 1)
+    self.nalloc = self.nalloc + 1
+    self.n = self.n + 1
+    return idx
+  }
+  fun insertAt(self, node: Int, k: K, v: V): Int {
+    if (node < 0) { return self.newNode(k, v) }
+    val nk: K = __packedGet::<K>(self.keys, node)
+    if (k == nk) { __packedSet::<V>(self.vals, node, v) return node }
+    if (k < nk) { val nl = self.insertAt(__rawLoad(self.left, node * 8), k, v) __rawStore(self.left, node * 8, nl) }
+    else { val nr = self.insertAt(__rawLoad(self.right, node * 8), k, v) __rawStore(self.right, node * 8, nr) }
+    return node
+  }
+  fun set(self, k: consuming K, v: consuming V): Int { self.root = self.insertAt(self.root, k, v) return 0 }
+  fun get(self, k: K): Option {
+    var node = self.root
+    while (node >= 0) {
+      val nk: K = __packedGet::<K>(self.keys, node)
+      if (k == nk) { return Some(__packedGet::<V>(self.vals, node)) }
+      if (k < nk) { node = __rawLoad(self.left, node * 8) } else { node = __rawLoad(self.right, node * 8) }
+    }
+    return None
+  }
+  fun getOr(self, k: K, dflt: V): V {
+    var node = self.root
+    while (node >= 0) {
+      val nk: K = __packedGet::<K>(self.keys, node)
+      if (k == nk) { return __packedGet::<V>(self.vals, node) }
+      if (k < nk) { node = __rawLoad(self.left, node * 8) } else { node = __rawLoad(self.right, node * 8) }
+    }
+    return dflt
+  }
+  fun has(self, k: K): Bool { return isSome(self.get(k)) }
+  fun removeAt(self, node: Int, k: K): Int {
+    if (node < 0) { return 0 - 1 }
+    val nk: K = __packedGet::<K>(self.keys, node)
+    if (k < nk) { val nl = self.removeAt(__rawLoad(self.left, node * 8), k) __rawStore(self.left, node * 8, nl) return node }
+    if (nk < k) { val nr = self.removeAt(__rawLoad(self.right, node * 8), k) __rawStore(self.right, node * 8, nr) return node }
+    val l = __rawLoad(self.left, node * 8)
+    val r = __rawLoad(self.right, node * 8)
+    if (l < 0) { return r }
+    if (r < 0) { return l }
+    var succ = r
+    while (__rawLoad(self.left, succ * 8) >= 0) { succ = __rawLoad(self.left, succ * 8) }
+    __packedSet::<K>(self.keys, node, __packedGet::<K>(self.keys, succ))
+    __packedSet::<V>(self.vals, node, __packedGet::<V>(self.vals, succ))
+    val sk: K = __packedGet::<K>(self.keys, succ)
+    val nr2 = self.removeAt(r, sk)
+    __rawStore(self.right, node * 8, nr2)
+    return node
+  }
+  fun remove(self, k: K): Option {
+    val g = self.get(k)
+    if (isNone(g)) { return None }
+    self.root = self.removeAt(self.root, k)
+    self.n = self.n - 1
+    return g
+  }
+  fun min(self): Option {
+    if (self.root < 0) { return None }
+    var node = self.root
+    while (__rawLoad(self.left, node * 8) >= 0) { node = __rawLoad(self.left, node * 8) }
+    return Some(__packedGet::<K>(self.keys, node))
+  }
+  fun max(self): Option {
+    if (self.root < 0) { return None }
+    var node = self.root
+    while (__rawLoad(self.right, node * 8) >= 0) { node = __rawLoad(self.right, node * 8) }
+    return Some(__packedGet::<K>(self.keys, node))
+  }
+  fun floor(self, k: K): Option {
+    var node = self.root
+    var best = 0 - 1
+    while (node >= 0) {
+      val nk: K = __packedGet::<K>(self.keys, node)
+      if (k < nk) { node = __rawLoad(self.left, node * 8) }
+      else { best = node node = __rawLoad(self.right, node * 8) }
+    }
+    if (best < 0) { return None }
+    return Some(__packedGet::<K>(self.keys, best))
+  }
+  fun ceil(self, k: K): Option {
+    var node = self.root
+    var best = 0 - 1
+    while (node >= 0) {
+      val nk: K = __packedGet::<K>(self.keys, node)
+      if (nk < k) { node = __rawLoad(self.right, node * 8) }
+      else { best = node node = __rawLoad(self.left, node * 8) }
+    }
+    if (best < 0) { return None }
+    return Some(__packedGet::<K>(self.keys, best))
+  }
+  fun higher(self, k: K): Option {
+    var node = self.root
+    var best = 0 - 1
+    while (node >= 0) {
+      val nk: K = __packedGet::<K>(self.keys, node)
+      if (k < nk) { best = node node = __rawLoad(self.left, node * 8) }
+      else { node = __rawLoad(self.right, node * 8) }
+    }
+    if (best < 0) { return None }
+    return Some(__packedGet::<K>(self.keys, best))
+  }
+  fun lower(self, k: K): Option {
+    var node = self.root
+    var best = 0 - 1
+    while (node >= 0) {
+      val nk: K = __packedGet::<K>(self.keys, node)
+      if (nk < k) { best = node node = __rawLoad(self.right, node * 8) }
+      else { node = __rawLoad(self.left, node * 8) }
+    }
+    if (best < 0) { return None }
+    return Some(__packedGet::<K>(self.keys, best))
+  }
+  fun size(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
+  fun clear(self): Int { self.root = 0 - 1 self.n = 0 self.nalloc = 0 return 0 }
+}

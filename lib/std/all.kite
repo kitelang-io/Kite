@@ -2,7 +2,7 @@
 // (`import kite::std::all` gives core + alloc + std). Import it explicitly; it is NOT auto-imported.
 //
 // NOTE: this is deliberately NOT called "prelude". In Kite, "prelude" is the compiler's config-driven
-// injection of the language primitives (List/Map + nominal methods) — see compiler/prelude.conf. This
+// injection of the language primitives (IntBuf/RawMap + nominal methods) — see compiler/prelude.conf. This
 // module is a user-facing all-in-one for the *standard library*, a separate concern.
 pub import kite::core
 

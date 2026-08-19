@@ -13,7 +13,7 @@
 // cleanly. A correctly-brace-balanced version of this exact deep nesting parses and compiles fine.
 //
 // gate.sh asserts `kitec check` on this file exits non-zero AND is not signal-killed (not 139).
-fun f(s: String, i: Int, steps: List): Int {
+fun f(s: String, i: Int, steps: IntBuf): Int {
   val c = s.charAt(i)
   if (c == 32) { steps.push(1) } else { if (c == 124) { steps.push(2) }
   else { if (c == 46) { val d = s.charAt(i) if (d == 91) { steps.push(3) } else { steps.push(4) } }
@@ -22,4 +22,4 @@ fun f(s: String, i: Int, steps: List): Int {
   else { steps.push(8) } } } }
   return 0
 }
-fun main(): Int { val s = list() f("x", 0, s) return s.len() }
+fun main(): Int { val s = intBuf() f("x", 0, s) return s.len() }
