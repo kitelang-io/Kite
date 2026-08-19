@@ -1,12 +1,13 @@
 // kite::core::overflow — the portable overflow-method families (Rust/Swift's highest-value idea), as
 // extension methods on the unsigned fixed-width integer types. Opt in with `import kite::core::overflow`.
 //
-// Default arithmetic in Kite WRAPS at the type's width (deterministic, self-host-safe): registers are full
-// 64-bit words and width only bites at a store, a narrowing `as` cast, or these explicit families. So the
-// three families are expressed WITHOUT any new intrinsic for the sub-word widths (U8/U16/U32): compute the
-// sum/product WIDE in the register (no wrap up to 2^63), then decide by mask (`as UW`) or a range check.
-// The full-word U64 family detects unsigned add-overflow with an unsigned compare (`sum < a`), which the
-// Phase-3 unsigned condition codes make correct — no carry-flag intrinsic needed for add.
+// Default arithmetic in Kite WRAPS at the type's width (Phase D — deterministic two's-complement): a
+// same-width `self + b` on U8/U16/U32 already masks back to the width, so a range check on that result
+// can no longer see the overflow. To DECIDE overflow the checked/saturating families therefore WIDEN the
+// operands first — `(self as U64) + (b as U64)` computes the true sum/product in a full 64-bit word (no
+// wrap up to 2^63), and the range check / clamp reads that wide value. The wrapping family just takes the
+// naturally wrapped result (a trailing `as UW` re-mask is idempotent). The full-word U64 family detects
+// unsigned add-overflow with an unsigned compare (`sum < a`), which the Phase-3 unsigned codes make correct.
 //
 // Convention-by-name: the bodies are the mangled `<UW>_<op>` methods, so `a.wrappingAdd(b)` /
 // `a.checkedAdd(b)` / `a.saturatingAdd(b)` resolve here via UFCS on the width-typed receiver.
@@ -16,39 +17,39 @@
 //   saturating*: clamp to the type's max (or 0) instead of wrapping
 
 // ---- U8 (0..255) ----
-fun U8_wrappingAdd(a: U8, b: U8): U8 { return (a + b) as U8 }
+fun U8.wrappingAdd(b: U8): U8 { return (self + b) as U8 }
 
-fun U8_wrappingSub(a: U8, b: U8): U8 { return (a - b) as U8 }
+fun U8.wrappingSub(b: U8): U8 { return (self - b) as U8 }
 
-fun U8_wrappingMul(a: U8, b: U8): U8 { return (a * b) as U8 }
+fun U8.wrappingMul(b: U8): U8 { return (self * b) as U8 }
 
-fun U8_checkedAdd(a: U8, b: U8): Option { val s = a + b; if (s > 255) { return None } return Some(s) }
+fun U8.checkedAdd(b: U8): Option { val s: U64 = (self as U64) + (b as U64); if (s > 255) { return None } return Some(s) }
 
-fun U8_checkedSub(a: U8, b: U8): Option { if (a < b) { return None } return Some(a - b) }
+fun U8.checkedSub(b: U8): Option { if (self < b) { return None } return Some(self - b) }
 
-fun U8_checkedMul(a: U8, b: U8): Option { val p = a * b; if (p > 255) { return None } return Some(p) }
+fun U8.checkedMul(b: U8): Option { val p: U64 = (self as U64) * (b as U64); if (p > 255) { return None } return Some(p) }
 
-fun U8_saturatingAdd(a: U8, b: U8): U8 { val s = a + b; if (s > 255) { return 255 as U8 } return s as U8 }
+fun U8.saturatingAdd(b: U8): U8 { val s: U64 = (self as U64) + (b as U64); if (s > 255) { return 255 as U8 } return s as U8 }
 
-fun U8_saturatingSub(a: U8, b: U8): U8 { if (a < b) { return 0 as U8 } return (a - b) as U8 }
+fun U8.saturatingSub(b: U8): U8 { if (self < b) { return 0 as U8 } return (self - b) as U8 }
 
 // ---- U16 (0..65535) ----
-fun U16_wrappingAdd(a: U16, b: U16): U16 { return (a + b) as U16 }
+fun U16.wrappingAdd(b: U16): U16 { return (self + b) as U16 }
 
-fun U16_wrappingSub(a: U16, b: U16): U16 { return (a - b) as U16 }
+fun U16.wrappingSub(b: U16): U16 { return (self - b) as U16 }
 
-fun U16_checkedAdd(a: U16, b: U16): Option { val s = a + b; if (s > 65535) { return None } return Some(s) }
+fun U16.checkedAdd(b: U16): Option { val s: U64 = (self as U64) + (b as U64); if (s > 65535) { return None } return Some(s) }
 
-fun U16_saturatingAdd(a: U16, b: U16): U16 { val s = a + b; if (s > 65535) { return 65535 as U16 } return s as U16 }
+fun U16.saturatingAdd(b: U16): U16 { val s: U64 = (self as U64) + (b as U64); if (s > 65535) { return 65535 as U16 } return s as U16 }
 
 // ---- U32 (0..4294967295) ----
-fun U32_wrappingAdd(a: U32, b: U32): U32 { return (a + b) as U32 }
+fun U32.wrappingAdd(b: U32): U32 { return (self + b) as U32 }
 
-fun U32_checkedAdd(a: U32, b: U32): Option { val s = a + b; if (s > 4294967295) { return None } return Some(s) }
+fun U32.checkedAdd(b: U32): Option { val s: U64 = (self as U64) + (b as U64); if (s > 4294967295) { return None } return Some(s) }
 
-fun U32_saturatingAdd(a: U32, b: U32): U32 { val s = a + b; if (s > 4294967295) { return 4294967295 as U32 } return s as U32 }
+fun U32.saturatingAdd(b: U32): U32 { val s: U64 = (self as U64) + (b as U64); if (s > 4294967295) { return 4294967295 as U32 } return s as U32 }
 
 // ---- U64 (full word): native wrap; overflow via unsigned compare (sum < a) ----
-fun U64_wrappingAdd(a: U64, b: U64): U64 { return a + b }
+fun U64.wrappingAdd(b: U64): U64 { return self + b }
 
-fun U64_checkedAdd(a: U64, b: U64): Option { val s: U64 = a + b; if (s < a) { return None } return Some(s) }
+fun U64.checkedAdd(b: U64): Option { val s: U64 = self + b; if (s < self) { return None } return Some(s) }

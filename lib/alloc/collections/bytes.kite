@@ -14,7 +14,7 @@
 
 // ---- U8Array: packed unsigned bytes (stride 1), zero-extended on load ----
 @arc(manual)
-class U8Array(var n: Int, var cap: Int, var data: Int) {
+class U8Array(var n: Int, var cap: Int, var data: USize) {
   fun push(self, x: consuming Int): Int {
     if (self.n == self.cap) {
       if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
@@ -33,7 +33,7 @@ fun u8Array(): U8Array { return U8Array(0, 4, __rawAlloc(4)) }
 
 // ---- U16Array: packed unsigned halfwords (stride 2), zero-extended on load ----
 @arc(manual)
-class U16Array(var n: Int, var cap: Int, var data: Int) {
+class U16Array(var n: Int, var cap: Int, var data: USize) {
   fun push(self, x: consuming Int): Int {
     if (self.n == self.cap) {
       if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
@@ -52,7 +52,7 @@ fun u16Array(): U16Array { return U16Array(0, 4, __rawAlloc(4 * 2)) }
 
 // ---- U32Array: packed unsigned words (stride 4), zero-extended on load ----
 @arc(manual)
-class U32Array(var n: Int, var cap: Int, var data: Int) {
+class U32Array(var n: Int, var cap: Int, var data: USize) {
   fun push(self, x: consuming Int): Int {
     if (self.n == self.cap) {
       if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
@@ -71,7 +71,7 @@ fun u32Array(): U32Array { return U32Array(0, 4, __rawAlloc(4 * 4)) }
 
 // ---- I8Array: packed signed bytes (stride 1), sign-extended on load ----
 @arc(manual)
-class I8Array(var n: Int, var cap: Int, var data: Int) {
+class I8Array(var n: Int, var cap: Int, var data: USize) {
   fun push(self, x: consuming Int): Int {
     if (self.n == self.cap) {
       if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
@@ -90,7 +90,7 @@ fun i8Array(): I8Array { return I8Array(0, 4, __rawAlloc(4)) }
 
 // ---- I16Array: packed signed halfwords (stride 2), sign-extended on load ----
 @arc(manual)
-class I16Array(var n: Int, var cap: Int, var data: Int) {
+class I16Array(var n: Int, var cap: Int, var data: USize) {
   fun push(self, x: consuming Int): Int {
     if (self.n == self.cap) {
       if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
@@ -109,7 +109,7 @@ fun i16Array(): I16Array { return I16Array(0, 4, __rawAlloc(4 * 2)) }
 
 // ---- I32Array: packed signed words (stride 4), sign-extended on load ----
 @arc(manual)
-class I32Array(var n: Int, var cap: Int, var data: Int) {
+class I32Array(var n: Int, var cap: Int, var data: USize) {
   fun push(self, x: consuming Int): Int {
     if (self.n == self.cap) {
       if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }

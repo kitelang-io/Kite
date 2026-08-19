@@ -1,0 +1,14 @@
+// Regression: a method/UFCS call on the RESULT of an overloaded operator must dispatch against the
+// operator's RETURN type, not fall to a bare undefined symbol. `(b + Box(3))` is an `impl Add for Box`
+// expression whose result type is Box; `.value()` must resolve to `Box_value` (before the fix, tagOf of
+// the binary expr inferred "Int" -> `.value()` linked to a bare `_value` and dyld-failed at run time).
+struct Box(val v: Int)
+
+impl Add for Box { fun add(self, o: Box): Box { return Box(self.v + o.v) } }
+
+fun Box_value(b: Box): Int { return b.v }
+
+fun main(): Int {
+  val b = Box(2)
+  return (b + Box(3)).value() // Box(5).value() == 5
+}

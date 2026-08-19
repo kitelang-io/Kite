@@ -1,0 +1,19 @@
+// Regression: a bare NAMED-FUNCTION reference passed as a higher-order argument must lower to a proper
+// callable (a thunk closure invoked via blr), NOT a garbage value (which crashed, rc138). `xs.map(dbl)`,
+// `xs.filter(pred)`, and `xs.fold(acc, f)` all accept a named function by reference. Exit code sums the
+// three results: 12 + 12 + 10 = 34.
+fun dbl(x: Int): Int { return x * 2 }
+
+fun isEven(x: Int): Bool { return x % 2 == 0 }
+
+fun addup(a: Int, x: Int): Int { return a + x }
+
+fun main(): Int {
+  val s = [1, 2, 3].map(dbl).sum()
+  // [2,4,6] -> 12
+  val e = [1, 2, 3, 4, 5, 6].filter(isEven).sum()
+  // 2+4+6 -> 12
+  val f = [1, 2, 3, 4].fold(0, addup)
+  // 1+2+3+4 -> 10
+  return s + e + f
+}

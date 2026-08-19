@@ -1186,11 +1186,46 @@ fun parseRecv(p: P): String {
 fun parseFunc(p: P, annos: IntBuf): FFunc {
   eat(p) // 'fun'
   var gen = parseGenerics(p) // free-fn: fun <T> name
-  val name = ptext(p); eat(p)
+  var name = ptext(p); eat(p)
+  // EXTENSION FUNCTION: `fun Type.method(args): R { ... }`. The first ident is the RECEIVER TYPE, the
+  // ident after the `.` is the method name. We DESUGAR onto the free-function convention that method
+  // dispatch already uses: a top-level `fun <Type>_<method>(this: <Type>, args)`. `x.m(a)` then routes
+  // to `<Type>_<method>(x, a)` via methodCallee's mangle, and `self` in the body (FEThis -> local "this")
+  // binds to the injected first parameter. No lowering/checker/codegen change is needed: this reads as a
+  // plain free function whose first param is named "this".
+  var extRecv = ""
+  if (pk(p) == 27) { // '.'  — extension function: `fun Type.method(args): R`
+    eat(p)
+    // VALIDATE: the token after the dot MUST be a plain identifier (kind 1) — the method name. Without this
+    // guard a malformed `fun Int.()` / `fun Int.5()` blindly took ptext as the method (e.g. "(" or ""), then
+    // `eat(p) // '('` consumed the wrong token, desyncing the parser and SILENTLY miscompiling (the real
+    // `main` was swallowed, yet `check` reported "ok"). Route a violation through the shared hard-abort
+    // diagnostic path (stderr Diagnostic + __abort → exit 134, NO binary), same as every other robustness case.
+    if (pk(p) != 1) {
+      emitDiag(diagError("extension function: expected a method name identifier after `" + (name + ".`")))
+      __abort()
+    }
+    extRecv = name
+    val meth = ptext(p); eat(p)
+    name = extRecv + ("_" + meth)
+  } else { if (pk(p) == 28 || pk(p) == 83) { // '..' / '..<' — a MALFORMED extension decl (e.g. `fun Int..dbl()`)
+    // `..`/`..<` lex as a single range token, so this never entered the `.` branch above; left unguarded it
+    // fell straight into `eat(p) // '('`, eating the range token as the `(` and desyncing the parser (main
+    // swallowed, `check` still said "ok"). Same hard-abort path — a range operator is never a valid receiver dot.
+    emitDiag(diagError("extension function: expected `.` then a method name identifier after `" + (name + "`")))
+    __abort()
+  } }
   if (gen == "") { gen = parseGenerics(p) } // method: fun name<T>
+  // DEFENSIVE: the signature's `(` must be here. A residual desync (e.g. `fun Int.dbl.foo()`) that left a
+  // non-`(` token would otherwise be eaten as the paren and silently miscompile — hard-abort instead.
+  if (pk(p) != 20) {
+    emitDiag(diagError("function `" + (name + "`: expected `(` to open the parameter list")))
+    __abort()
+  }
   eat(p) // '('
   val recv = parseRecv(p)
   val params = list()
+  if (extRecv != "") { params.push(FParam("this", extRecv)) } // injected receiver param
   var need = 0
   if (recv == "") { if (pk(p) != 21) { need = 1 } }
   else { if (pk(p) == 24) { eat(p); need = 1 } }

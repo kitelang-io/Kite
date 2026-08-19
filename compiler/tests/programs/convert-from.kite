@@ -15,12 +15,12 @@ fun main(): Int {
   if ((0x8000 as I16).toI32() == (0 - 32768)) { acc = acc + 1 }   // 4
 
   // TryFrom: in-range narrows to Some, out-of-range to None.
-  if (isSome((200 as U16).toU8())) { acc = acc + 1 }              // 5
-  if (isNone((300 as U16).toU8())) { acc = acc + 1 }              // 6
-  if (optGetOr((200 as U16).toU8(), 0) == 200) { acc = acc + 1 }  // 7
-  if (isNone((70000 as U32).toU16())) { acc = acc + 1 }           // 8
-  if (isSome((4294967295 as U64).toU32())) { acc = acc + 1 }      // 9
-  if (isNone(((1u64 << 40) as U64).toU32())) { acc = acc + 1 }    // 10
+  if ((200 as U16).toU8().isSome()) { acc = acc + 1 }              // 5
+  if ((300 as U16).toU8().isNone()) { acc = acc + 1 }              // 6
+  if ((200 as U16).toU8().getOr(0) == 200) { acc = acc + 1 }  // 7
+  if ((70000 as U32).toU16().isNone()) { acc = acc + 1 }           // 8
+  if ((4294967295 as U64).toU32().isSome()) { acc = acc + 1 }      // 9
+  if (((1u64 << 40) as U64).toU32().isNone()) { acc = acc + 1 }    // 10
 
   return acc                                                        // 10
 }

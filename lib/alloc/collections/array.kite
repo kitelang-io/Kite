@@ -51,5 +51,5 @@ class Array<T>(var n: Int, var buf: RawBuf) {
     while (i < self.n) { if (__packedGet::<T>(self.buf.data, i) == x) { return Some(i) } i = i + 1 }
     return None
   }
-  fun contains(self, x: T): Bool { return isSome(self.indexOf(x)) }
+  fun contains(self, x: T): Bool { return self.indexOf(x).isSome() }
 }

@@ -83,5 +83,15 @@ rm -f "$T/dd_out"
 grep -q "floating-point" "$T/dd_err" || fail "double-derive diagnostic not on stderr"
 echo "  @derive(Eq,Ord,Debug) over Double -> exit $rc, no binary, diagnostic on stderr ✓"
 
+echo "=== [robustness] malformed extension-function decl hard-aborts, no silent miscompile ==="
+XF=compiler/tests/bugs/malformed-extension-must-abort.kite
+rm -f "$T/xf_out"
+"$T/k2" --no-check "$XF" "$T/xf_out" >"$T/xf_stdout" 2>"$T/xf_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on 'fun Int..dbl()' — extension-fn parser validation regressed (silent desync)"
+[ -f "$T/xf_out" ] && fail "compiler wrote a binary despite a malformed extension-fn decl (parser desynced, main swallowed)"
+grep -q "extension function" "$T/xf_err" || fail "malformed-extension diagnostic not on stderr"
+[ -s "$T/xf_stdout" ] && fail "malformed-extension diagnostic leaked to stdout (must be stderr-only)"
+echo "  fun Int..dbl() -> exit $rc, no binary, diagnostic on stderr ✓"
+
 echo "✅ GATE PASSED (no OCaml, no shared /tmp) — suite green, kcc2==kcc3, robust to malformed input"
 rm -rf "$T"

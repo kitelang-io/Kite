@@ -234,8 +234,8 @@ fun genOr(ctx: Ctx, a: Expr, b: Expr): Int {
 // The compiler's own sources are 100% `Int` (signed), so binUnsigned is always false for kcc itself and
 // the emitted bytes are unchanged — the split only fires on user unsigned-typed operands.
 fun isUnsignedTy(s: String): Bool {
-  return s == "U8" || s == "U16" || s == "U32" || s == "U64" || s == "USize" || s == "Byte"
-    || s == "UInt8" || s == "UInt16" || s == "UInt32" || s == "UInt64"
+  return s == "U8" || s == "U16" || s == "U32" || s == "U64" || s == "USize"
+    || s == "UByte" || s == "UShort" || s == "UInt" || s == "ULong"
 }
 
 fun binUnsigned(ctx: Ctx, a: Expr, b: Expr): Bool {
@@ -254,6 +254,45 @@ fun uOpInstr(ctx: Ctx, op: String): Int {
   return opInstr(ctx, op)
 }
 
+// Runtime width (in bits) of an integer type for arithmetic WRAP: everything narrower than a 64-bit
+// machine word gets masked back to its width after a value-widening op. `Int` is 32-bit (Phase BC);
+// the 64-bit words (Long/ISize/USize/ULong) and everything else (structs, "", Double…) return 64 =
+// "no wrap". Kept separate from castBits so an explicit `as Int` / `as Char` keeps its own semantics.
+fun arithBits(s: String): Int {
+  if (s == "I8" || s == "U8" || s == "Byte" || s == "UByte") { return 8 }
+  if (s == "I16" || s == "U16" || s == "Short" || s == "UShort") { return 16 }
+  if (s == "I32" || s == "U32" || s == "UInt" || s == "Int") { return 32 }
+  return 64
+}
+
+// Mask x0 to its low `bits` (bits<64) by shifting the excess out the top and back: LOGICAL right shift
+// zero-fills (unsigned), ARITHMETIC right shift replicates the sign bit (signed). Immediate-free — only
+// a small (64-bits) shift count — so it never has to build a 2^bits-1 mask constant. That matters at
+// bits==32, where the mask (0xFFFFFFFF) is itself a >31-bit value: computing it as `pow2(32)-1` inside a
+// Phase-D compiler would wrap to -1 and mask nothing. Shifts sidestep that entirely.
+fun emitWidthMask(ctx: Ctx, bits: Int, uns: Bool): Int {
+  loadImm(ctx, 1, 64 - bits); emit(ctx, IShl(0, 0, 1))
+  if (uns) { return emit(ctx, ILShr(0, 0, 1)) }
+  return emit(ctx, IShr(0, 0, 1))
+}
+
+// Two's-complement wrap of x0 to the runtime width of `ty`. Unsigned types zero-extend, signed types
+// sign-extend. A 64-bit / non-integer `ty` is a no-op. Keyed off arithBits (Int=32) so ORDINARY
+// arithmetic — not just explicit casts — wraps at the declared width.
+fun genWidthWrap(ctx: Ctx, ty: String): Int {
+  val bits = arithBits(ty)
+  if (bits >= 64) { return 0 }
+  return emitWidthMask(ctx, bits, isUnsignedTy(ty))
+}
+
+// Only the value-WIDENING ops need a post-wrap: +,-,*,/ and left-shift can carry the result past the
+// declared width. %, >>, &, |, ^, comparisons and && / || preserve or reduce an already-in-width
+// operand, so masking them would be dead work. (Operands are kept in-width by this same wrap + by the
+// sized loads and casts, so the invariant is self-sustaining.)
+fun opWidens(op: String): Bool {
+  return op == "+" || op == "-" || op == "*" || op == "/" || op == "<<"
+}
+
 fun genBinary(ctx: Ctx, op: String, a: Expr, b: Expr): Int {
   if (op == "&&") { return genAnd(ctx, a, b) }
   if (op == "||") { return genOr(ctx, a, b) }
@@ -263,8 +302,15 @@ fun genBinary(ctx: Ctx, op: String, a: Expr, b: Expr): Int {
   val u = binUnsigned(ctx, a, b)
   genExpr(ctx, a); emit(ctx, IPush(0))
   genExpr(ctx, b); emit(ctx, IMov(1, 0)); emit(ctx, IPop(0))
-  if (u) { return uOpInstr(ctx, op) }
-  return opInstr(ctx, op)
+  val r = if (u) { uOpInstr(ctx, op) } else { opInstr(ctx, op) }
+  // Wrap a sub-64-bit result to its declared runtime width (drive it from the checker-assigned type of
+  // the whole expression). 64-bit / untyped results skip the mask, so the compiler's own USize/Long/""
+  // machine-word arithmetic is byte-unchanged; only genuinely narrow (Int32/U8/…) results get masked.
+  if (opWidens(op)) {
+    val rt = typeNameOf(ctx, EBin(op, a, b))
+    if (arithBits(rt) < 64) { return genWidthWrap(ctx, rt) }
+  }
+  return r
 }
 
 // ---- struct type table + boxed struct codegen -----------------------------
@@ -307,6 +353,34 @@ fun getLty(ctx: Ctx, name: String): String {
   return ""
 }
 
+// Combine two operand type names into the result type of a binary op for width/signedness purposes:
+// pick the wider (larger arithBits; "" and other non-narrow names are 64-bit machine words), and on a
+// width tie prefer an unsigned name (so unsigned div/shift selection survives), else a known name.
+fun widerTy(a: String, b: String): String {
+  val ba = arithBits(a); val bb = arithBits(b)
+  if (ba > bb) { return a }
+  if (bb > ba) { return b }
+  if (isUnsignedTy(a)) { return a }
+  if (isUnsignedTy(b)) { return b }
+  if (a != "") { return a }
+  return b
+}
+
+fun isIntLit(e: Expr): Bool { return when (e) { EInt(v) -> true; else -> false } }
+
+// Result type of a binary op given its two operand EXPRESSIONS. A bare integer literal carries no width
+// of its own — it adapts to the other operand (mirrors the checker, where `x:Int + 1` infers Int and
+// `usize + 1` infers USize). So `Int_var + 1` masks to 32 while the compiler's untyped `hv + 1` (hv is
+// "") stays a 64-bit machine word. When neither (or both) is a literal, fall back to the wider type:
+// an untyped ("") machine-word operand dominates a typed-narrow one, which is what keeps the compiler's
+// own `untyped * 16 + intReturningCall()` lexer arithmetic unmasked and self-reproducing.
+fun binTy(ctx: Ctx, l: Expr, r: Expr): String {
+  val ll = isIntLit(l); val rl = isIntLit(r)
+  if (ll && (rl == false)) { return typeNameOf(ctx, r) }
+  if (rl && (ll == false)) { return typeNameOf(ctx, l) }
+  return widerTy(typeNameOf(ctx, l), typeNameOf(ctx, r))
+}
+
 fun typeNameOf(ctx: Ctx, e: Expr): String {
   return when (e) {
     EIdent(n) -> getLty(ctx, n)
@@ -322,9 +396,13 @@ fun typeNameOf(ctx: Ctx, e: Expr): String {
       else { val ft = floorRetTag(nm); if (ft != "") { ft } else { funRetOf(ctx.gen, nm) } } }
     }
     EField(b, f) -> fieldTypeOf(ctx.gen, typeNameOf(ctx, b), f)
-    // Arithmetic/bitwise result carries an operand's type so unsignedness propagates through nested
-    // expressions (`(a+b) >> c` stays unsigned when a/b are). Prefer an unsigned operand's type.
-    EBin(op, l, r) -> { val tl = typeNameOf(ctx, l); if (isUnsignedTy(tl)) { tl } else { val tr = typeNameOf(ctx, r); if (tr != "") { tr } else { tl } } }
+    // Arithmetic/bitwise result carries the WIDER operand's type, so both the runtime-width wrap
+    // (genBinary) and unsignedness propagation (`(a+b) >> c` stays unsigned when a/b are) see the right
+    // type. An untyped ("") operand is an unknown-width machine word -> treated as 64-bit, so mixing a
+    // typed-narrow value with an untyped one does NOT mask to the narrow width (this is what keeps the
+    // compiler's own USize/untyped machine-word arithmetic — e.g. the lexer's 0x100000000 hex value —
+    // unmasked and self-reproducing). Equal widths prefer an unsigned type to keep unsigned div/shift.
+    EBin(op, l, r) -> binTy(ctx, l, r)
     else -> ""
   }
 }
@@ -695,24 +773,19 @@ fun isFloatTypeName(s: String): Bool { return s == "Double" || s == "Float" }
 
 // Storage width in bits for an integer/char cast target ("" -> 64 = word, the no-normalize case).
 fun castBits(ty: String): Int {
-  if (ty == "I8" || ty == "Int8" || ty == "U8" || ty == "UInt8" || ty == "Byte") { return 8 }
-  if (ty == "I16" || ty == "Int16" || ty == "U16" || ty == "UInt16") { return 16 }
-  if (ty == "I32" || ty == "Int32" || ty == "U32" || ty == "UInt32" || ty == "Char") { return 32 }
+  if (ty == "I8" || ty == "U8" || ty == "Byte" || ty == "UByte") { return 8 }
+  if (ty == "I16" || ty == "U16" || ty == "Short" || ty == "UShort") { return 16 }
+  if (ty == "I32" || ty == "U32" || ty == "UInt" || ty == "Char") { return 32 }
   return 64
 }
 
-// int -> int normalization to the cast target's width: unsigned/char masks (zero-extend), signed
-// sign-extends via a left-then-arithmetic-right shift pair. x0 already holds the source word.
+// int -> int normalization to the cast target's width: unsigned/char zero-extend, signed sign-extend.
+// x0 already holds the source word. Shares the immediate-free shift masker with the arithmetic wrap.
 fun genCastNarrow(ctx: Ctx, ty: String): Int {
   val bits = castBits(ty)
   if (bits >= 64) { return 0 } // word target: reinterpret, no bits change
-  if (isUnsignedTy(ty) || ty == "Char") {
-    loadImm(ctx, 1, pow2i(bits) - 1); return emit(ctx, IAnd(0, 0, 1)) // mask low `bits`
-  }
-  loadImm(ctx, 1, 64 - bits); emit(ctx, IShl(0, 0, 1)); return emit(ctx, IShr(0, 0, 1)) // sign-extend
+  return emitWidthMask(ctx, bits, isUnsignedTy(ty) || ty == "Char")
 }
-
-fun pow2i(n: Int): Int { var r = 1; var i = 0; while (i < n) { r = r * 2; i = i + 1 }; return r }
 
 // `e as T`: numeric conversion. int<->int = width/sign normalize; int->float = scvtf+box;
 // float->int = unbox+fcvtzs (truncate toward zero); float->float = identity.

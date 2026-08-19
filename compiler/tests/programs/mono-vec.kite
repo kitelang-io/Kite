@@ -11,7 +11,7 @@ fun main(): Int {
   if (sizeOf::<U8>() == 1) { acc = acc + 1 }        // 1
   if (sizeOf::<U16>() == 2) { acc = acc + 1 }       // 2
   if (sizeOf::<U32>() == 4) { acc = acc + 1 }       // 3
-  if (sizeOf::<Int>() == 8) { acc = acc + 1 }       // 4
+  if (sizeOf::<Int>() == 4) { acc = acc + 1 }       // 4  (Int is 32-bit: 4-byte stride)
   if (sizeOf::<Bool>() == 1) { acc = acc + 1 }      // 5
   if (sizeOf::<Char>() == 4) { acc = acc + 1 }      // 6
 
@@ -59,7 +59,7 @@ fun main(): Int {
   sw.push(0xFFFFFFFF)                                 // -1
   if (sw.get(0) == 0 - 1) { acc = acc + 1 }          // 19
 
-  // Vec<Int>: stride 8, full word, exercises growth (push past cap 4).
+  // Vec<Int>: stride 4 (Int is 32-bit), exercises growth (push past cap 4).
   val v = Vec::<Int>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<Int>())))
   v.push(10)
   v.push(20)

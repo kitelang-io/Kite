@@ -61,7 +61,7 @@ class TreeMap<K, V>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, va
     }
     return dflt
   }
-  fun has(self, k: K): Bool { return isSome(self.get(k)) }
+  fun has(self, k: K): Bool { return self.get(k).isSome() }
   fun removeAt(self, node: Int, k: K): Int {
     if (node < 0) { return 0 - 1 }
     val nk: K = __packedGet::<K>(self.keys, node)
@@ -82,7 +82,7 @@ class TreeMap<K, V>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, va
   }
   fun remove(self, k: K): Option {
     val g = self.get(k)
-    if (isNone(g)) { return None }
+    if (g.isNone()) { return None }
     self.root = self.removeAt(self.root, k)
     self.n = self.n - 1
     return g

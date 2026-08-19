@@ -106,5 +106,5 @@ class Vec<T>(var n: Int, var cap: Int, var buf: RawBuf) {
     }
     return None
   }
-  fun contains(self, x: T): Bool { return isSome(self.indexOf(x)) }
+  fun contains(self, x: T): Bool { return self.indexOf(x).isSome() }
 }

@@ -13,47 +13,58 @@
 // substance — they exist purely to carry the classification a primitive's name maps to. A2: registers
 // are always 64-bit words; the width lives in the TYPE, so a U16 computes in an X-register like an Int.
 //
-// Canonical doc names are I8..I64 / U8..U64 / ISize / USize / Double / Never; the older aliases
-// (Int8.., UInt8.., Float, Nothing, Byte, Long) stay recognized so no existing source regresses.
+// NAMING (Phase A — Kotlin-primary + explicit-width aliases). The PRIMARY (canonical) name of each
+// primitive carries its @prim classification; the explicit-width alias carries `@alias("<Primary>")` so
+// the checker CANONICALIZES the alias to its primary (same type-id, freely interchangeable). Canon:
+//   Byte(sint8, alias I8) · Short(sint16, alias I16) · Int(sint32, alias I32) · Long(sint64, alias I64)
+//   UByte(uint8, U8) · UShort(uint16, U16) · UInt(uint32, U32) · ULong(uint64, U64)
+//   ISize/USize (ptr word, no alias) · Float(f32, F32) · Double(f64, F64) · Nothing(bottom, alias Never)
+// The dropped Int8../UInt8../old-sint64-over-aliases are GONE; Byte is now SIGNED 8-bit (was uint8) —
+// unsigned bytes are UByte/U8. WIDTH is unchanged this phase: `Int` keeps its 64-bit @prim (Phase BC
+// narrows it to sint32); each fixed-width alias keeps its true width so sizeOf<I8>/<I16>/<I32> and casts
+// stay 8/16/32. An alias defers TYPE-IDENTITY to its primary via @alias but keeps its own @prim so
+// recognition/sizeOf/range-checks read a width directly; only the checker's compat canonicalizes.
 
-// ---- signed integer tower ----
-@prim("sint", 64) fun Int()
-@prim("sint", 64) fun Long()
-@prim("sint", 64) fun ISize()
-@prim("sint", 8) fun I8()
-@prim("sint", 16) fun I16()
-@prim("sint", 32) fun I32()
-@prim("sint", 64) fun I64()
-@prim("sint", 8) fun Int8()
-@prim("sint", 16) fun Int16()
-@prim("sint", 32) fun Int32()
-@prim("sint", 64) fun Int64()
+// ---- signed integer tower (primaries + explicit-width aliases) ----
+// Each scalar is a `@prim class`: a NON-BOXING value class. The @prim marker diverts it away from the
+// heap-layout (structN) and auto-ARC (classN) tables in klower's collectDecl, so it is an unboxed
+// primitive — byte-for-byte the old `@prim fun Int()`, only the declaration syntax now reads as a type.
+@prim("sint", 8) class Byte
+@prim("sint", 16) class Short
+@prim("sint", 32) class Int
+@prim("sint", 64) class Long
+@prim("sint", 64) class ISize
+@prim("sint", 8) @alias("Byte") class I8
+@prim("sint", 16) @alias("Short") class I16
+@prim("sint", 32) @alias("Int") class I32
+@prim("sint", 64) @alias("Long") class I64
 
-// ---- unsigned integer tower ----
-@prim("uint", 64) fun USize()
-@prim("uint", 8) fun Byte()
-@prim("uint", 8) fun U8()
-@prim("uint", 16) fun U16()
-@prim("uint", 32) fun U32()
-@prim("uint", 64) fun U64()
-@prim("uint", 8) fun UInt8()
-@prim("uint", 16) fun UInt16()
-@prim("uint", 32) fun UInt32()
-@prim("uint", 64) fun UInt64()
+// ---- unsigned integer tower (primaries + explicit-width aliases) ----
+@prim("uint", 8) class UByte
+@prim("uint", 16) class UShort
+@prim("uint", 32) class UInt
+@prim("uint", 64) class ULong
+@prim("uint", 64) class USize
+@prim("uint", 8) @alias("UByte") class U8
+@prim("uint", 16) @alias("UShort") class U16
+@prim("uint", 32) @alias("UInt") class U32
+@prim("uint", 64) @alias("ULong") class U64
 
 // ---- floating point ----
-@prim("float", 64) fun Double()
-@prim("float", 32) fun Float()
+@prim("float", 32) class Float
+@prim("float", 64) class Double
+@prim("float", 32) @alias("Float") class F32
+@prim("float", 64) @alias("Double") class F64
 
 // ---- non-integer scalars ----
-@prim("bool", 8) fun Bool()
-@prim("char", 32) fun Char()
+@prim("bool", 8) class Bool
+@prim("char", 32) class Char
 @prim("string", 64) fun String()
 @prim("unit", 0) fun Unit()
 
 // ---- bottom + reserved ----
-@prim("never", 0) fun Never()
 @prim("never", 0) fun Nothing()
+@prim("never", 0) @alias("Nothing") fun Never()
 @prim("reserved", 128) fun I128()
 @prim("reserved", 128) fun U128()
 
@@ -66,12 +77,34 @@
 // reads as `Int::MAX`. Bare integer arithmetic (registers are 64-bit words), so word-width MIN is
 // computed as `0 - MAX - 1` rather than written as an out-of-range literal.
 
-// signed word (Int == I64 == ISize)
-fun Int_BITS(): Int { return 64 }
+// Int is a 32-bit signed integer (Phase BC narrowed it from the 64-bit word). The pointer-width machine
+// word is now Long/ISize/USize, NOT Int — addresses/sizes/buffer pointers carry those types.
+fun Int_BITS(): Int { return 32 }
 
-fun Int_MAX(): Int { return 9223372036854775807 }
+fun Int_MAX(): Int { return 2147483647 }
 
-fun Int_MIN(): Int { return 0 - 9223372036854775807 - 1 }
+fun Int_MIN(): Int { return 0 - 2147483648 }
+
+// signed 64-bit standalone (Long == I64); the pointer-width signed word is ISize (same width). The 64-bit
+// bounds are written with the `L`/`isize` suffix so the literal carries the wide type (a bare literal
+// infers Int, which no longer holds a 64-bit value).
+fun Long_BITS(): Int { return 64 }
+
+fun Long_MAX(): Long { return 9223372036854775807L }
+
+fun Long_MIN(): Long { return 0L - 9223372036854775807L - 1L }
+
+fun ISize_BITS(): Int { return 64 }
+
+fun ISize_MAX(): ISize { return 9223372036854775807isize }
+
+fun ISize_MIN(): ISize { return 0isize - 9223372036854775807isize - 1isize }
+
+// USize is the unsigned pointer-width word (addresses/sizes); MIN is 0, MAX (2^64-1) exceeds the signed
+// word so it is deferred with I128/U128 exactly like U64_MAX.
+fun USize_BITS(): Int { return 64 }
+
+fun USize_MIN(): USize { return 0usize }
 
 // signed fixed widths
 fun I8_BITS(): Int { return 8 }

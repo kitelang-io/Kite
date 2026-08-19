@@ -14,40 +14,40 @@
 // destination range first and returns Some(x)/None.
 
 // ---- From / Into: lossless unsigned widening (x.toUN()) ----
-fun U8_toU16(x: U8): U16 { return x as U16 }
+fun U8.toU16(): U16 { return self as U16 }
 
-fun U8_toU32(x: U8): U32 { return x as U32 }
+fun U8.toU32(): U32 { return self as U32 }
 
-fun U16_toU32(x: U16): U32 { return x as U32 }
+fun U16.toU32(): U32 { return self as U32 }
 
-fun U8_toU64(x: U8): U64 { return x as U64 }
+fun U8.toU64(): U64 { return self as U64 }
 
-fun U16_toU64(x: U16): U64 { return x as U64 }
+fun U16.toU64(): U64 { return self as U64 }
 
-fun U32_toU64(x: U32): U64 { return x as U64 }
+fun U32.toU64(): U64 { return self as U64 }
 
 // ---- From / Into: lossless signed widening (sign-preserving, x.toIN()) ----
-fun I8_toI16(x: I8): I16 { return x as I16 }
+fun I8.toI16(): I16 { return self as I16 }
 
-fun I8_toI32(x: I8): I32 { return x as I32 }
+fun I8.toI32(): I32 { return self as I32 }
 
-fun I16_toI32(x: I16): I32 { return x as I32 }
+fun I16.toI32(): I32 { return self as I32 }
 
-fun I8_toI64(x: I8): Int { return x as I64 }
+fun I8.toI64(): I64 { return self as I64 }
 
-fun I16_toI64(x: I16): Int { return x as I64 }
+fun I16.toI64(): I64 { return self as I64 }
 
-fun I32_toI64(x: I32): Int { return x as I64 }
+fun I32.toI64(): I64 { return self as I64 }
 
 // ---- TryFrom: fallible unsigned narrowing (x.toUN() -> Option, None when out of range) ----
-fun U16_toU8(x: U16): Option { if (x > 255) { return None } return Some(x as U8) }
+fun U16.toU8(): Option { if (self > 255) { return None } return Some(self as U8) }
 
-fun U32_toU8(x: U32): Option { if (x > 255) { return None } return Some(x as U8) }
+fun U32.toU8(): Option { if (self > 255) { return None } return Some(self as U8) }
 
-fun U64_toU8(x: U64): Option { if (x > 255) { return None } return Some(x as U8) }
+fun U64.toU8(): Option { if (self > 255) { return None } return Some(self as U8) }
 
-fun U32_toU16(x: U32): Option { if (x > 65535) { return None } return Some(x as U16) }
+fun U32.toU16(): Option { if (self > 65535) { return None } return Some(self as U16) }
 
-fun U64_toU16(x: U64): Option { if (x > 65535) { return None } return Some(x as U16) }
+fun U64.toU16(): Option { if (self > 65535) { return None } return Some(self as U16) }
 
-fun U64_toU32(x: U64): Option { if (x > 4294967295) { return None } return Some(x as U32) }
+fun U64.toU32(): Option { if (self > 4294967295) { return None } return Some(self as U32) }

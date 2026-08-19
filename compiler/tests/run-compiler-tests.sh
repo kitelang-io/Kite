@@ -58,6 +58,7 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/property-getset.kite:53
        compiler/tests/programs/map-class.kite:166
        compiler/tests/programs/operator-overload.kite:210 compiler/tests/programs/string-methods.kite:114
+       compiler/tests/programs/op-method-result.kite:5
        compiler/tests/programs/bool-not-call.kite:7
        compiler/tests/programs/question-operator.kite:117
        compiler/tests/programs/for-in-seq.kite:233
@@ -66,7 +67,7 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/big-frame-later-globals.kite:42
        compiler/tests/programs/untyped-param-retty.kite:5
        compiler/tests/programs/sized-arrays.kite:12
-       compiler/tests/programs/unsigned-ops.kite:7 compiler/tests/programs/cast-as.kite:11 compiler/tests/programs/to-float.kite:5 compiler/tests/programs/overflow-family.kite:16 compiler/tests/programs/convert-from.kite:10
+       compiler/tests/programs/unsigned-ops.kite:7 compiler/tests/programs/cast-as.kite:11 compiler/tests/programs/to-float.kite:5 compiler/tests/programs/overflow-family.kite:16 compiler/tests/programs/convert-from.kite:10 compiler/tests/programs/width-wrap.kite:11
        compiler/tests/programs/derive.kite:18 compiler/tests/programs/derive-enum.kite:20
        compiler/tests/programs/strbuilder.kite:10
        compiler/tests/programs/mono-vec.kite:12 compiler/tests/programs/mono-vec-field.kite:5 compiler/tests/programs/mono-vec-return.kite:7
@@ -78,7 +79,9 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/collections-cow.kite:14
        compiler/tests/programs/ns-mono-vec.kite:12
        compiler/tests/programs/ns-method-sugar.kite:18
-       compiler/tests/programs/string-escapes.kite:255 compiler/tests/programs/char-utf8.kite:127)
+       compiler/tests/programs/alias-method-dispatch.kite:4
+       compiler/tests/programs/string-escapes.kite:255 compiler/tests/programs/char-utf8.kite:127
+       compiler/tests/programs/string-int-concat.kite:11 compiler/tests/programs/named-fn-ref.kite:34)
 for t in $TESTS; do
   if check "${t%:*}" "${t##*:}"; then pass=$((pass+1)); else fail=$((fail+1)); fi
 done
