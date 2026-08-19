@@ -1,6 +1,6 @@
 // kite::alloc::collections — aggregator for the collection modules. There is nothing left to opt into:
-// IntBuf and RawMap are language primitives auto-injected via the prelude (kite::alloc::collections::{list,map}),
+// IntBuf and RawMap are language primitives auto-injected via the prelude (kite::alloc::collections::internal::{intbuf,rawmap}),
 // the generic higher-order operations are IntBuf methods (xs.map(f), xs.fold(acc,f), xs.find(pred), ...),
-// and `rangeList` is a free factory in the list module. The former orphan Vec module has been removed.
-pub import kite::alloc::collections::list
-pub import kite::alloc::collections::map
+// and `rangeList` is a free factory in the intbuf module. The former orphan Vec module has been removed.
+pub import kite::alloc::collections::internal::intbuf
+pub import kite::alloc::collections::internal::rawmap

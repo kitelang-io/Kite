@@ -1,4 +1,4 @@
-import "lib/alloc/hashmap.kite"
+import "lib/alloc/collections/hashmap.kite"
 fun main(): Int {
   var acc = 0
   // Int -> Int map

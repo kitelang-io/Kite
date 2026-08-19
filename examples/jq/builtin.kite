@@ -35,7 +35,7 @@ fun strLess(a: String, b: String): Bool {
 
 // keys: a SORTED array of an object's keys (jq's `keys` sorts; `keys_unsorted` preserves order).
 fun keysOf(j: Json): Json {
-  val ks = intBuf()
+  val ks = list()
   when (j) {
     JObj(es) -> { for (e in es) { ks.push(entryKey(e)) } }
     else -> 0
@@ -48,7 +48,7 @@ fun keysOf(j: Json): Json {
     ks.set(d + 1, key)
     i += 1
   }
-  val out = intBuf()
+  val out = list()
   for (k in ks) { out.push(JStr(k)) }
   return JArr(out)
 }

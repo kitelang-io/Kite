@@ -1,5 +1,5 @@
 // {..} builds a REAL RawMap class (not a IntBuf-as-[k,v] alias): exercises m.get/set/has/size + key
-// iteration, m[k] / m[k]=v index sugar, rawMap() returning a real RawMap, and IntBuf's .length()/.len() methods.
+// iteration, m[k] / m[k]=v index sugar, map() returning a real RawMap, and IntBuf's .length()/.len() methods.
 fun main(): Int {
   val m = ["a": 10, "b": 20] // real RawMap via {..}
   var acc = 0
@@ -16,7 +16,7 @@ fun main(): Int {
   m["c"] = 9 // index write (update in place)
   acc = acc + m["c"] // 9   -> 151
 
-  val e = rawMap() // rawMap() returns a real RawMap
+  val e = map() // map() returns a real RawMap
   e.set("k", 7)
   acc = acc + e.size() // 1   -> 152
   acc = acc + e.get("k") // 7   -> 159

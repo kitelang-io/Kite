@@ -52,7 +52,7 @@ fun pushWord(out: IntBuf, w: String): Int {
 }
 
 fun parseQuery(src: String): IntBuf {
-  val filters = intBuf()
+  val filters = list()
   val p = QParser(src, 0)
   var go = true
   while (go) {
@@ -76,7 +76,7 @@ fun parseQuery(src: String): IntBuf {
 // ---------------- evaluation ----------------
 // apply ONE filter to ONE input value, producing a stream (0+ outputs).
 fun applyFilter(f: Filter, input: Json): IntBuf {
-  val out = intBuf()
+  val out = list()
   when (f) {
     FIdentity -> out.push(input)
     FField(name) -> when (objGet(input, name)) { Some(v) -> out.push(v) None -> out.push(JNull) }
@@ -91,10 +91,10 @@ fun applyFilter(f: Filter, input: Json): IntBuf {
 
 // run the pipeline: start with [root], then flat-map each filter across the whole stream.
 fun runQuery(filters: IntBuf, root: Json): IntBuf {
-  var stream = intBuf()
+  var stream = list()
   stream.push(root)
   for (f in filters) {
-    val next = intBuf()
+    val next = list()
     for (v in stream) { for (o in applyFilter(f, v)) { next.push(o) } }
     stream = next
   }

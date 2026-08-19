@@ -1,0 +1,11 @@
+// Regression: UFCS method-SUGAR dispatch across a NAMESPACE import (`import ...`, not a quoted include).
+// `c.value()` (struct-body method), `c.raw()` (inherent trait-impl method) and `c.score()` (trait DEFAULT
+// method whose body calls the module-local free fn `boost`) must all resolve to the owner-mangled
+// `Counter_<m>` / module-mangled `boost` symbols under the module pipeline exactly as the flat/quoted path
+// does. Counter(5): value=5, raw=10, score=boost(10)=13 -> 5+13 = 18.
+import compiler::tests::programs::ns_method_dep
+
+fun main(): Int {
+  val c = Counter(5)
+  return c.value() + c.score()
+}

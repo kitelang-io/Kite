@@ -14,7 +14,7 @@ enum Decl { DFun(FFunc); DType(Int, FTDecl); DEnum(FEDecl); DTrait(FTraitDecl); 
 // annotation, if any). Diagnostics are later attributed to their enclosing decl's line.
 fun parseProgramLn(toks: IntBuf, lines: IntBuf): IntBuf {
   val p = P(toks, 0)
-  val decls = intBuf()
+  val decls = list()
   var go = 1
   while (go == 1) {
     if (pk(p) == 0) { go = 0 }
@@ -58,7 +58,7 @@ fun isBuiltin(n: String): Bool {
 
 // lambda param string "x: Int, y" -> ["x","y"]; "" -> []
 fun splitLamParams(s: String): IntBuf {
-  val out = intBuf()
+  val out = list()
   if (s == "") { return out }
   val n = s.len()
   var i = 0
@@ -103,10 +103,10 @@ fun rBind(ctx: RCtx, n: String): Int {
 
 fun rPush(ctx: RCtx): IntBuf { // returns saved scopes for restore
   val saved = ctx.scopes
-  val ns = intBuf()
+  val ns = list()
   var i = 0
   while (i < saved.len()) { ns.push(saved.get(i)); i = i + 1 }
-  ns.push(intBuf())
+  ns.push(list())
   ctx.scopes = ns
   return saved
 }
@@ -286,7 +286,7 @@ fun rDecl(ctx: RCtx, d: Decl): Int {
 // skipDup=1 suppresses duplicate-definition errors: used when checking a MERGED multi-module source
 // (namespace imports), where two modules legitimately share a name (the module system mangles them).
 fun collectGlobals(decls: IntBuf, lines: IntBuf, globals: IntBuf, diags: IntBuf, skipDup: Int): Int {
-  val seen = intBuf()
+  val seen = list()
   var i = 0
   while (i < decls.len()) {
     val d: Decl = decls.get(i)
@@ -342,14 +342,18 @@ fun collectDeclNames(decls: IntBuf, out: IntBuf): Int {
 // The prelude's top-level declarations, parsed ONCE from the same module list preludeSigs/injectHelpers
 // read. Returned so BOTH the resolver (names only) and the type-checker (full param/return signatures)
 // can seed themselves from one source of truth.
-fun preludeDeclList(): IntBuf {
-  val out = intBuf()
-  val paths = preludeConfPaths()
+fun preludeDeclList(): IntBuf { return preludeDeclListT(0) }
+
+// t1 (Phase 9): thread the String-T1 flag so the checker seeds the boxed `class String` module instead of
+// the T0 primitive-String modules — mirrors the lowerer's injectHelpers path, keeping the two in agreement.
+fun preludeDeclListT(t1: Int): IntBuf {
+  val out = list()
+  val paths = preludeConfPathsT(t1)
   var pi = 0
   while (pi < paths.len()) {
     val src = readFile(paths.get(pi))
     if (src.len() > 0) {
-      val plines = intBuf()
+      val plines = list()
       val decls = parseProgramLn(lex(src), plines)
       var di = 0
       while (di < decls.len()) { out.push(decls.get(di)); di = di + 1 }
@@ -359,20 +363,22 @@ fun preludeDeclList(): IntBuf {
   return out
 }
 
-fun preludeSigs(): IntBuf {
-  val out = intBuf()
-  collectDeclNames(preludeDeclList(), out)
+fun preludeSigs(): IntBuf { return preludeSigsT(0) }
+
+fun preludeSigsT(t1: Int): IntBuf {
+  val out = list()
+  collectDeclNames(preludeDeclListT(t1), out)
   return out
 }
 
-fun resolveCheck(decls: IntBuf, lines: IntBuf, skipDup: Int): IntBuf {
-  val diags = intBuf()
-  val globals = intBuf()
-  val pre = preludeSigs()
+fun resolveCheck(decls: IntBuf, lines: IntBuf, skipDup: Int, t1: Int): IntBuf {
+  val diags = list()
+  val globals = list()
+  val pre = preludeSigsT(t1)
   var pj = 0
   while (pj < pre.len()) { globals.push(pre.get(pj)); pj = pj + 1 }
   collectGlobals(decls, lines, globals, diags, skipDup)
-  val scopes = intBuf()
+  val scopes = list()
   val ctx = RCtx(globals, scopes, diags, 0)
   var i = 0
   while (i < decls.len()) { val d: Decl = decls.get(i); ctx.curLine = lines.get(i); rDecl(ctx, d); i = i + 1 }
@@ -383,50 +389,98 @@ fun resolveCheck(decls: IntBuf, lines: IntBuf, skipDup: Int): IntBuf {
 enum Ty { TPrim(String); TNamed(String, IntBuf); TNull(Ty); TFun(IntBuf, Ty); TUnknown }
 
 // ===== primitive-type REGISTRY (STDLIB-REDESIGN §2a numeric tower + scalars) =====
-// The checker consults this instead of ad-hoc strEq chains. Kind codes:
+// The primitive tower is DECLARED IN lib/ (lib/core/num.kite), NOT hardcoded here. Each scalar carries
+// a `@prim("<kind>", <bits>)` marker; `buildPReg` collects them during the prelude pass (exactly like
+// @lang/@arc) into a `PReg` table, threaded through the checker as `reg`. `primKind`/`primBits`/… READ
+// that table instead of a baked strEq switch, so the compiler SOURCES its numeric classification from
+// the library. Kind codes:
 //   0 none · 1 signed-int · 2 unsigned-int · 3 float · 4 bool · 5 char · 6 string
 //   7 unit · 8 never (bottom) · 9 reserved (I128/U128, not yet implemented)
-// Canonical doc names are I8..I64 / U8..U64 / ISize / USize / Double / Never; the older aliases
-// (Int8.., UInt8.., Float, Nothing, Byte, Long) stay recognized so no existing source regresses.
 // A2: registers are always 64-bit words — width lives in the TYPE, not the runtime rep (Phase 1).
-fun primKind(n: String): Int {
-  if (n == "Int" || n == "Long" || n == "ISize" ||
-    n == "I8" || n == "I16" || n == "I32" || n == "I64" ||
-    n == "Int8" || n == "Int16" || n == "Int32" || n == "Int64") { return 1 }
-  if (n == "USize" || n == "Byte" ||
-    n == "U8" || n == "U16" || n == "U32" || n == "U64" ||
-    n == "UInt8" || n == "UInt16" || n == "UInt32" || n == "UInt64") { return 2 }
-  if (n == "Double" || n == "Float") { return 3 }
-  if (n == "Bool") { return 4 }
-  if (n == "Char") { return 5 }
-  if (n == "String") { return 6 }
-  if (n == "Unit") { return 7 }
-  if (n == "Never" || n == "Nothing") { return 8 }
-  if (n == "I128" || n == "U128") { return 9 }
+struct PReg(val names: IntBuf, val kinds: IntBuf, val bits: IntBuf)
+
+// map a @prim kind string to the checker's kind code (the table's canonical classification).
+fun primKindCode(s: String): Int {
+  if (s == "sint") { return 1 }
+  if (s == "uint") { return 2 }
+  if (s == "float") { return 3 }
+  if (s == "bool") { return 4 }
+  if (s == "char") { return 5 }
+  if (s == "string") { return 6 }
+  if (s == "unit") { return 7 }
+  if (s == "never") { return 8 }
+  if (s == "reserved") { return 9 }
   return 0
 }
 
-fun isPrimReg(n: String): Bool { return primKind(n) != 0 }
+fun primAnnoStr(e: FExpr): String { return when (e) { FEStr(t, r) -> t; else -> "" } }
 
-fun primIsInt(n: String): Bool { val k = primKind(n); return k == 1 || k == 2 }
+fun primAnnoInt(e: FExpr): Int { return when (e) { FEInt(t) -> parseIntK(t); else -> 0 } }
 
-fun primIsSigned(n: String): Bool { return primKind(n) == 1 }
+// record a decl's `@prim("<kind>", <bits>)` marker (name -> kind code + storage bits) into the registry.
+fun recordPrim(annos: IntBuf, name: String, reg: PReg): Int {
+  var i = 0
+  while (i < annos.len()) {
+    val a: Anno = annos.get(i)
+    if (a.name == "prim" && a.args.len() >= 2) {
+      reg.names.push(name)
+      reg.kinds.push(primKindCode(primAnnoStr(a.args.get(0))))
+      reg.bits.push(primAnnoInt(a.args.get(1)))
+    }
+    i = i + 1
+  }
+  return 0
+}
 
-fun primIsFloat(n: String): Bool { return primKind(n) == 3 }
+// build the primitive registry from the prelude decl list: every @prim-marked declaration contributes
+// one (name, kind, bits) row. lib/core/num.kite carries the whole tower, so this equals the old switch.
+fun buildPReg(decls: IntBuf): PReg {
+  val reg = PReg(list(), list(), list())
+  var i = 0
+  while (i < decls.len()) {
+    val d: Decl = decls.get(i)
+    when (d) { DFun(fd) -> recordPrim(fd.annos, fd.name, reg); else -> 0 }
+    i = i + 1
+  }
+  return reg
+}
 
-fun primIsReserved(n: String): Bool { return primKind(n) == 9 }
+fun primKind(reg: PReg, n: String): Int {
+  var i = 0
+  while (i < reg.names.len()) { if (reg.names.get(i) == n) { return reg.kinds.get(i) }; i = i + 1 }
+  return 0
+}
+
+fun isPrimReg(reg: PReg, n: String): Bool { return primKind(reg, n) != 0 }
+
+fun primIsInt(reg: PReg, n: String): Bool { val k = primKind(reg, n); return k == 1 || k == 2 }
+
+fun primIsSigned(reg: PReg, n: String): Bool { return primKind(reg, n) == 1 }
+
+fun primIsFloat(reg: PReg, n: String): Bool { return primKind(reg, n) == 3 }
+
+fun primIsReserved(reg: PReg, n: String): Bool { return primKind(reg, n) == 9 }
 
 // Storage width in bits for an integer primitive; the word types (Int/Long/I64/ISize/U64/USize) = 64.
-fun primBits(n: String): Int {
-  if (n == "I8" || n == "Int8" || n == "U8" || n == "UInt8" || n == "Byte") { return 8 }
-  if (n == "I16" || n == "Int16" || n == "U16" || n == "UInt16") { return 16 }
-  if (n == "I32" || n == "Int32" || n == "U32" || n == "UInt32") { return 32 }
+// Only sub-word INTEGERS (kind 1/2 at 8/16/32) carry a narrow width; every other type reports 64,
+// matching the legacy switch exactly (Char/Float/reserved etc. all fell through to 64 there too).
+fun primBits(reg: PReg, n: String): Int {
+  var i = 0
+  while (i < reg.names.len()) {
+    if (reg.names.get(i) == n) {
+      val k = reg.kinds.get(i)
+      val b = reg.bits.get(i)
+      if ((k == 1 || k == 2) && (b == 8 || b == 16 || b == 32)) { return b }
+      return 64
+    }
+    i = i + 1
+  }
   return 64
 }
 
-fun isPrimitive(n: String): Bool { return isPrimReg(n) }
+fun isPrimitive(reg: PReg, n: String): Bool { return isPrimReg(reg, n) }
 
-fun isNumericN(n: String): Bool { return primIsInt(n) || primIsFloat(n) }
+fun isNumericN(reg: PReg, n: String): Bool { return primIsInt(reg, n) || primIsFloat(reg, n) }
 
 // 2^n for n in [0,63] (kite Int is the i64 word). Callers only pass n<=32, well inside the word.
 fun pow2(n: Int): Int { var r = 1; var i = 0; while (i < n) { r = r * 2; i = i + 1 }; return r }
@@ -434,13 +488,13 @@ fun pow2(n: Int): Int { var r = 1; var i = 0; while (i < n) { r = r * 2; i = i +
 // Compile-time range check: does the decimal literal `numStr` (optional leading '-') fit type `name`?
 // Sub-word widths (8/16/32) are checked exactly; the 64-bit word can't be bounded inside an i64, so we
 // only enforce the unsigned-can't-be-negative rule there.
-fun intInRange(numStr: String, name: String): Bool {
+fun intInRange(reg: PReg, numStr: String, name: String): Bool {
   val neg = numStr.len() >= 1 && numStr.charAt(0) == 45
-  if (neg && primIsSigned(name) == false) { return false } // unsigned rejects negatives
-  val bits = primBits(name)
+  if (neg && primIsSigned(reg, name) == false) { return false } // unsigned rejects negatives
+  val bits = primBits(reg, name)
   if (bits >= 64) { return true }
   val v = parseIntK(numStr)
-  if (primIsSigned(name)) { val hi = pow2(bits - 1) - 1; val lo = 0 - pow2(bits - 1); return v >= lo && v <= hi }
+  if (primIsSigned(reg, name)) { val hi = pow2(bits - 1) - 1; val lo = 0 - pow2(bits - 1); return v >= lo && v <= hi }
   return v >= 0 && v <= pow2(bits) - 1
 }
 
@@ -448,7 +502,7 @@ fun intInRange(numStr: String, name: String): Bool {
 fun inferIntLit(env: TEnv, t: String): Ty {
   val nm = suffixTyName(litSuf(t))
   if (nm == "") { return TPrim("Int") }
-  if (intInRange(litNum(t), nm) == false) { tErr(env, "integer literal " + (t + (" out of range for " + nm))) }
+  if (intInRange(env.prim, litNum(t), nm) == false) { tErr(env, "integer literal " + (t + (" out of range for " + nm))) }
   return TPrim(nm)
 }
 
@@ -456,7 +510,7 @@ fun inferIntLit(env: TEnv, t: String): Ty {
 // integer type and is range-checked at compile time. Returns true iff it fully handled the binding.
 fun adoptDest(env: TEnv, numStr: String, dt: Ty): Bool {
   return when (dt) {
-    TPrim(dn) -> { if (primIsInt(dn)) { if (intInRange(numStr, dn) == false) { tErr(env, "integer literal " + (numStr + (" out of range for " + dn))) }; true } else { false } }
+    TPrim(dn) -> { if (primIsInt(env.prim, dn)) { if (intInRange(env.prim, numStr, dn) == false) { tErr(env, "integer literal " + (numStr + (" out of range for " + dn))) }; true } else { false } }
     else -> false
   }
 }
@@ -476,74 +530,76 @@ fun adoptNegLit(env: TEnv, x: FExpr, dt: Ty): Bool {
   }
 }
 
-fun cons1(t: Ty): IntBuf { val l = intBuf(); l.push(t); return l }
+fun cons1(t: Ty): IntBuf { val l = list(); l.push(t); return l }
 
 // --- type-string parser (reuses kfront's lexer + P) ---
-fun tyBase(p: P): Ty {
+// `reg` classifies a bare name as a primitive (-> TPrim) vs a nominal type (-> TNamed), sourced from
+// the lib @prim table so the type parser reads the same registry as the rest of the checker.
+fun tyBase(reg: PReg, p: P): Ty {
   if (pk(p) == 20) {
     eat(p)
-    val args = intBuf()
-    if (pk(p) != 21) { args.push(parseTyC(p)); while (pk(p) == 24) { eat(p); args.push(parseTyC(p)) } }
+    val args = list()
+    if (pk(p) != 21) { args.push(parseTyC(reg, p)); while (pk(p) == 24) { eat(p); args.push(parseTyC(reg, p)) } }
     eat(p); eat(p) // ')' '->'
-    return TFun(args, parseTyC(p))
+    return TFun(args, parseTyC(reg, p))
   }
   var name = ptext(p); eat(p)
   while (pk(p) == 26) { eat(p); name = ptext(p); eat(p) }
-  val args = intBuf()
-  if (pk(p) == 37) { eat(p); args.push(parseTyC(p)); while (pk(p) == 24) { eat(p); args.push(parseTyC(p)) }; eat(p) }
-  if (isPrimitive(name) && args.len() == 0) { return TPrim(name) }
+  val args = list()
+  if (pk(p) == 37) { eat(p); args.push(parseTyC(reg, p)); while (pk(p) == 24) { eat(p); args.push(parseTyC(reg, p)) }; eat(p) }
+  if (isPrimitive(reg, name) && args.len() == 0) { return TPrim(name) }
   return TNamed(name, args)
 }
 
-fun parseTyC(p: P): Ty {
-  var b = tyBase(p)
+fun parseTyC(reg: PReg, p: P): Ty {
+  var b = tyBase(reg, p)
   while (pk(p) == 45) { eat(p); b = TNull(b) }
   return b
 }
 
 // A param type string may carry a leading ownership modifier ("consuming Int" / "inout Int"); the
 // modifier is not part of the type, so skip a leading `inout`(71)/`consuming`(72) token before parsing.
-fun parseTyStr(s: String): Ty {
+fun parseTyStr(reg: PReg, s: String): Ty {
   if (s == "") { return TUnknown }
   val p = P(lex(s), 0)
   if (pk(p) == 71 || pk(p) == 72) { eat(p) }
-  return parseTyC(p)
+  return parseTyC(reg, p)
 }
 
 // An empty return type means UNKNOWN, not Unit: Kite functions with an untyped param lose their
 // declared return through a parser quirk (the untyped param swallows the `: Ret`), and assuming Unit
 // there produces false "Unit and Int" arithmetic errors. Unknown is the honest, permissive choice.
-fun retTy(s: String): Ty { if (s == "") { return TUnknown } return parseTyStr(s) }
+fun retTy(reg: PReg, s: String): Ty { if (s == "") { return TUnknown } return parseTyStr(reg, s) }
 
 // --- ty ops ---
 fun isUnknownT(t: Ty): Bool { return when (t) { TUnknown -> true; else -> false } }
 
 // Never (alias Nothing) is a REAL bottom type: uninhabited, subtype of every type — the type of a
 // diverging expression (break/continue/return, and __abort). compat() lets it flow to any target.
-fun isNothingT(t: Ty): Bool { return when (t) { TPrim(x) -> primKind(x) == 8; else -> false } }
+fun isNothingT(reg: PReg, t: Ty): Bool { return when (t) { TPrim(x) -> primKind(reg, x) == 8; else -> false } }
 
-fun isNum(t: Ty): Bool { return when (t) { TPrim(x) -> isNumericN(x); else -> false } }
+fun isNum(reg: PReg, t: Ty): Bool { return when (t) { TPrim(x) -> isNumericN(reg, x); else -> false } }
 
 // arithmetic on nullable numerics yields a plain numeric in Kite (null is 0): strip an outer `?`.
 fun stripNull(t: Ty): Ty { return when (t) { TNull(x) -> x; else -> t } }
 
 // permissive numeric-ness for arithmetic under erasure: a real numeric, a type parameter (T may be Int),
 // or a nullable of one (`Int?` arithmetic). Keeps String/struct/Unit as genuine non-numeric errors.
-fun isNumOk(t: Ty): Bool {
+fun isNumOk(reg: PReg, t: Ty): Bool {
   return when (t) {
-    TPrim(x) -> isNumericN(x)
+    TPrim(x) -> isNumericN(reg, x)
     TNamed(n, args) -> isTypeParam(n)
-    TNull(x) -> isNumOk(x)
+    TNull(x) -> isNumOk(reg, x)
     else -> false
   }
 }
 
 fun tyEqPrim(t: Ty, name: String): Bool { return when (t) { TPrim(x) -> x == name; else -> false } }
 
-fun compatList(a: IntBuf, b: IntBuf): Bool {
+fun compatList(reg: PReg, a: IntBuf, b: IntBuf): Bool {
   if (a.len() != b.len()) { return false }
   var i = 0
-  while (i < a.len()) { val x: Ty = a.get(i); val y: Ty = b.get(i); if (compat(x, y) == false) { return false }; i = i + 1 }
+  while (i < a.len()) { val x: Ty = a.get(i); val y: Ty = b.get(i); if (compat(reg, x, y) == false) { return false }; i = i + 1 }
   return true
 }
 
@@ -553,19 +609,19 @@ fun isUnitTy(t: Ty): Bool { return when (t) { TPrim(s) -> s == "Unit"; TNamed(n,
 
 fun isNullUnknown(t: Ty): Bool { return when (t) { TNull(x) -> isUnknownT(x); else -> false } }
 
-fun compat(a: Ty, b: Ty): Bool {
+fun compat(reg: PReg, a: Ty, b: Ty): Bool {
   if (isUnknownT(a) || isUnknownT(b)) { return true }
-  if (isNothingT(a) || isNothingT(b)) { return true }
+  if (isNothingT(reg, a) || isNothingT(reg, b)) { return true }
   // erased generics: a type parameter (T/A/…) matches anything; Unit is the ignore-the-value type; a
   // nullable-of-unknown (`?unknown?`) is as permissive as unknown.
   if (isTypeParamTy(a) || isTypeParamTy(b)) { return true }
   if (isUnitTy(a) || isUnitTy(b)) { return true }
   if (isNullUnknown(a) || isNullUnknown(b)) { return true }
   return when (a) {
-    TPrim(x) -> compatPrimR(x, b)
-    TNull(x) -> compatNullR(x, b)
-    TNamed(n1, a1) -> compatNamedR(n1, a1, b)
-    TFun(p1, r1) -> compatFunR(p1, r1, b)
+    TPrim(x) -> compatPrimR(reg, x, b)
+    TNull(x) -> compatNullR(reg, x, b)
+    TNamed(n1, a1) -> compatNamedR(reg, n1, a1, b)
+    TFun(p1, r1) -> compatFunR(reg, p1, r1, b)
     else -> false
   }
 }
@@ -575,21 +631,21 @@ fun compat(a: Ty, b: Ty): Bool {
 // type up to documented aliasing: the signed word {Int,Long,I64,ISize}, the unsigned word
 // {U64,USize,UInt64}, each fixed width with its alias (I8/Int8, U8/UInt8/Byte, ...), and the float pair
 // {Double,Float}. So Int != I8, Int != U16, Int != Double — each needs an explicit conversion.
-fun primCompat(x: String, y: String): Bool {
+fun primCompat(reg: PReg, x: String, y: String): Bool {
   if (x == y) { return true }
-  val kx = primKind(x)
-  val ky = primKind(y)
+  val kx = primKind(reg, x)
+  val ky = primKind(reg, y)
   if (kx == 0 || ky == 0) { return false }
   if (kx != ky) { return false }
-  if (kx == 1 || kx == 2) { return primBits(x) == primBits(y) } // integers: same sign-kind AND width
+  if (kx == 1 || kx == 2) { return primBits(reg, x) == primBits(reg, y) } // integers: same sign-kind AND width
   return true // float/bool/char/string/unit/never aliases
 }
 
-fun compatPrimR(x: String, b: Ty): Bool {
-  return when (b) { TPrim(y) -> primCompat(x, y); TNull(y) -> compat(TPrim(x), y); else -> false }
+fun compatPrimR(reg: PReg, x: String, b: Ty): Bool {
+  return when (b) { TPrim(y) -> primCompat(reg, x, y); TNull(y) -> compat(reg, TPrim(x), y); else -> false }
 }
 
-fun compatNullR(x: Ty, b: Ty): Bool { return when (b) { TNull(y) -> compat(x, y); else -> false } }
+fun compatNullR(reg: PReg, x: Ty, b: Ty): Bool { return when (b) { TNull(y) -> compat(reg, x, y); else -> false } }
 
 // a single uppercase letter (T, A, K, V, ...) is a generic type PARAMETER — erased, compatible with any.
 fun isTypeParam(n: String): Bool {
@@ -600,7 +656,7 @@ fun isTypeParam(n: String): Bool {
   return true
 }
 
-fun compatNamedR(n1: String, a1: IntBuf, b: Ty): Bool {
+fun compatNamedR(reg: PReg, n1: String, a1: IntBuf, b: Ty): Bool {
   if (isTypeParam(n1)) { return true }
   return when (b) {
     TNamed(n2, a2) -> {
@@ -608,18 +664,18 @@ fun compatNamedR(n1: String, a1: IntBuf, b: Ty): Bool {
       else { if (n1 != n2) { false }
         // same base type: with type erasure, `IntBuf<Int>` and `IntBuf` are compatible — only compare type
         // args when BOTH sides carry them.
-        else { if (a1.len() == 0) { true } else { if (a2.len() == 0) { true } else { compatList(a1, a2) } } } }
+        else { if (a1.len() == 0) { true } else { if (a2.len() == 0) { true } else { compatList(reg, a1, a2) } } } }
     }
-    TNull(y) -> compat(TNamed(n1, a1), y)
+    TNull(y) -> compat(reg, TNamed(n1, a1), y)
     else -> false
   }
 }
 
-fun compatFunR(p1: IntBuf, r1: Ty, b: Ty): Bool {
-  return when (b) { TFun(p2, r2) -> compatList(p1, p2) && compat(r1, r2); TNull(y) -> compat(TFun(p1, r1), y); else -> false }
+fun compatFunR(reg: PReg, p1: IntBuf, r1: Ty, b: Ty): Bool {
+  return when (b) { TFun(p2, r2) -> compatList(reg, p1, p2) && compat(reg, r1, r2); TNull(y) -> compat(reg, TFun(p1, r1), y); else -> false }
 }
 
-fun joinTy(a: Ty, b: Ty): Ty { if (compat(a, b)) { return b } if (compat(b, a)) { return a } return TUnknown }
+fun joinTy(reg: PReg, a: Ty, b: Ty): Ty { if (compat(reg, a, b)) { return b } if (compat(reg, b, a)) { return a } return TUnknown }
 
 fun showTyList(l: IntBuf): String {
   var s = ""
@@ -646,7 +702,7 @@ struct Look(val found: Int, val ty: Ty)
 
 struct LP(val name: String, val ty: String)
 
-struct TEnv(val funN: IntBuf, val funP: IntBuf, val funR: IntBuf, val funG: IntBuf, val structN: IntBuf, val structFN: IntBuf, val structFT: IntBuf, val enumN: IntBuf, var locals: IntBuf, var curRet: Ty, var hasRet: Int, val implN: IntBuf, val implT: IntBuf, val diags: IntBuf, var curLine: Int)
+struct TEnv(val funN: IntBuf, val funP: IntBuf, val funR: IntBuf, val funG: IntBuf, val structN: IntBuf, val structFN: IntBuf, val structFT: IntBuf, val enumN: IntBuf, var locals: IntBuf, var curRet: Ty, var hasRet: Int, val implN: IntBuf, val implT: IntBuf, val diags: IntBuf, var curLine: Int, val prim: PReg)
 
 // trait subtyping: a concrete type is assignable to a trait it impls. implN/implT are parallel
 // (type name -> trait name), collected from `impl Trait for Type`. subtypeOk is checked ALONGSIDE
@@ -672,7 +728,7 @@ fun tErr(env: TEnv, msg: String): Int { env.diags.push(linePrefix(env.curLine) +
 // Reserved primitives (I128/U128) are recognized names but carry no lowering yet — reject on use.
 fun reservedTyErr(env: TEnv, t: Ty): Int {
   return when (t) {
-    TPrim(x) -> { if (primIsReserved(x)) { tErr(env, x + " is reserved and not yet implemented") }; 0 }
+    TPrim(x) -> { if (primIsReserved(env.prim, x)) { tErr(env, x + " is reserved and not yet implemented") }; 0 }
     TNull(y) -> reservedTyErr(env, y)
     else -> 0
   }
@@ -680,10 +736,10 @@ fun reservedTyErr(env: TEnv, t: Ty): Int {
 
 fun tPush(env: TEnv): IntBuf {
   val saved = env.locals
-  val ns = intBuf()
+  val ns = list()
   var i = 0
   while (i < saved.len()) { ns.push(saved.get(i)); i = i + 1 }
-  ns.push(intBuf())
+  ns.push(list())
   env.locals = ns
   return saved
 }
@@ -708,7 +764,7 @@ fun tLocal(env: TEnv, name: String): Look {
 }
 
 fun splitLamPairs(s: String): IntBuf {
-  val out = intBuf()
+  val out = list()
   if (s == "") { return out }
   val n = s.len()
   var i = 0
@@ -738,7 +794,7 @@ fun isBitwise(op: String): Bool { return op == "&" || op == "|" || op == "^" || 
 fun isCmp(op: String): Bool { return op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" }
 
 fun requireBool(env: TEnv, t: Ty, ctx: String): Int {
-  if (compat(t, TPrim("Bool")) == false) { tErr(env, ctx + (" condition must be Bool, found " + showTy(t))) }
+  if (compat(env.prim, t, TPrim("Bool")) == false) { tErr(env, ctx + (" condition must be Bool, found " + showTy(t))) }
   return 0
 }
 
@@ -748,7 +804,7 @@ fun inferIdent(env: TEnv, s: String): Ty {
   var i = 0
   while (i < env.funN.len()) { if (env.funN.get(i) == s) { return TFun(env.funP.get(i), env.funR.get(i)) }; i = i + 1 }
   var j = 0
-  while (j < env.structN.len()) { if (env.structN.get(j) == s) { return TFun(env.structFT.get(j), TNamed(s, intBuf())) }; j = j + 1 }
+  while (j < env.structN.len()) { if (env.structN.get(j) == s) { return TFun(env.structFT.get(j), TNamed(s, list())) }; j = j + 1 }
   return TUnknown
 }
 
@@ -778,11 +834,11 @@ fun opOverloadTy(env: TEnv, op: String, ta: Ty): Ty {
 // Silent Int/Float mixing is UNSOUND (the int operand would be dereferenced as a double-pointer): ban
 // `i + f` when one side is a concrete integer prim and the other a concrete float prim — require an
 // explicit toFloat(i)/toInt(f). Only fires for two concrete primitives, so erased generics stay permissive.
-fun primFloatKind(t: Ty): Int { return when (t) { TPrim(x) -> primKind(x); else -> 0 } }
+fun primFloatKind(reg: PReg, t: Ty): Int { return when (t) { TPrim(x) -> primKind(reg, x); else -> 0 } }
 
-fun mixedIntFloat(ta: Ty, tb: Ty): Bool {
-  val ka = primFloatKind(ta)
-  val kb = primFloatKind(tb)
+fun mixedIntFloat(reg: PReg, ta: Ty, tb: Ty): Bool {
+  val ka = primFloatKind(reg, ta)
+  val kb = primFloatKind(reg, tb)
   if (ka == 3 && (kb == 1 || kb == 2)) { return true }
   if (kb == 3 && (ka == 1 || ka == 2)) { return true }
   return false
@@ -791,13 +847,13 @@ fun mixedIntFloat(ta: Ty, tb: Ty): Bool {
 fun inferBinary(env: TEnv, op: String, a: FExpr, b: FExpr): Ty {
   val ta = infer(env, a)
   val tb = infer(env, b)
-  if (mixedIntFloat(ta, tb)) {
+  if (mixedIntFloat(env.prim, ta, tb)) {
     tErr(env, "mixed Int/Float arithmetic requires an explicit conversion (toFloat/toInt): " + (showTy(ta) + (" and " + showTy(tb))))
     return TUnknown
   }
   if (isArith(op)) {
     if (op == "+" && (tyEqPrim(ta, "String") || tyEqPrim(tb, "String"))) { return TPrim("String") }
-    if (isNumOk(ta) && isNumOk(tb)) { return stripNull(joinTy(ta, tb)) }
+    if (isNumOk(env.prim, ta) && isNumOk(env.prim, tb)) { return stripNull(joinTy(env.prim, ta, tb)) }
     val ov = opOverloadTy(env, op, ta)
     if (isUnknownT(ov) == false) { return ov }
     if (isUnknownT(ta) || isUnknownT(tb)) { return TUnknown }
@@ -807,12 +863,12 @@ fun inferBinary(env: TEnv, op: String, a: FExpr, b: FExpr): Ty {
   if (isCmp(op)) { return TPrim("Bool") }
   if (op == "&&" || op == "||") { requireBool(env, ta, "logical operator"); requireBool(env, tb, "logical operator"); return TPrim("Bool") }
   if (isBitwise(op)) {
-    if (isNumOk(ta) && isNumOk(tb)) { return stripNull(joinTy(ta, tb)) }
+    if (isNumOk(env.prim, ta) && isNumOk(env.prim, tb)) { return stripNull(joinTy(env.prim, ta, tb)) }
     if (isUnknownT(ta) || isUnknownT(tb)) { return TUnknown }
     tErr(env, "bitwise operator on non-numeric operands: " + (showTy(ta) + (" and " + showTy(tb))))
     return TUnknown
   }
-  return TNamed("Range", cons1(joinTy(ta, tb)))
+  return TNamed("Range", cons1(joinTy(env.prim, ta, tb)))
 }
 
 fun inferNotNull(env: TEnv, a: FExpr): Ty { val t = infer(env, a); return when (t) { TNull(x) -> x; else -> t } }
@@ -820,21 +876,21 @@ fun inferNotNull(env: TEnv, a: FExpr): Ty { val t = infer(env, a); return when (
 // `e as T` (Phase 3): an explicit numeric conversion — width truncation/extension between integer types,
 // int<->float via fcvt/scvtf, or a same-width sign reinterpret. The source and target must both be scalar
 // numeric (integer/float/char); casting a String or a struct is a type error. The result type is T.
-fun isCastScalar(t: Ty): Bool {
+fun isCastScalar(reg: PReg, t: Ty): Bool {
   return when (t) {
-    TPrim(x) -> { val k = primKind(x); k == 1 || k == 2 || k == 3 || k == 5 }
+    TPrim(x) -> { val k = primKind(reg, x); k == 1 || k == 2 || k == 3 || k == 5 }
     TNamed(n, args) -> isTypeParam(n)
-    TNull(x) -> isCastScalar(x)
+    TNull(x) -> isCastScalar(reg, x)
     else -> false
   }
 }
 
 fun inferCast(env: TEnv, a: FExpr, ty: String): Ty {
   val src = infer(env, a)
-  val dt = parseTyStr(ty)
+  val dt = parseTyStr(env.prim, ty)
   reservedTyErr(env, dt)
   if (isUnknownT(src) == false) {
-    if (isCastScalar(src) == false || isCastScalar(dt) == false) {
+    if (isCastScalar(env.prim, src) == false || isCastScalar(env.prim, dt) == false) {
       tErr(env, "`as` cast requires numeric operands: " + (showTy(src) + (" as " + showTy(dt))))
     }
   }
@@ -878,7 +934,7 @@ fun inferField(env: TEnv, a: FExpr, f: String, isSafe: Int): Ty {
 
 fun inferStatic(env: TEnv, a: FExpr): Ty {
   val base = when (a) { FEIdent(b) -> b; else -> "" }
-  if (base != "" && memList(env.enumN, base)) { return TNamed(base, intBuf()) }
+  if (base != "" && memList(env.enumN, base)) { return TNamed(base, list()) }
   infer(env, a)
   return TUnknown
 }
@@ -918,7 +974,7 @@ fun bindTypeVar(env: TEnv, subN: IntBuf, subT: IntBuf, n: String, at: Ty): Int {
   if (isUnknownT(prev) || isTypeParamTy(prev)) { subT.set(j, at); return 0 }
   if (isUnknownT(at) || isTypeParamTy(at)) { return 0 }
   if (isConcreteTy(prev) && isConcreteTy(at)) {
-    if (compat(at, prev) == false && compat(prev, at) == false) {
+    if (compat(env.prim, at, prev) == false && compat(env.prim, prev, at) == false) {
       tErr(env, "type parameter " + (n + (" bound to incompatible types " + (showTy(prev) + (" and " + showTy(at))))))
     }
   }
@@ -926,7 +982,7 @@ fun bindTypeVar(env: TEnv, subN: IntBuf, subT: IntBuf, n: String, at: Ty): Int {
 }
 
 fun instTyList(l: IntBuf, subN: IntBuf, subT: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < l.len()) { out.push(instTy(l.get(i), subN, subT)); i = i + 1 }
   return out
@@ -963,7 +1019,7 @@ fun trimStr(s: String): String {
 // split `s` on separator char `sep`, but only at angle-bracket depth 0 (so `RawMap<K, V>` stays whole);
 // each piece is trimmed.
 fun topSplit(s: String, sep: Int): IntBuf {
-  val out = intBuf()
+  val out = list()
   val n = s.len()
   var depth = 0
   var start = 0
@@ -990,8 +1046,8 @@ fun headIdent(s: String): String {
 }
 
 fun parseGenBounds(gen: String): GBounds {
-  val names = intBuf()
-  val traits = intBuf()
+  val names = list()
+  val traits = list()
   if (gen == "") { return GBounds(names, traits) }
   val n = gen.len()
   var body = gen
@@ -1016,7 +1072,7 @@ fun parseGenBounds(gen: String): GBounds {
     var nameEnd = sl
     if (colon >= 0) { nameEnd = colon } else { if (eq >= 0) { nameEnd = eq } }
     val nm = trimStr(seg.substr(0, nameEnd))
-    val trs = intBuf()
+    val trs = list()
     if (colon >= 0) {
       var bEnd = sl
       if (eq >= 0 && eq > colon) { bEnd = eq }
@@ -1035,7 +1091,7 @@ fun parseGenBounds(gen: String): GBounds {
 fun boundsOf(gb: GBounds, n: String): IntBuf {
   var i = 0
   while (i < gb.names.len()) { if (gb.names.get(i) == n) { return gb.traits.get(i) }; i = i + 1 }
-  return intBuf()
+  return list()
 }
 
 // When a type parameter `n: SomeTrait` is instantiated with a CONCRETE type `at`, require that type to
@@ -1060,10 +1116,10 @@ fun checkBound(env: TEnv, gb: GBounds, n: String, at: Ty): Int {
 // other callee (struct constructor, local, method) has no bounds.
 fun calleeBounds(env: TEnv, f: FExpr): GBounds {
   val nm = when (f) { FEIdent(s) -> s; else -> "" }
-  if (nm == "") { return GBounds(intBuf(), intBuf()) }
+  if (nm == "") { return GBounds(list(), list()) }
   var i = 0
   while (i < env.funN.len()) { if (env.funN.get(i) == nm) { return parseGenBounds(env.funG.get(i)) }; i = i + 1 }
-  return GBounds(intBuf(), intBuf())
+  return GBounds(list(), list())
 }
 
 fun checkCallArgs(env: TEnv, params: IntBuf, args: IntBuf, ret: Ty, gb: GBounds): Ty {
@@ -1071,8 +1127,8 @@ fun checkCallArgs(env: TEnv, params: IntBuf, args: IntBuf, ret: Ty, gb: GBounds)
     tErr(env, "wrong number of arguments: expected " + (params.len().toStr() + (", got " + args.len().toStr())))
     return ret
   }
-  val subN = intBuf()
-  val subT = intBuf()
+  val subN = list()
+  val subT = list()
   var i = 0
   while (i < params.len()) {
     val pt: Ty = params.get(i)
@@ -1083,7 +1139,7 @@ fun checkCallArgs(env: TEnv, params: IntBuf, args: IntBuf, ret: Ty, gb: GBounds)
     // else keeps the exact prior structural compat + trait-subtype check, so non-generic calls are
     // byte-identical to before.
     if (isTypeParamTy(pt)) { bindTypeVar(env, subN, subT, headNameOf(pt), at); checkBound(env, gb, headNameOf(pt), at) }
-    else { if (compat(at, pt) == false) { if (subtypeOk(env, at, pt) == false) { tErr(env, "argument type " + (showTy(at) + (" is not compatible with parameter " + showTy(pt)))) } } }
+    else { if (compat(env.prim, at, pt) == false) { if (subtypeOk(env, at, pt) == false) { tErr(env, "argument type " + (showTy(at) + (" is not compatible with parameter " + showTy(pt)))) } } }
     i = i + 1
   }
   return instTy(ret, subN, subT)
@@ -1113,25 +1169,25 @@ fun inferCall(env: TEnv, f: FExpr, args: IntBuf): Ty {
 fun inferList(env: TEnv, es: IntBuf): Ty {
   var acc = TUnknown
   var i = 0
-  while (i < es.len()) { val x: FExpr = es.get(i); acc = joinTy(acc, infer(env, x)); i = i + 1 }
+  while (i < es.len()) { val x: FExpr = es.get(i); acc = joinTy(env.prim, acc, infer(env, x)); i = i + 1 }
   return TNamed("IntBuf", cons1(acc))
 }
 
 fun inferMap(env: TEnv, ents: IntBuf): Ty {
   var i = 0
   while (i < ents.len()) { val en: FMapEnt = ents.get(i); infer(env, en.k); infer(env, en.v); i = i + 1 }
-  val l = intBuf(); l.push(TUnknown); l.push(TUnknown)
+  val l = list(); l.push(TUnknown); l.push(TUnknown)
   return TNamed("RawMap", l)
 }
 
 fun inferLambda(env: TEnv, params: String, body: FExpr): Ty {
   val saved = tPush(env)
-  val ptys = intBuf()
+  val ptys = list()
   val pairs = splitLamPairs(params)
   var i = 0
   while (i < pairs.len()) {
     val lp: LP = pairs.get(i)
-    val ty = if (lp.ty == "") { TUnknown } else { parseTyStr(lp.ty) }
+    val ty = if (lp.ty == "") { TUnknown } else { parseTyStr(env.prim, lp.ty) }
     ptys.push(ty); tBind(env, lp.name, ty); i = i + 1
   }
   val bt = infer(env, body)
@@ -1143,7 +1199,7 @@ fun inferIf(env: TEnv, c: FExpr, t: FExpr, el: FExpr): Ty {
   requireBool(env, infer(env, c), "if")
   val tt = infer(env, t)
   if (isNoResF(el)) { return tt }
-  return joinTy(tt, infer(env, el))
+  return joinTy(env.prim, tt, infer(env, el))
 }
 
 fun inferInterp(env: TEnv, parts: IntBuf): Int {
@@ -1180,7 +1236,7 @@ fun inferWhen(env: TEnv, hasSubj: Int, bind: String, subj: FExpr, arms: IntBuf):
     else { if (a.kind == 2) { var j = 0; while (j < a.pats.len()) { bindPattern(env, a.pats.get(j)); j = j + 1 } } }
     if (hasSubj == 1 && bn != "") { tBind(env, bn, TUnknown) }
     if (isNoResF(a.guard) == false) { requireBool(env, infer(env, a.guard), "guard") }
-    acc = joinTy(acc, infer(env, a.body))
+    acc = joinTy(env.prim, acc, infer(env, a.body))
     tPop(env, saved)
     i = i + 1
   }
@@ -1235,25 +1291,25 @@ fun infer(env: TEnv, e: FExpr): Ty {
 
 fun checkLet(env: TEnv, name: String, ty: String, init: FExpr): Int {
   if (ty == "") { val it0 = infer(env, init); tBind(env, name, it0); return 0 }
-  val dt = parseTyStr(ty)
+  val dt = parseTyStr(env.prim, ty)
   reservedTyErr(env, dt)
   // A bare integer literal adopts an integer annotation (val x: U16 = 300) with a compile-time range
   // check, instead of the generic compat test (which would reject Int vs U16 under the tightened rule).
   if (adoptBareIntLit(env, init, dt)) { tBind(env, name, dt); return 0 }
   val it = infer(env, init)
-  if (compat(it, dt) == false) { tErr(env, "cannot assign " + (showTy(it) + (" to " + (showTy(dt) + (" " + name))))) }
+  if (compat(env.prim, it, dt) == false) { tErr(env, "cannot assign " + (showTy(it) + (" to " + (showTy(dt) + (" " + name))))) }
   tBind(env, name, dt)
   return 0
 }
 
 fun checkReturnV(env: TEnv, e: FExpr): Int {
   val t = infer(env, e)
-  if (env.hasRet == 1 && compat(t, env.curRet) == false) { if (subtypeOk(env, t, env.curRet) == false) { tErr(env, "return type " + (showTy(t) + (" is not compatible with " + showTy(env.curRet)))) } }
+  if (env.hasRet == 1 && compat(env.prim, t, env.curRet) == false) { if (subtypeOk(env, t, env.curRet) == false) { tErr(env, "return type " + (showTy(t) + (" is not compatible with " + showTy(env.curRet)))) } }
   return 0
 }
 
 fun checkReturnU(env: TEnv): Int {
-  if (env.hasRet == 1 && compat(TPrim("Unit"), env.curRet) == false) { tErr(env, "return type Unit is not compatible with " + showTy(env.curRet)) }
+  if (env.hasRet == 1 && compat(env.prim, TPrim("Unit"), env.curRet) == false) { tErr(env, "return type Unit is not compatible with " + showTy(env.curRet)) }
   return 0
 }
 
@@ -1287,14 +1343,14 @@ fun checkFun(env: TEnv, fd: FFunc): Int {
   if (isNoResF(fd.body)) { return 0 }
   val saved = tPush(env)
   var i = 0
-  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); val pt = parseTyStr(pp.ty); reservedTyErr(env, pt); tBind(env, pp.name, pt); i = i + 1 }
+  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); val pt = parseTyStr(env.prim, pp.ty); reservedTyErr(env, pt); tBind(env, pp.name, pt); i = i + 1 }
   val prevRet = env.curRet
   val prevHas = env.hasRet
-  env.curRet = retTy(fd.ret)
+  env.curRet = retTy(env.prim, fd.ret)
   reservedTyErr(env, env.curRet)
   env.hasRet = 1
   val bt = infer(env, fd.body)
-  if (shouldCheckBody(fd.body) && fd.ret != "" && compat(bt, env.curRet) == false && tyEqPrim(bt, "Nothing") == false) {
+  if (shouldCheckBody(fd.body) && fd.ret != "" && compat(env.prim, bt, env.curRet) == false && tyEqPrim(bt, "Nothing") == false) {
     tErr(env, "function " + (fd.name + (" body has type " + (showTy(bt) + (", expected " + showTy(env.curRet))))))
   }
   env.curRet = prevRet
@@ -1320,17 +1376,17 @@ fun checkDecl(env: TEnv, d: Decl): Int {
 }
 
 fun addFunSig(env: TEnv, fd: FFunc): Int {
-  val ptys = intBuf()
+  val ptys = list()
   var i = 0
-  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); ptys.push(parseTyStr(pp.ty)); i = i + 1 }
-  env.funN.push(fd.name); env.funP.push(ptys); env.funR.push(retTy(fd.ret)); env.funG.push(fd.gen)
+  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); ptys.push(parseTyStr(env.prim, pp.ty)); i = i + 1 }
+  env.funN.push(fd.name); env.funP.push(ptys); env.funR.push(retTy(env.prim, fd.ret)); env.funG.push(fd.gen)
   return 0
 }
 
 fun addStructSig(env: TEnv, td: FTDecl): Int {
-  val fns = intBuf(); val fts = intBuf()
+  val fns = list(); val fts = list()
   var i = 0
-  while (i < td.fields.len()) { val f: FFld = td.fields.get(i); fns.push(f.name); fts.push(parseTyStr(f.ty)); i = i + 1 }
+  while (i < td.fields.len()) { val f: FFld = td.fields.get(i); fns.push(f.name); fts.push(parseTyStr(env.prim, f.ty)); i = i + 1 }
   env.structN.push(td.name); env.structFN.push(fns); env.structFT.push(fts)
   return 0
 }
@@ -1363,9 +1419,12 @@ fun collectSigs(env: TEnv, decls: IntBuf): Int {
   return 0
 }
 
-fun typecheckCheck(decls: IntBuf, lines: IntBuf): IntBuf {
-  val diags = intBuf()
-  val env = TEnv(intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), TUnknown, 0, intBuf(), intBuf(), diags, 0)
+fun typecheckCheck(decls: IntBuf, lines: IntBuf, t1: Int): IntBuf {
+  val diags = list()
+  // The prelude decl list is parsed ONCE: it seeds the primitive registry (@prim markers in
+  // lib/core/num.kite -> PReg, the checker's whole numeric classification) AND the function signatures.
+  val pdecls = preludeDeclListT(t1)
+  val env = TEnv(list(), list(), list(), list(), list(), list(), list(), list(), list(), TUnknown, 0, list(), list(), diags, 0, buildPReg(pdecls))
   collectSigs(env, decls)
   // Seed prelude/lib FUNCTION signatures so their calls are arg-type-checked exactly like user calls (an
   // unsound gap otherwise: a wrong-typed argument to a stdlib function slipped through). Only functions
@@ -1373,7 +1432,7 @@ fun typecheckCheck(decls: IntBuf, lines: IntBuf): IntBuf {
   // types like IntBuf keep their erased/opaque treatment, and property-getter accessors on them are not
   // mis-flagged as missing fields). User decls are collected FIRST, so on a name collision inferIdent's
   // first-match keeps the user's definition.
-  collectFunSigsOnly(env, preludeDeclList())
+  collectFunSigsOnly(env, pdecls)
   var i = 0
   while (i < decls.len()) { env.curLine = lines.get(i); checkDecl(env, decls.get(i)); i = i + 1 }
   return diags
@@ -1383,11 +1442,13 @@ fun typecheckCheck(decls: IntBuf, lines: IntBuf): IntBuf {
 // combined diagnostics list (empty = clean). No `main` here — kcheck is a LIBRARY now, so it can be
 // quoted-included into kitec.kite alongside klower (which owns `main`). The standalone `kitec check`
 // tool lives in kcheck_main.kite.
-fun checkDiags(toks: IntBuf, skipDup: Int): IntBuf {
-  val lines = intBuf()
+fun checkDiags(toks: IntBuf, skipDup: Int): IntBuf { return checkDiagsT(toks, skipDup, 0) }
+
+fun checkDiagsT(toks: IntBuf, skipDup: Int, t1: Int): IntBuf {
+  val lines = list()
   val decls = parseProgramLn(toks, lines)
-  val diags = resolveCheck(decls, lines, skipDup)
-  val td = typecheckCheck(decls, lines)
+  val diags = resolveCheck(decls, lines, skipDup, t1)
+  val td = typecheckCheck(decls, lines, t1)
   var k = 0
   while (k < td.len()) { diags.push(td.get(k)); k = k + 1 }
   return diags

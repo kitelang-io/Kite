@@ -1,0 +1,24 @@
+// kite::core::char UTF-8 tier: round-trip encode/decode + sequence lengths over the byte String.
+// Each check adds a distinct bit; all-pass -> 127.
+import "lib/core/char.kite"
+
+fun main(): Int {
+  var acc = 0
+  // sequence lengths by lead byte
+  if ((65).utf8SeqLen() == 1 && (226).utf8SeqLen() == 3 && (240).utf8SeqLen() == 4) { acc = acc + 1 }
+  if ((65).charUtf8Len() == 1 && (8364).charUtf8Len() == 3 && (128512).charUtf8Len() == 4) { acc = acc + 2 }
+  // encode a scalar into a builder, then read the bytes back
+  val sb = strNew()
+  sb.encodeUtf8(8364) // U+20AC euro -> E2 82 AC
+  if (sb.size() == 3 && sb.byteAt(0) == 226 && sb.byteAt(1) == 130 && sb.byteAt(2) == 172) { acc = acc + 4 }
+  val euro = sb.finish()
+  // decode it back to the scalar
+  if (euro.decodeUtf8At(0) == 8364) { acc = acc + 8 }
+  // multi-scalar string: "A€z" via literal escapes, count scalars and decode each
+  val s = "A\u{20AC}z"
+  if (s.utf8CharCount() == 3) { acc = acc + 16 }
+  if (s.decodeUtf8At(0) == 65 && s.decodeUtf8At(1) == 8364 && s.decodeUtf8At(4) == 122) { acc = acc + 32 }
+  // ASCII classification
+  if ((53).isDigit() && (65).isAlpha() && (97).toUpper() == 65 && (90).toLower() == 122 && (32).isSpace()) { acc = acc + 64 }
+  return acc // 127 iff every UTF-8 helper is correct
+}

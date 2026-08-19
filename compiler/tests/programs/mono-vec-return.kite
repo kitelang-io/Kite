@@ -7,7 +7,7 @@
 // own return annotation, so the inferred binding types as `Vec$Int`/`Vec$U8` and dispatches correctly.
 // Exercises: inferred-type binding, two coexisting instantiations (Vec<Int> + Vec<U8>), and a factory
 // result method-chained without an intermediate binding. Exit code is a checksum (7).
-import "lib/alloc/vec.kite"
+import "lib/alloc/collections/vec.kite"
 
 fun makeInts(): Vec<Int> {
   val v = Vec::<Int>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<Int>())))

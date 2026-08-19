@@ -9,7 +9,7 @@
 // then lower) so forward references resolve. Constructs outside kenc's codegen (lambdas, floats,
 // map literals, traits/impl, nullable ops) are still reported via lowFail.
 
-struct Lo(val ctr: IntBuf, val locN: IntBuf, val locT: IntBuf, val fN: IntBuf, val fR: IntBuf, val sN: IntBuf, val sFN: IntBuf, val sFT: IntBuf, val lifted: IntBuf, val gctr: IntBuf, val classN: IntBuf, val arcOwned: IntBuf, val traitN: IntBuf, val constN: IntBuf, val constV: IntBuf, val cfuncs: IntBuf, val traitMethN: IntBuf, val traitMethT: IntBuf, val pmN: IntBuf, val pmM: IntBuf, val variantN: IntBuf, val variantTys: IntBuf, val variantOwn: IntBuf, val roleK: IntBuf, val roleV: IntBuf, val arcE: IntBuf, val valueE: IntBuf)
+struct Lo(val ctr: IntBuf, val locN: IntBuf, val locT: IntBuf, val fN: IntBuf, val fR: IntBuf, val sN: IntBuf, val sFN: IntBuf, val sFT: IntBuf, val lifted: IntBuf, val gctr: IntBuf, val classN: IntBuf, val arcOwned: IntBuf, val traitN: IntBuf, val constN: IntBuf, val constV: IntBuf, val cfuncs: IntBuf, val traitMethN: IntBuf, val traitMethT: IntBuf, val pmN: IntBuf, val pmM: IntBuf, val variantN: IntBuf, val variantTys: IntBuf, val variantOwn: IntBuf, val roleK: IntBuf, val roleV: IntBuf, val arcE: IntBuf, val valueE: IntBuf, val prim: PReg)
 
 struct PFun(val owner: String, val fd: FFunc) // owner "" = free function; else the struct type
 
@@ -193,7 +193,7 @@ fun roleSym(lo: Lo, role: String): String {
 
 fun roleSymFallback(role: String): String {
   // list literals `[..]` / for-in / a[i] on a IntBuf
-  if (role == "list.new") { return "intBuf" } // [..] constructor
+  if (role == "list.new") { return "list" } // [..] constructor
   if (role == "list.push") { return "IntBuf_push" } // [..] element append
   if (role == "list.get") { return "IntBuf_get" } // a[i] load / for-in element
   if (role == "list.set") { return "IntBuf_set" } // a[i] = v store
@@ -207,7 +207,7 @@ fun roleSymFallback(role: String): String {
   if (role == "str.build.push") { return "StrBuilder_pushStr" } // append a piece, returns the builder
   if (role == "str.build.finish") { return "StrBuilder_finish" } // seal to a String
   // map literals `{..}` / m[k] / m[k]=v — the map.put role (append) is realized by mapPutInto below
-  if (role == "map.new") { return "rawMap" } // {..} constructor
+  if (role == "map.new") { return "map" } // {..} constructor
   if (role == "map.putList") { return "IntBuf_push" } // append into a parallel word-list (map.put)
   if (role == "map.getS") { return "RawMap_get" } // m[k] load, String key
   if (role == "map.getI") { return "RawMap_getI" } // m[k] load, Int key
@@ -274,7 +274,7 @@ fun lowerBin(lo: Lo, op: String, l: FExpr, r: FExpr): Expr {
   if (isOverloadableOp(op)) {
     val om = opMangledFor(lo, op, l, r)
     if (om != "") {
-      val ca = intBuf(); ca.push(lowerExpr(lo, l)); ca.push(lowerExpr(lo, r))
+      val ca = list(); ca.push(lowerExpr(lo, l)); ca.push(lowerExpr(lo, r))
       return ECall(om, ca)
     }
   }
@@ -284,7 +284,7 @@ fun lowerBin(lo: Lo, op: String, l: FExpr, r: FExpr): Expr {
   if (op == "==" || op == "!=") {
     val em = opMangledFor(lo, "==", l, r)
     if (em != "") {
-      val ca = intBuf(); ca.push(lowerExpr(lo, l)); ca.push(lowerExpr(lo, r))
+      val ca = list(); ca.push(lowerExpr(lo, l)); ca.push(lowerExpr(lo, r))
       val eq = ECall(em, ca)
       if (op == "!=") { return EUnary("not !", eq) }
       return eq
@@ -293,7 +293,7 @@ fun lowerBin(lo: Lo, op: String, l: FExpr, r: FExpr): Expr {
   if (isOrderingOp(op)) {
     val cm = cmpMangledFor(lo, l, r)
     if (cm != "") {
-      val ca = intBuf(); ca.push(lowerExpr(lo, l)); ca.push(lowerExpr(lo, r))
+      val ca = list(); ca.push(lowerExpr(lo, l)); ca.push(lowerExpr(lo, r))
       return EBin(op, ECall(cm, ca), EInt("0"))
     }
   }
@@ -452,7 +452,7 @@ fun calleeName(callee: FExpr): String {
 }
 
 fun consFront(x: Expr, rest: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   out.push(x)
   var i = 0
   while (i < rest.len()) { out.push(rest.get(i)); i = i + 1 }
@@ -460,10 +460,10 @@ fun consFront(x: Expr, rest: IntBuf): IntBuf {
 }
 
 // ---------- closures: lift lambdas + capture enclosing locals ----------
-fun one(x: String): IntBuf { val l = intBuf(); l.push(x); return l }
+fun one(x: String): IntBuf { val l = list(); l.push(x); return l }
 
 fun extendB(bound: IntBuf, names: IntBuf): IntBuf {
-  val nb = intBuf()
+  val nb = list()
   var i = 0
   while (i < bound.len()) { nb.push(bound.get(i)); i = i + 1 }
   var j = 0
@@ -472,7 +472,7 @@ fun extendB(bound: IntBuf, names: IntBuf): IntBuf {
 }
 
 fun splitLamNames(s: String): IntBuf {
-  val out = intBuf()
+  val out = list()
   if (s == "") { return out }
   val n = s.len(); var i = 0; var start = 0
   while (i <= n) {
@@ -496,7 +496,7 @@ fun patVarsInto(pat: FPat, out: IntBuf): Int {
   return 0
 }
 
-fun patVars(pat: FPat): IntBuf { val out = intBuf(); patVarsInto(pat, out); return out }
+fun patVars(pat: FPat): IntBuf { val out = list(); patVarsInto(pat, out); return out }
 
 // collect free variables of `e` (referenced idents that are enclosing locals, not bound within `e`)
 fun fvArgs(lo: Lo, bound: IntBuf, args: IntBuf, out: IntBuf): Int {
@@ -586,31 +586,31 @@ fun lowerLambda(lo: Lo, params: String, body: FExpr): Expr {
   val id: Int = lo.gctr.get(0); lo.gctr.set(0, id + 1)
   val name = "__lam" + id.toStr()
   val pnames = splitLamNames(params)
-  val bound = intBuf()
+  val bound = list()
   var pi = 0; while (pi < pnames.len()) { bound.push(pnames.get(pi)); pi = pi + 1 }
-  val caps = intBuf()
+  val caps = list()
   fvExpr(lo, bound, body, caps)
   // lifted function: params = env + lambda params; body loads captures then runs
-  val lnames = intBuf(); lnames.push("env")
-  val ltys = intBuf(); ltys.push("?")
+  val lnames = list(); lnames.push("env")
+  val ltys = list(); ltys.push("?")
   var qi = 0; while (qi < pnames.len()) { lnames.push(pnames.get(qi)); ltys.push("?"); qi = qi + 1 }
-  val lctr = intBuf(); lctr.push(0)
-  val llo = Lo(lctr, intBuf(), intBuf(), lo.fN, lo.fR, lo.sN, lo.sFN, lo.sFT, lo.lifted, lo.gctr, lo.classN, intBuf(), lo.traitN, lo.constN, lo.constV, lo.cfuncs, lo.traitMethN, lo.traitMethT, lo.pmN, lo.pmM, lo.variantN, lo.variantTys, lo.variantOwn, lo.roleK, lo.roleV, lo.arcE, lo.valueE)
+  val lctr = list(); lctr.push(0)
+  val llo = Lo(lctr, list(), list(), lo.fN, lo.fR, lo.sN, lo.sFN, lo.sFT, lo.lifted, lo.gctr, lo.classN, list(), lo.traitN, lo.constN, lo.constV, lo.cfuncs, lo.traitMethN, lo.traitMethT, lo.pmN, lo.pmM, lo.variantN, lo.variantTys, lo.variantOwn, lo.roleK, lo.roleV, lo.arcE, lo.valueE, lo.prim)
   bindLoc(llo, "env", "?")
   var ri = 0; while (ri < pnames.len()) { bindLoc(llo, pnames.get(ri), "?"); ri = ri + 1 }
-  val lstmts = intBuf()
+  val lstmts = list()
   var ci = 0
   while (ci < caps.len()) {
     val cn: String = caps.get(ci)
     bindLoc(llo, cn, localTag(lo, cn))
-    val ga = intBuf(); ga.push(EIdent("env")); ga.push(EInt(ci.toStr()))
+    val ga = list(); ga.push(EIdent("env")); ga.push(EInt(ci.toStr()))
     lstmts.push(SLet(cn, ECall("__closGet", ga)))
     ci = ci + 1
   }
   val lbody = lowerExpr(llo, body)
   lo.lifted.push(Func(name, lnames, ltys, EBlock(lstmts, lbody)))
   // closure value: __closNew("__lamN", cap0, cap1, ...)
-  val cargs = intBuf(); cargs.push(EStr(name))
+  val cargs = list(); cargs.push(EStr(name))
   var di = 0; while (di < caps.len()) { cargs.push(EIdent(caps.get(di))); di = di + 1 }
   return ECall("__closNew", cargs)
 }
@@ -618,7 +618,7 @@ fun lowerLambda(lo: Lo, params: String, body: FExpr): Expr {
 fun closCall(lo: Lo, envE: Expr, args: IntBuf): Expr { return ECall("__closCall", consFront(envE, lowerArgs(lo, args))) }
 
 fun lowerArgs(lo: Lo, args: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < args.len()) {
     val a: FArg = args.get(i)
@@ -628,7 +628,7 @@ fun lowerArgs(lo: Lo, args: IntBuf): IntBuf {
     // the caller's. A fresh temporary already owns its buffer and moves in. (The method receiver is lowered
     // separately, never through here, so `self` is a borrow and mutations write back.)
     val t = tagOf(lo, a.expr)
-    if (isValueTag(lo, t)) { if (isCopyLvalue(a.expr)) { val ca = intBuf(); ca.push(e); e = ECall(mangleMethod(t, "copy"), ca) } }
+    if (isValueTag(lo, t)) { if (isCopyLvalue(a.expr)) { val ca = list(); ca.push(e); e = ECall(mangleMethod(t, "copy"), ca) } }
     out.push(e)
     i = i + 1
   }
@@ -725,7 +725,7 @@ fun ceKindGet(names: IntBuf, kinds: IntBuf, nm: String): String {
 fun ceCallKind(callee: FExpr): String {
   return when (callee) {
     FEField(recv, m) -> if (m == "substr" || m == "toStr") { "String" } else { "Int" }
-    FEIdent(nm) -> if (nm == "intBuf") { "IntBuf" } else { "Int" }
+    FEIdent(nm) -> if (nm == "list") { "IntBuf" } else { "Int" }
     else -> "Int"
   }
 }
@@ -844,7 +844,7 @@ fun ceIntToStr(n: Int): Int {
   return r
 }
 
-// A fresh empty comptime IntBuf as an erased Int word, laid out {n@0, cap@8, data@16} exactly like intBuf()
+// A fresh empty comptime IntBuf as an erased Int word, laid out {n@0, cap@8, data@16} exactly like list()
 // (lib/alloc/collections/list.kite) so ceLGet/ceLSet/ceLPush/ceLLen operate on it. Header-less (the
 // comptime evaluator never releases these — leak-managed like the rest).
 fun ceLNew(): Int { val w = __rawAlloc(24) __rawStore(w, 0, 0) __rawStore(w, 8, 4) __rawStore(w, 16, __rawAlloc(32)) return w }
@@ -875,11 +875,11 @@ fun ceCall(names: IntBuf, vals: IntBuf, kinds: IntBuf, funcs: IntBuf, callee: FE
 }
 
 fun ceFreeCall(names: IntBuf, vals: IntBuf, kinds: IntBuf, funcs: IntBuf, fn: String, args: IntBuf): Int {
-  if (fn == "intBuf" && args.len() == 0) { return ceLNew() }
+  if (fn == "list" && args.len() == 0) { return ceLNew() }
   val idx = ceFindFunc(funcs, fn)
   if (idx < 0) { return 0 }
   val fd: FFunc = funcs.get(idx)
-  val pn = intBuf(); val pv = intBuf(); val pk = intBuf()
+  val pn = list(); val pv = list(); val pk = list()
   var i = 0
   while (i < fd.params.len()) {
     val pp: FParam = fd.params.get(i); val av: FArg = args.get(i)
@@ -891,7 +891,7 @@ fun ceFreeCall(names: IntBuf, vals: IntBuf, kinds: IntBuf, funcs: IntBuf, fn: St
 fun ceRunBody(names: IntBuf, vals: IntBuf, kinds: IntBuf, funcs: IntBuf, body: FExpr): Int {
   return when (body) {
     FEBlock(stmts, res) -> {
-      val ret = intBuf(); ret.push(0); ret.push(0) // [returned?, value]
+      val ret = list(); ret.push(0); ret.push(0) // [returned?, value]
       ceExec(names, vals, kinds, funcs, stmts, ret)
       if (ret.get(0) == 1) { ret.get(1) } else { if (isNoResF(res)) { 0 } else { ceEval(names, vals, kinds, funcs, res) } }
     }
@@ -942,11 +942,11 @@ fun ceWhile(names: IntBuf, vals: IntBuf, kinds: IntBuf, funcs: IntBuf, c: FExpr,
 }
 
 // top-level constant-expression eval (empty variable env)
-fun ceval(funcs: IntBuf, e: FExpr): Int { return ceEval(intBuf(), intBuf(), intBuf(), funcs, e) }
+fun ceval(funcs: IntBuf, e: FExpr): Int { return ceEval(list(), list(), list(), funcs, e) }
 
 // comptime eval that seeds the env with the program's consts (so comptime(SOME_CONST + 1) works)
 fun cevalWithConsts(lo: Lo, e: FExpr): Int {
-  val en = intBuf(); val ev = intBuf(); val ek = intBuf()
+  val en = list(); val ev = list(); val ek = list()
   var i = 0
   while (i < lo.constN.len()) { en.push(lo.constN.get(i)); ev.push(parseIntK(lo.constV.get(i))); ek.push("Int"); i = i + 1 }
   return ceEval(en, ev, ek, lo.cfuncs, e)
@@ -999,9 +999,9 @@ fun lowerPlainCall(lo: Lo, nm: String, args: IntBuf): Expr {
   var i = 0
   while (i < args.len()) { if (argNeedsRelease(lo, nm, i, argExprAt(args, i))) { need = 1 }; i = i + 1 }
   if (need == 0) { return ECall(nm, lowerArgs(lo, args)) }
-  val stmts = intBuf()
-  val callArgs = intBuf()
-  val rels = intBuf()
+  val stmts = list()
+  val callArgs = list()
+  val rels = list()
   var j = 0
   while (j < args.len()) {
     val ae = argExprAt(args, j)
@@ -1014,7 +1014,7 @@ fun lowerPlainCall(lo: Lo, nm: String, args: IntBuf): Expr {
   val rn = freshName(lo, "_ar")
   stmts.push(SLet(rn, ECall(nm, callArgs)))
   var r = 0
-  while (r < rels.len()) { val ra = intBuf(); ra.push(EIdent(rels.get(r))); stmts.push(SExprS(ECall("__release", ra))); r = r + 1 }
+  while (r < rels.len()) { val ra = list(); ra.push(EIdent(rels.get(r))); stmts.push(SExprS(ECall("__release", ra))); r = r + 1 }
   return EBlock(stmts, EIdent(rn))
 }
 
@@ -1025,8 +1025,8 @@ fun lowerPlainCall(lo: Lo, nm: String, args: IntBuf): Expr {
 // `sizeOf::<U16>()` is 2 and `Vec<U16>` packs two bytes per element instead of IntBuf's eight.
 fun sizeOfTy(lo: Lo, ty: String): Int {
   val t = tyTag(stripMode(ty))
-  val k = primKind(t)
-  if (k == 1 || k == 2) { return primBits(t) / 8 }
+  val k = primKind(lo.prim, t)
+  if (k == 1 || k == 2) { return primBits(lo.prim, t) / 8 }
   if (k == 3) { return 8 }
   if (k == 4) { return 1 }
   if (k == 5) { return 4 }
@@ -1051,7 +1051,7 @@ fun sizeOfTy(lo: Lo, ty: String): Int {
 fun packedLoadName(lo: Lo, ty: String): String {
   val t = tyTag(stripMode(ty))
   val sz = sizeOfTy(lo, t)
-  val signed = primIsSigned(t)
+  val signed = primIsSigned(lo.prim, t)
   if (sz == 1) { if (signed) { return "__rawLoad8S" } else { return "__rawLoadByte" } }
   if (sz == 2) { if (signed) { return "__rawLoad16S" } else { return "__rawLoad16" } }
   if (sz == 4) { if (signed) { return "__rawLoad32S" } else { return "__rawLoad32" } }
@@ -1076,13 +1076,13 @@ fun packedOff(idx: FExpr, sz: Int): FExpr {
 
 fun lowerPackedGet(lo: Lo, ty: String, args: IntBuf): Expr {
   val sz = sizeOfTy(lo, tyTag(stripMode(ty)))
-  val ca = intBuf(); ca.push(lowerExpr(lo, argExprAt(args, 0))); ca.push(lowerExpr(lo, packedOff(argExprAt(args, 1), sz)))
+  val ca = list(); ca.push(lowerExpr(lo, argExprAt(args, 0))); ca.push(lowerExpr(lo, packedOff(argExprAt(args, 1), sz)))
   return ECall(packedLoadName(lo, ty), ca)
 }
 
 fun lowerPackedSet(lo: Lo, ty: String, args: IntBuf): Expr {
   val sz = sizeOfTy(lo, tyTag(stripMode(ty)))
-  val ca = intBuf(); ca.push(lowerExpr(lo, argExprAt(args, 0))); ca.push(lowerExpr(lo, packedOff(argExprAt(args, 1), sz))); ca.push(lowerExpr(lo, argExprAt(args, 2)))
+  val ca = list(); ca.push(lowerExpr(lo, argExprAt(args, 0))); ca.push(lowerExpr(lo, packedOff(argExprAt(args, 1), sz))); ca.push(lowerExpr(lo, argExprAt(args, 2)))
   return ECall(packedStoreName(lo, ty), ca)
 }
 
@@ -1112,15 +1112,15 @@ fun lowerCall(lo: Lo, callee: FExpr, args: IntBuf): Expr {
   }
 }
 
-// [a, b, c] -> { val _l = intBuf() ; _l.push(a) ; ... ; _l } — emits the intBuf() constructor + the
+// [a, b, c] -> { val _l = list() ; _l.push(a) ; ... ; _l } — emits the list() constructor + the
 // List_push method (methods-only: the free listNew/listPush are being retired).
 fun lowerList(lo: Lo, es: IntBuf): Expr {
   val nm = freshName(lo, "__lst")
-  val stmts = intBuf()
-  stmts.push(SLet(nm, ECall(roleSym(lo, "list.new"), intBuf())))
+  val stmts = list()
+  stmts.push(SLet(nm, ECall(roleSym(lo, "list.new"), list())))
   var i = 0
   while (i < es.len()) {
-    val a2 = intBuf(); a2.push(EIdent(nm)); a2.push(lowerExpr(lo, es.get(i)))
+    val a2 = list(); a2.push(EIdent(nm)); a2.push(lowerExpr(lo, es.get(i)))
     stmts.push(SExprS(ECall(roleSym(lo, "list.push"), a2)))
     i = i + 1
   }
@@ -1134,9 +1134,9 @@ fun lowerList(lo: Lo, es: IntBuf): Expr {
 // this helper changes, not lowerMap. `nm`'s codegen local-type is inferred as RawMap from mapNewM()'s return,
 // so the field offsets resolve. Emits, per entry: listPush(_m.keys, k); listPush(_m.vals, v).
 fun mapPutInto(lo: Lo, out: IntBuf, nm: String, k: FExpr, v: FExpr): Int {
-  val ka = intBuf(); ka.push(EField(EIdent(nm), "keys")); ka.push(lowerExpr(lo, k))
+  val ka = list(); ka.push(EField(EIdent(nm), "keys")); ka.push(lowerExpr(lo, k))
   out.push(SExprS(ECall(roleSym(lo, "map.putList"), ka)))
-  val va = intBuf(); va.push(EField(EIdent(nm), "vals")); va.push(lowerExpr(lo, v))
+  val va = list(); va.push(EField(EIdent(nm), "vals")); va.push(lowerExpr(lo, v))
   out.push(SExprS(ECall(roleSym(lo, "map.putList"), va)))
   return 0
 }
@@ -1147,8 +1147,8 @@ fun mapPutInto(lo: Lo, out: IntBuf, nm: String, k: FExpr, v: FExpr): Int {
 // [k0: v0, k1: v1] -> { val _m = mapNewM(); listPush(_m.keys,k0); listPush(_m.vals,v0); ...; _m }
 fun lowerMap(lo: Lo, ents: IntBuf): Expr {
   val nm = freshName(lo, "__map")
-  val stmts = intBuf()
-  stmts.push(SLet(nm, ECall(roleSym(lo, "map.new"), intBuf())))
+  val stmts = list()
+  stmts.push(SLet(nm, ECall(roleSym(lo, "map.new"), list())))
   var i = 0
   while (i < ents.len()) {
     val en: FMapEnt = ents.get(i)
@@ -1161,19 +1161,23 @@ fun lowerMap(lo: Lo, ents: IntBuf): Expr {
 // a[i] -> charAt (String) / __mapGetS|I (RawMap, by key type) / listGet (IntBuf/default)
 fun lowerIndex(lo: Lo, a: FExpr, ix: FExpr): Expr {
   val at = tagOf(lo, a)
-  val args = intBuf(); args.push(lowerExpr(lo, a)); args.push(lowerExpr(lo, ix))
+  val args = list(); args.push(lowerExpr(lo, a)); args.push(lowerExpr(lo, ix))
   if (at == "String") { return ECall(roleSym(lo, "str.get"), args) }
   if (at == "RawMap") {
     if (tagOf(lo, ix) == "String") { return ECall(roleSym(lo, "map.getS"), args) }
     return ECall(roleSym(lo, "map.getI"), args)
   }
+  // Phase 8 literal flip: a target-tier nominal (Vec/Array/…) with a concrete `<T>_get` method drives
+  // `a[i]` through it by convention (§3c), so indexing follows the static element type off the bootstrap
+  // IntBuf. IntBuf and unknown "?" tags keep the default list role — byte-identical for the self-host.
+  if (!isDefaultSeqTag(at)) { val m = mangleMethod(at, "get"); if (funDefined(lo, m)) { return ECall(m, args) } }
   return ECall(roleSym(lo, "list.get"), args)
 }
 
 // string interpolation -> concat chain; each $expr becomes intToStr(expr) unless it is a String
 fun interpPiece(lo: Lo, e: FExpr): Expr {
   if (tagOf(lo, e) == "String") { return lowerExpr(lo, e) }
-  val a = intBuf(); a.push(lowerExpr(lo, e))
+  val a = list(); a.push(lowerExpr(lo, e))
   return ECall(roleSym(lo, "str.show"), a)
 }
 
@@ -1182,7 +1186,7 @@ fun interpPiece(lo: Lo, e: FExpr): Expr {
 // piece is a String (a literal chunk, or `$expr` rendered via interpPiece/str.show). The 0-piece and
 // 1-piece cases short-circuit to the piece itself (no builder allocation for a plain string).
 fun lowerInterp(lo: Lo, parts: IntBuf): Expr {
-  val pieces = intBuf()
+  val pieces = list()
   var i = 0
   while (i < parts.len()) {
     val pt: FIPart = parts.get(i)
@@ -1192,15 +1196,15 @@ fun lowerInterp(lo: Lo, parts: IntBuf): Expr {
   }
   if (pieces.len() == 0) { return EStr("") }
   if (pieces.len() == 1) { val only: Expr = pieces.get(0); return only }
-  var acc = ECall(roleSym(lo, "str.build.new"), intBuf())
+  var acc = ECall(roleSym(lo, "str.build.new"), list())
   var j = 0
   while (j < pieces.len()) {
     val pj: Expr = pieces.get(j)
-    val pa = intBuf(); pa.push(acc); pa.push(pj)
+    val pa = list(); pa.push(acc); pa.push(pj)
     acc = ECall(roleSym(lo, "str.build.push"), pa)
     j = j + 1
   }
-  val fa = intBuf(); fa.push(acc)
+  val fa = list(); fa.push(acc)
   return ECall(roleSym(lo, "str.build.finish"), fa)
 }
 
@@ -1214,22 +1218,22 @@ fun desugarQuestion(lo: Lo, inner: FExpr): FExpr {
   var sadC = "Err"
   var sadNullary = 0
   if (tagOf(lo, inner) == "Option") { okC = "Some"; sadC = "None"; sadNullary = 1 }
-  val okBind = intBuf(); okBind.push(FPBind("__q_v"))
-  val okPats = intBuf(); okPats.push(FPCtor(okC, okBind))
+  val okBind = list(); okBind.push(FPBind("__q_v"))
+  val okPats = list(); okPats.push(FPCtor(okC, okBind))
   val okArm = FArm(2, FENoRes, okPats, FENoRes, FEIdent("__q_v"))
-  val sadPats = intBuf()
-  val sadStmts = intBuf()
+  val sadPats = list()
+  val sadStmts = list()
   if (sadNullary == 1) {
     sadPats.push(FPPath(sadC))
     sadStmts.push(FSReturnV(FEIdent(sadC)))
   } else {
-    val eb = intBuf(); eb.push(FPBind("__q_e"))
+    val eb = list(); eb.push(FPBind("__q_e"))
     sadPats.push(FPCtor(sadC, eb))
-    val cargs = intBuf(); cargs.push(FArg("", FEIdent("__q_e")))
+    val cargs = list(); cargs.push(FArg("", FEIdent("__q_e")))
     sadStmts.push(FSReturnV(FECall(FEIdent(sadC), cargs)))
   }
   val sadArm = FArm(2, FENoRes, sadPats, FENoRes, FEBlock(sadStmts, FENoRes))
-  val arms = intBuf(); arms.push(okArm); arms.push(sadArm)
+  val arms = list(); arms.push(okArm); arms.push(sadArm)
   return FEWhen(1, "", inner, arms)
 }
 
@@ -1247,7 +1251,7 @@ fun lowerExpr(lo: Lo, e: FExpr): Expr {
     FEUnary(op, x) -> EUnary(op, lowerExpr(lo, x))
     FEBin(op, l, r) -> lowerBin(lo, op, l, r)
     FEField(x, nm) -> if (isFieldOf(lo, tagOf(lo, x), nm)) { EField(lowerExpr(lo, x), nm) }
-    else { if (hasGetterMethod(lo, x, nm)) { ECall(methodCallee(lo, x, nm), consFront(lowerExpr(lo, x), intBuf())) }
+    else { if (hasGetterMethod(lo, x, nm)) { ECall(methodCallee(lo, x, nm), consFront(lowerExpr(lo, x), list())) }
       else { EField(lowerExpr(lo, x), nm) } }
     FEStatic(x, nm) -> EIdent(nm)
     FECall(callee, args) -> lowerCall(lo, callee, args)
@@ -1282,21 +1286,21 @@ fun guardTemp(lo: Lo, a: FExpr, pre: String): String {
 
 fun lowerSafe(lo: Lo, a: FExpr, f: String): Expr {
   val t = guardTemp(lo, a, "_sf")
-  val stmts = intBuf(); stmts.push(SLet(t, lowerExpr(lo, a)))
+  val stmts = list(); stmts.push(SLet(t, lowerExpr(lo, a)))
   val cond = EBin("==", EIdent(t), EInt("0"))
   return EBlock(stmts, EIf(cond, EInt("0"), EField(EIdent(t), f)))
 }
 
 fun lowerNotNull(lo: Lo, a: FExpr): Expr {
   val t = guardTemp(lo, a, "_nn")
-  val stmts = intBuf(); stmts.push(SLet(t, lowerExpr(lo, a)))
+  val stmts = list(); stmts.push(SLet(t, lowerExpr(lo, a)))
   val cond = EBin("==", EIdent(t), EInt("0"))
-  return EBlock(stmts, EIf(cond, ECall("__abort", intBuf()), EIdent(t)))
+  return EBlock(stmts, EIf(cond, ECall("__abort", list()), EIdent(t)))
 }
 
 fun lowerElvis(lo: Lo, a: FExpr, b: FExpr): Expr {
   val t = guardTemp(lo, a, "_ev")
-  val stmts = intBuf(); stmts.push(SLet(t, lowerExpr(lo, a)))
+  val stmts = list(); stmts.push(SLet(t, lowerExpr(lo, a)))
   val cond = EBin("==", EIdent(t), EInt("0"))
   return EBlock(stmts, EIf(cond, lowerExpr(lo, b), EIdent(t)))
 }
@@ -1308,9 +1312,9 @@ fun lowerElvis(lo: Lo, a: FExpr, b: FExpr): Expr {
 fun lowerAssignInto(lo: Lo, out: IntBuf, nm: String, rhs: FExpr): Int {
   val tmp = freshName(lo, "_rc")
   var rv = lowerExpr(lo, rhs)
-  if (isFreshCtor(lo, rhs) == false) { val a = intBuf(); a.push(rv); rv = ECall("__retain", a) }
+  if (isFreshCtor(lo, rhs) == false) { val a = list(); a.push(rv); rv = ECall("__retain", a) }
   out.push(SLet(tmp, rv))
-  val relA = intBuf(); relA.push(EIdent(nm))
+  val relA = list(); relA.push(EIdent(nm))
   out.push(SExprS(ECall("__release", relA)))
   out.push(SAssign(nm, EIdent(tmp)))
   return 0
@@ -1327,10 +1331,10 @@ fun lowerFieldAssignInto(lo: Lo, out: IntBuf, obj: FExpr, f: String, rhs: FExpr)
   val to = freshName(lo, "_ro")
   out.push(SLet(to, lowerExpr(lo, obj)))
   var rv = lowerExpr(lo, rhs)
-  if (isFreshCtor(lo, rhs) == false) { val a = intBuf(); a.push(rv); rv = ECall("__retain", a) }
+  if (isFreshCtor(lo, rhs) == false) { val a = list(); a.push(rv); rv = ECall("__retain", a) }
   val tn = freshName(lo, "_rn")
   out.push(SLet(tn, rv))
-  val relA = intBuf(); relA.push(EField(EIdent(to), f))
+  val relA = list(); relA.push(EField(EIdent(to), f))
   out.push(SExprS(ECall("__release", relA)))
   out.push(SAssignF(EIdent(to), f, EIdent(tn)))
   return 0
@@ -1357,7 +1361,7 @@ fun lowerStmtInto(lo: Lo, out: IntBuf, s: FStmt): Int {
 fun assignName(lhs: FExpr): String { return when (lhs) { FEIdent(nm) -> nm; else -> "" } }
 
 fun lowerStmts(lo: Lo, stmts: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < stmts.len()) { lowerStmtInto(lo, out, stmts.get(i)); i = i + 1 }
   return out
@@ -1389,7 +1393,7 @@ fun lowerForInto(lo: Lo, out: IntBuf, v: String, it: FExpr, body: FExpr): Int {
 // The `v = v + 1` increment is the loop STEP (emitted at the continue target), so `continue` advances v.
 fun lowerForRange(lo: Lo, out: IntBuf, v: String, loE: FExpr, hi: FExpr, body: FExpr, cmp: String): Int {
   bindLoc(lo, v, "Int")
-  val stmts = intBuf()
+  val stmts = list()
   lowerBodyInto(lo, stmts, body)
   val step = SAssign(v, EBin("+", EIdent(v), EInt("1")))
   out.push(SLet(v, lowerExpr(lo, loE)))
@@ -1429,11 +1433,11 @@ fun lowerForEach(lo: Lo, out: IntBuf, v: String, it: FExpr, body: FExpr): Int {
   val idx = freshName(lo, "__i")
   out.push(SLet(lst, lowerExpr(lo, it)))
   out.push(SLet(idx, EInt("0")))
-  val ga = intBuf(); ga.push(EIdent(lst)); ga.push(EIdent(idx))
-  val stmts = intBuf()
+  val ga = list(); ga.push(EIdent(lst)); ga.push(EIdent(idx))
+  val stmts = list()
   stmts.push(SLet(v, ECall(getC, ga)))
   lowerBodyInto(lo, stmts, body)
-  val la = intBuf(); la.push(EIdent(lst))
+  val la = list(); la.push(EIdent(lst))
   val step = SAssign(idx, EBin("+", EIdent(idx), EInt("1")))
   out.push(SLoop(EBin("<", EIdent(idx), ECall(lenC, la)), EBlock(stmts, ENoRes), step))
   return 0
@@ -1443,22 +1447,25 @@ fun lowerForEach(lo: Lo, out: IntBuf, v: String, it: FExpr, body: FExpr): Int {
 // String is immutable so it's rejected.
 fun lowerIndexStore(lo: Lo, a: FExpr, ix: FExpr, rhs: FExpr): Stmt {
   val at = tagOf(lo, a)
-  val args = intBuf()
+  val args = list()
   args.push(lowerExpr(lo, a)); args.push(lowerExpr(lo, ix)); args.push(lowerExpr(lo, rhs))
   if (at == "String") { lowFail("cannot store into an immutable String index"); return SExprS(EInt("0")) }
   if (at == "RawMap") {
     if (tagOf(lo, ix) == "String") { return SExprS(ECall(roleSym(lo, "map.setS"), args)) }
     return SExprS(ECall(roleSym(lo, "map.setI"), args))
   }
+  // Phase 8 literal flip: a target-tier nominal (Vec/Array/…) with a concrete `<T>_set` method drives
+  // `a[i] = v` through it, mirroring lowerIndex's load dispatch. Default IntBuf/unknown keep list.set.
+  if (!isDefaultSeqTag(at)) { val m = mangleMethod(at, "set"); if (funDefined(lo, m)) { return SExprS(ECall(m, args)) } }
   return SExprS(ECall(roleSym(lo, "list.set"), args))
 }
 
-fun pairE(a: Expr, b: Expr): IntBuf { val l = intBuf(); l.push(a); l.push(b); return l }
+fun pairE(a: Expr, b: Expr): IntBuf { val l = list(); l.push(a); l.push(b); return l }
 
 fun lowerAssign(lo: Lo, lhs: FExpr, rhs: FExpr): Stmt {
   return when (lhs) {
     FEIdent(nm) -> { val t = tagOf(lo, lhs); var rv = lowerExpr(lo, rhs)
-      if (isValueTag(lo, t)) { if (isCopyLvalue(rhs)) { val a = intBuf(); a.push(rv); rv = ECall(mangleMethod(t, "copy"), a) } }
+      if (isValueTag(lo, t)) { if (isCopyLvalue(rhs)) { val a = list(); a.push(rv); rv = ECall(mangleMethod(t, "copy"), a) } }
       SAssign(nm, rv) }
     FEField(b, f) -> if (isFieldOf(lo, tagOf(lo, b), f)) { SAssignF(lowerExpr(lo, b), f, lowerExpr(lo, rhs)) }
     else { if (hasSetter(lo, b, f)) { SExprS(ECall(setterCallee(lo, b, f), pairE(lowerExpr(lo, b), lowerExpr(lo, rhs)))) }
@@ -1474,13 +1481,21 @@ fun lowerLet(lo: Lo, nm: String, ty: String, init: FExpr): Stmt {
   // @value CoW: binding an existing value-type lvalue takes a value COPY (its `copy` method deep-retains
   // the shared RawBuf so a later mutation copy-on-writes) — a fresh temporary already owns its buffer.
   if (isValueTag(lo, tag)) {
-    if (isCopyLvalue(init)) { val a = intBuf(); a.push(initE); initE = ECall(mangleMethod(tag, "copy"), a) }
+    if (isCopyLvalue(init)) { val a = list(); a.push(initE); initE = ECall(mangleMethod(tag, "copy"), a) }
   } else {
     // class ARC: a class-typed local is an owned reference. A fresh constructor already carries its
     // +1; binding an EXISTING class value (alias) takes a new co-ownership, so retain it.
     if (isClassTag(lo, tag)) {
       lo.arcOwned.push(nm)
-      if (isFreshCtor(lo, init) == false) { val a = intBuf(); a.push(initE); initE = ECall("__retain", a) }
+      // T1 boxed String / StrView (Phase 9): a String-producing RHS (literal, `+` concat, substr, Int_toStr,
+      // readFile, StrBuilder.finish — anything that is NOT a bare alias) yields a FRESH +1 box that MOVES
+      // into the binding with no retain, so scope-exit release drops it to 0 and runs deinit → __rawFree.
+      // Only aliasing an existing String/StrView value (a bare identifier or field read) co-owns and retains.
+      // Inert in T0: neither `String` nor `StrView` is a class there (isClassTag(tag) is already false), so
+      // this never fires while self-hosting and the fixpoint is untouched.
+      val isAlias = when (init) { FEIdent(x) -> true; FEField(ab, af) -> true; else -> false }
+      val movesIn = if (tag == "String" || tag == "StrView") { isAlias == false } else { isFreshCtor(lo, init) }
+      if (movesIn == false) { val a = list(); a.push(initE); initE = ECall("__retain", a) }
     }
   }
   bindLoc(lo, nm, tag)
@@ -1502,7 +1517,7 @@ fun lowerStmt(lo: Lo, s: FStmt): Stmt {
 
 // ---------- pattern lowering ----------
 fun lowerPats(subs: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < subs.len()) { val s: FPat = subs.get(i); out.push(lowerPat(s)); i = i + 1 }
   return out
@@ -1526,7 +1541,7 @@ fun lowerPat(p: FPat): Pat {
 fun ctorPayloadTys(lo: Lo, ctorName: String): IntBuf {
   var i = 0
   while (i < lo.variantN.len()) { if (lo.variantN.get(i) == ctorName) { return lo.variantTys.get(i) }; i = i + 1 }
-  return intBuf()
+  return list()
 }
 
 // bind a single pattern variable with a known type (a leaf FPBind); recurse for a nested constructor.
@@ -1573,7 +1588,7 @@ fun lowerArm(lo: Lo, a: FArm): Arm {
 }
 
 fun lowerArms(lo: Lo, arms: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < arms.len()) { val a: FArm = arms.get(i); out.push(lowerArm(lo, a)); i = i + 1 }
   return out
@@ -1581,8 +1596,8 @@ fun lowerArms(lo: Lo, arms: IntBuf): IntBuf {
 
 // ---------- declaration collection (2-phase) ----------
 fun collectStruct(td: FTDecl, structN: IntBuf, structF: IntBuf, structFT: IntBuf): Int {
-  val fields = intBuf()
-  val ftys = intBuf()
+  val fields = list()
+  val ftys = list()
   var i = 0
   while (i < td.fields.len()) { val f: FFld = td.fields.get(i); fields.push(f.name); ftys.push(f.ty); i = i + 1 }
   structN.push(td.name); structF.push(fields); structFT.push(ftys)
@@ -1603,7 +1618,7 @@ fun collectMethodSigs(td: FTDecl, pfuns: IntBuf, fN: IntBuf, fR: IntBuf): Int {
 // routine calls it when the last reference drops (see codegen buildRelRoutine / hasDeinit).
 fun collectDeinit(td: FTDecl, pfuns: IntBuf, fN: IntBuf, fR: IntBuf): Int {
   if (isNoResF(td.dtor)) { return 0 }
-  val df = FFunc(intBuf(), "deinit", "", "self", intBuf(), "Int", "", td.dtor)
+  val df = FFunc(list(), "deinit", "", "self", list(), "Int", "", td.dtor)
   pfuns.push(PFun(td.name, df)); fN.push(mangleMethod(td.name, "deinit")); fR.push("Int")
   return 0
 }
@@ -1672,7 +1687,7 @@ fun arcReleaseInto(out: IntBuf, cls: IntBuf, exceptNm: String): Int {
   var i = 0
   while (i < cls.len()) {
     val c: String = cls.get(i)
-    if (c != exceptNm) { val a = intBuf(); a.push(EIdent(c)); out.push(SExprS(ECall("__release", a))) }
+    if (c != exceptNm) { val a = list(); a.push(EIdent(c)); out.push(SExprS(ECall("__release", a))) }
     i = i + 1
   }
   return 0
@@ -1680,7 +1695,7 @@ fun arcReleaseInto(out: IntBuf, cls: IntBuf, exceptNm: String): Int {
 
 fun arcRetName(e: Expr): String { return when (e) { EIdent(n) -> n; else -> "" } }
 
-fun arcRelList(cls: IntBuf, exceptNm: String): IntBuf { val out = intBuf(); arcReleaseInto(out, cls, exceptNm); return out }
+fun arcRelList(cls: IntBuf, exceptNm: String): IntBuf { val out = list(); arcReleaseInto(out, cls, exceptNm); return out }
 
 fun arcZeroInto(out: IntBuf, cls: IntBuf): Int {
   var i = 0
@@ -1696,12 +1711,12 @@ fun arcRet(lo: Lo, cls: IntBuf, v: Expr): Expr {
   val rn = arcRetName(v)
   if (memListL(cls, rn)) { return EBlock(arcRelList(cls, rn), v) }
   val t = freshName(lo, "_ar")
-  val ss = intBuf(); ss.push(SLet(t, v)); arcReleaseInto(ss, cls, "")
+  val ss = list(); ss.push(SLet(t, v)); arcReleaseInto(ss, cls, "")
   return EBlock(ss, EIdent(t))
 }
 
 fun arcRwArms(lo: Lo, cls: IntBuf, arms: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < arms.len()) { val a: Arm = arms.get(i); out.push(Arm(a.isElse, a.pat, arcRwExpr(lo, cls, a.body))); i = i + 1 }
   return out
@@ -1718,7 +1733,7 @@ fun arcRwExpr(lo: Lo, cls: IntBuf, e: Expr): Expr {
 }
 
 fun arcRwStmts(lo: Lo, cls: IntBuf, stmts: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < stmts.len()) {
     val s: Stmt = stmts.get(i)
@@ -1743,7 +1758,7 @@ fun arcInjectBody(lo: Lo, body: Expr, cls: IntBuf): Expr {
   if (cls.len() == 0) { return body }
   return when (body) {
     EBlock(stmts, res) -> {
-      val out = intBuf()
+      val out = list()
       arcZeroInto(out, cls)
       val rw = arcRwStmts(lo, cls, stmts)
       var i = 0
@@ -1757,7 +1772,7 @@ fun arcInjectBody(lo: Lo, body: Expr, cls: IntBuf): Expr {
       }
     }
     else -> {
-      val out = intBuf()
+      val out = list()
       arcZeroInto(out, cls)
       val t = freshName(lo, "_ar"); out.push(SLet(t, arcRwExpr(lo, cls, body))); arcReleaseInto(out, cls, "")
       EBlock(out, EIdent(t))
@@ -1778,11 +1793,11 @@ fun findTraitDeclIdx(traitDecls: IntBuf, name: String): Int {
   return 0 - 1
 }
 
-fun oneStmt(s: Stmt): IntBuf { val l = intBuf(); l.push(s); return l }
+fun oneStmt(s: Stmt): IntBuf { val l = list(); l.push(s); return l }
 
 // implementations of trait `tn` (parallel implTrait/implType lists) -> the list of impl type names
 fun implTypesOf(implTrait: IntBuf, implType: IntBuf, tn: String): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < implTrait.len()) { if (implTrait.get(i) == tn) { out.push(implType.get(i)) }; i = i + 1 }
   return out
@@ -1791,18 +1806,18 @@ fun implTypesOf(implTrait: IntBuf, implType: IntBuf, tn: String): IntBuf {
 // build  fun ___dyn_T_m(obj, <method params>): Ret { val __t = __typeId(obj)
 //   if (__t == id(Ty0)) return Ty0_m(obj, params) ; ... ; return 0 }
 fun buildDispatcher(traitName: String, m: FFunc, implTypes: IntBuf, structN: IntBuf): Func {
-  val pnames = intBuf(); pnames.push("obj")
-  val ptys = intBuf(); ptys.push(traitName)
+  val pnames = list(); pnames.push("obj")
+  val ptys = list(); ptys.push(traitName)
   var i = 0
   while (i < m.params.len()) { val pp: FParam = m.params.get(i); pnames.push(pp.name); ptys.push(pp.ty); i = i + 1 }
-  val stmts = intBuf()
-  val tArgs = intBuf(); tArgs.push(EIdent("obj"))
+  val stmts = list()
+  val tArgs = list(); tArgs.push(EIdent("obj"))
   stmts.push(SLet("__t", ECall("__typeId", tArgs)))
   var j = 0
   while (j < implTypes.len()) {
     val ty: String = implTypes.get(j)
     val id = indexOfL(structN, ty)
-    val cargs = intBuf(); cargs.push(EIdent("obj"))
+    val cargs = list(); cargs.push(EIdent("obj"))
     var k = 0
     while (k < m.params.len()) { val pp: FParam = m.params.get(k); cargs.push(EIdent(pp.name)); k = k + 1 }
     val callE = ECall(mangleMethod(ty, m.name), cargs)
@@ -1813,14 +1828,14 @@ fun buildDispatcher(traitName: String, m: FFunc, implTypes: IntBuf, structN: Int
   // No impl matched the runtime type-id: this is a hard error (a trait method invoked on a type that
   // does not implement it), not a silently-wrong 0. Abort the process; the trailing return is unreachable
   // but keeps the function value-returning for the checker/codegen (STDLIB-REDESIGN §2b, Phase 4).
-  stmts.push(SExprS(ECall("__abort", intBuf())))
+  stmts.push(SExprS(ECall("__abort", list())))
   stmts.push(SReturnV(EInt("0")))
   return Func("__dyn_" + (traitName + ("_" + m.name)), pnames, ptys, EBlock(stmts, ENoRes))
 }
 
 // generate every trait method's dispatcher; register names/returns so calls resolve during lowering
 fun genDispatchers(traitDecls: IntBuf, implTrait: IntBuf, implType: IntBuf, structN: IntBuf, fN: IntBuf, fR: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < traitDecls.len()) {
     val tr: FTraitDecl = traitDecls.get(i)
@@ -1881,7 +1896,7 @@ fun deriveEqBody(fields: IntBuf): FExpr {
 // cmp body: lexicographic over fields, returning -1/0/1. Uses only `<`, which re-enters lowerBin so a
 // nested field routes to its own <T>_cmp (Ord desugar) while scalar fields machine-compare.
 fun deriveCmpBody(fields: IntBuf): FExpr {
-  val stmts = intBuf()
+  val stmts = list()
   var i = 0
   while (i < fields.len()) {
     val fn: String = fields.get(i)
@@ -1902,15 +1917,15 @@ fun deriveCmpBody(fields: IntBuf): FExpr {
 // derived type -> its own <T>_hash(). A proper byte-fold String hash arrives with the Phase 5 String work.
 fun deriveHashOf(fn: String, ft: String): FExpr {
   val b = tyTag(ft)
-  if (b == "String") { return FECall(FEField(deriveThisF(fn), "len"), intBuf()) }
-  if (b == "Float" || b == "Double") { val ta = intBuf(); ta.push(FArg("", deriveThisF(fn))); return FECall(FEIdent("toInt"), ta) }
+  if (b == "String") { return FECall(FEField(deriveThisF(fn), "len"), list()) }
+  if (b == "Float" || b == "Double") { val ta = list(); ta.push(FArg("", deriveThisF(fn))); return FECall(FEIdent("toInt"), ta) }
   if (deriveIsScalar(ft)) { return deriveThisF(fn) }
-  return FECall(FEField(deriveThisF(fn), "hash"), intBuf())
+  return FECall(FEField(deriveThisF(fn), "hash"), list())
 }
 
 // hash body: FNV-style mix  var __h = 0 ; __h = __h*31 + hash(fi) ; ... ; return __h
 fun deriveHashBody(fields: IntBuf, ftys: IntBuf): FExpr {
-  val stmts = intBuf()
+  val stmts = list()
   stmts.push(FSLet(1, "__h", "Int", FEInt("0")))
   var i = 0
   while (i < fields.len()) {
@@ -1924,12 +1939,12 @@ fun deriveHashBody(fields: IntBuf, ftys: IntBuf): FExpr {
 
 // clone body: reconstruct the struct; scalar/String fields copy the word, nested fields deep-clone.
 fun deriveCloneBody(tyName: String, fields: IntBuf, ftys: IntBuf): FExpr {
-  val args = intBuf()
+  val args = list()
   var i = 0
   while (i < fields.len()) {
     val fn: String = fields.get(i); val ft: String = ftys.get(i)
     if (deriveIsScalar(ft) || deriveIsString(ft)) { args.push(FArg("", deriveThisF(fn))) }
-    else { args.push(FArg("", FECall(FEField(deriveThisF(fn), "clone"), intBuf()))) }
+    else { args.push(FArg("", FECall(FEField(deriveThisF(fn), "clone"), list()))) }
     i = i + 1
   }
   return FEBlock(oneStmt(FSReturnV(FECall(FEIdent(tyName), args))), FENoRes)
@@ -1938,14 +1953,14 @@ fun deriveCloneBody(tyName: String, fields: IntBuf, ftys: IntBuf): FExpr {
 // debug body: `TypeName(f0, f1, ...)` via interpolation. Scalars render via str.show (Int_toStr), String
 // fields render directly, nested fields render via their own <T>_debug() (a String).
 fun deriveDebugBody(tyName: String, fields: IntBuf, ftys: IntBuf): FExpr {
-  val parts = intBuf()
+  val parts = list()
   parts.push(FILit(tyName + "("))
   var i = 0
   while (i < fields.len()) {
     if (i > 0) { parts.push(FILit(", ")) }
     val fn: String = fields.get(i); val ft: String = ftys.get(i)
     if (deriveIsScalar(ft) || deriveIsString(ft)) { parts.push(FIExpr(deriveThisF(fn))) }
-    else { parts.push(FIExpr(FECall(FEField(deriveThisF(fn), "debug"), intBuf()))) }
+    else { parts.push(FIExpr(FECall(FEField(deriveThisF(fn), "debug"), list()))) }
     i = i + 1
   }
   parts.push(FILit(")"))
@@ -1954,13 +1969,13 @@ fun deriveDebugBody(tyName: String, fields: IntBuf, ftys: IntBuf): FExpr {
 
 // default body: construct from each field's default (0 for scalars, "" for String, <T>::default() nested).
 fun deriveDefaultBody(tyName: String, fields: IntBuf, ftys: IntBuf): FExpr {
-  val args = intBuf()
+  val args = list()
   var i = 0
   while (i < fields.len()) {
     val ft: String = ftys.get(i)
     if (deriveIsScalar(ft)) { args.push(FArg("", FEInt("0"))) }
     else { if (deriveIsString(ft)) { args.push(FArg("", FEStr("", 0))) }
-      else { args.push(FArg("", FECall(FEStatic(FEIdent(tyTag(ft)), "default"), intBuf()))) } }
+      else { args.push(FArg("", FECall(FEStatic(FEIdent(tyTag(ft)), "default"), list()))) } }
     i = i + 1
   }
   return FEBlock(oneStmt(FSReturnV(FECall(FEIdent(tyName), args))), FENoRes)
@@ -1974,11 +1989,11 @@ fun deriveDefaultBody(tyName: String, fields: IntBuf, ftys: IntBuf): FExpr {
 // __s0.. (self) / __o0.. (other), typed from the variant table so `__sJ == __oJ` routes by payload type.
 
 // one-element FPat list (an arm's pattern-alternatives list holds a single ctor pattern).
-fun oneP(p: FPat): IntBuf { val l = intBuf(); l.push(p); return l }
+fun oneP(p: FPat): IntBuf { val l = list(); l.push(p); return l }
 
 // ctor pattern `V(__<pre>0, __<pre>1, ...)` binding `n` positional payload holes.
 fun deriveBindPats(pre: String, n: Int): IntBuf {
-  val ps = intBuf()
+  val ps = list()
   var j = 0
   while (j < n) { ps.push(FPBind("__" + (pre + j.toStr()))); j = j + 1 }
   return ps
@@ -1986,7 +2001,7 @@ fun deriveBindPats(pre: String, n: Int): IntBuf {
 
 // gather one enum's variant names (declaration order) from the flat variant table (filtered by owner).
 fun enumVariantNamesOf(variantN: IntBuf, variantOwn: IntBuf, en: String): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < variantN.len()) { if (variantOwn.get(i) == en) { out.push(variantN.get(i)) }; i = i + 1 }
   return out
@@ -1994,7 +2009,7 @@ fun enumVariantNamesOf(variantN: IntBuf, variantOwn: IntBuf, en: String): IntBuf
 
 // gather the parallel per-variant payload-type lists for one enum.
 fun enumVariantTysOf(variantN: IntBuf, variantOwn: IntBuf, variantTys: IntBuf, en: String): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < variantN.len()) { if (variantOwn.get(i) == en) { out.push(variantTys.get(i)) }; i = i + 1 }
   return out
@@ -2011,19 +2026,19 @@ fun deriveEnumEqConj(n: Int): FExpr {
 
 // enum eq: `when (self) { V(s..) -> when (other) { V(o..) -> AND(s==o) ; else -> false } ... else -> false }`.
 fun deriveEnumEqBody(vnames: IntBuf, vtys: IntBuf): FExpr {
-  val arms = intBuf()
+  val arms = list()
   var i = 0
   while (i < vnames.len()) {
     val vn: String = vnames.get(i)
     val tys: IntBuf = vtys.get(i)
-    val innerArms = intBuf()
+    val innerArms = list()
     innerArms.push(FArm(2, FENoRes, oneP(FPCtor(vn, deriveBindPats("o", tys.len()))), FENoRes, deriveEnumEqConj(tys.len())))
-    innerArms.push(FArm(1, FENoRes, intBuf(), FENoRes, FEBool("false")))
+    innerArms.push(FArm(1, FENoRes, list(), FENoRes, FEBool("false")))
     val inner = FEWhen(1, "", FEIdent("other"), innerArms)
     arms.push(FArm(2, FENoRes, oneP(FPCtor(vn, deriveBindPats("s", tys.len()))), FENoRes, inner))
     i = i + 1
   }
-  arms.push(FArm(1, FENoRes, intBuf(), FENoRes, FEBool("false")))
+  arms.push(FArm(1, FENoRes, list(), FENoRes, FEBool("false")))
   return FEBlock(oneStmt(FSReturnV(FEWhen(1, "", FEThis, arms))), FENoRes)
 }
 
@@ -2039,12 +2054,12 @@ fun deriveEnumCmpPayload(n: Int, i: Int): FExpr {
 // returns 1 for an EARLIER variant (self greater), the payload compare for the SAME variant, -1 for a LATER
 // variant. Every variant is covered; an else -> 0 backstops.
 fun deriveEnumCmpBody(vnames: IntBuf, vtys: IntBuf): FExpr {
-  val arms = intBuf()
+  val arms = list()
   var oi = 0
   while (oi < vnames.len()) {
     val vn: String = vnames.get(oi)
     val tys: IntBuf = vtys.get(oi)
-    val innerArms = intBuf()
+    val innerArms = list()
     var ii = 0
     while (ii < vnames.len()) {
       val ivn: String = vnames.get(ii)
@@ -2053,27 +2068,27 @@ fun deriveEnumCmpBody(vnames: IntBuf, vtys: IntBuf): FExpr {
       innerArms.push(FArm(2, FENoRes, oneP(FPCtor(ivn, deriveBindPats("o", itys.len()))), FENoRes, body))
       ii = ii + 1
     }
-    innerArms.push(FArm(1, FENoRes, intBuf(), FENoRes, FEInt("0")))
+    innerArms.push(FArm(1, FENoRes, list(), FENoRes, FEInt("0")))
     arms.push(FArm(2, FENoRes, oneP(FPCtor(vn, deriveBindPats("s", tys.len()))), FENoRes, FEWhen(1, "", FEIdent("other"), innerArms)))
     oi = oi + 1
   }
-  arms.push(FArm(1, FENoRes, intBuf(), FENoRes, FEInt("0")))
+  arms.push(FArm(1, FENoRes, list(), FENoRes, FEInt("0")))
   return FEBlock(oneStmt(FSReturnV(FEWhen(1, "", FEThis, arms))), FENoRes)
 }
 
 // per-payload-local hash surrogate (Int): String -> .len(), Double -> toInt(), scalar -> the word, nested -> .hash().
 fun deriveEnumHashOf(nm: String, ft: String): FExpr {
   val b = tyTag(ft)
-  if (b == "String") { return FECall(FEField(FEIdent(nm), "len"), intBuf()) }
-  if (b == "Float" || b == "Double") { val ta = intBuf(); ta.push(FArg("", FEIdent(nm))); return FECall(FEIdent("toInt"), ta) }
+  if (b == "String") { return FECall(FEField(FEIdent(nm), "len"), list()) }
+  if (b == "Float" || b == "Double") { val ta = list(); ta.push(FArg("", FEIdent(nm))); return FECall(FEIdent("toInt"), ta) }
   if (deriveIsScalar(ft)) { return FEIdent(nm) }
-  return FECall(FEField(FEIdent(nm), "hash"), intBuf())
+  return FECall(FEField(FEIdent(nm), "hash"), list())
 }
 
 // enum hash: `when (self) { V(s..) -> FNV-mix(<variant-index>, hash(s0), ...) }`. The variant index seeds the
 // mix so distinct variants (even with equal payloads) hash apart; equal values hash equal (matches derived eq).
 fun deriveEnumHashBody(vnames: IntBuf, vtys: IntBuf): FExpr {
-  val arms = intBuf()
+  val arms = list()
   var i = 0
   while (i < vnames.len()) {
     val vn: String = vnames.get(i)
@@ -2087,41 +2102,41 @@ fun deriveEnumHashBody(vnames: IntBuf, vtys: IntBuf): FExpr {
     arms.push(FArm(2, FENoRes, oneP(FPCtor(vn, deriveBindPats("s", tys.len()))), FENoRes, acc))
     i = i + 1
   }
-  arms.push(FArm(1, FENoRes, intBuf(), FENoRes, FEInt("0")))
+  arms.push(FArm(1, FENoRes, list(), FENoRes, FEInt("0")))
   return FEBlock(oneStmt(FSReturnV(FEWhen(1, "", FEThis, arms))), FENoRes)
 }
 
 // enum clone: `when (self) { V(s..) -> V(clone(s0), ...) }`. Scalar/String copy the word, nested deep-clone.
 fun deriveEnumCloneBody(vnames: IntBuf, vtys: IntBuf): FExpr {
-  val arms = intBuf()
+  val arms = list()
   var i = 0
   while (i < vnames.len()) {
     val vn: String = vnames.get(i)
     val tys: IntBuf = vtys.get(i)
-    val cargs = intBuf()
+    val cargs = list()
     var j = 0
     while (j < tys.len()) {
       val ft: String = tys.get(j); val nm = "__s" + j.toStr()
       if (deriveIsScalar(ft) || deriveIsString(ft)) { cargs.push(FArg("", FEIdent(nm))) }
-      else { cargs.push(FArg("", FECall(FEField(FEIdent(nm), "clone"), intBuf()))) }
+      else { cargs.push(FArg("", FECall(FEField(FEIdent(nm), "clone"), list()))) }
       j = j + 1
     }
     arms.push(FArm(2, FENoRes, oneP(FPCtor(vn, deriveBindPats("s", tys.len()))), FENoRes, FECall(FEIdent(vn), cargs)))
     i = i + 1
   }
-  arms.push(FArm(1, FENoRes, intBuf(), FENoRes, FEThis))
+  arms.push(FArm(1, FENoRes, list(), FENoRes, FEThis))
   return FEBlock(oneStmt(FSReturnV(FEWhen(1, "", FEThis, arms))), FENoRes)
 }
 
 // enum debug: `when (self) { V(s..) -> "V(s0, s1)" }` via interpolation. Scalar/String render directly,
 // nested via their own <T>_debug().
 fun deriveEnumDebugBody(vnames: IntBuf, vtys: IntBuf): FExpr {
-  val arms = intBuf()
+  val arms = list()
   var i = 0
   while (i < vnames.len()) {
     val vn: String = vnames.get(i)
     val tys: IntBuf = vtys.get(i)
-    val parts = intBuf()
+    val parts = list()
     if (tys.len() == 0) { parts.push(FILit(vn)) }
     else {
       parts.push(FILit(vn + "("))
@@ -2130,7 +2145,7 @@ fun deriveEnumDebugBody(vnames: IntBuf, vtys: IntBuf): FExpr {
         if (j > 0) { parts.push(FILit(", ")) }
         val ft: String = tys.get(j); val nm = "__s" + j.toStr()
         if (deriveIsScalar(ft) || deriveIsString(ft)) { parts.push(FIExpr(FEIdent(nm))) }
-        else { parts.push(FIExpr(FECall(FEField(FEIdent(nm), "debug"), intBuf()))) }
+        else { parts.push(FIExpr(FECall(FEField(FEIdent(nm), "debug"), list()))) }
         j = j + 1
       }
       parts.push(FILit(")"))
@@ -2138,7 +2153,7 @@ fun deriveEnumDebugBody(vnames: IntBuf, vtys: IntBuf): FExpr {
     arms.push(FArm(2, FENoRes, oneP(FPCtor(vn, deriveBindPats("s", tys.len()))), FENoRes, FEInterp(parts, 0)))
     i = i + 1
   }
-  arms.push(FArm(1, FENoRes, intBuf(), FENoRes, FEStr("", 0)))
+  arms.push(FArm(1, FENoRes, list(), FENoRes, FEStr("", 0)))
   return FEBlock(oneStmt(FSReturnV(FEWhen(1, "", FEThis, arms))), FENoRes)
 }
 
@@ -2146,13 +2161,13 @@ fun deriveEnumDebugBody(vnames: IntBuf, vtys: IntBuf): FExpr {
 fun deriveEnumDefaultBody(vnames: IntBuf, vtys: IntBuf): FExpr {
   val vn: String = vnames.get(0)
   val tys: IntBuf = vtys.get(0)
-  val args = intBuf()
+  val args = list()
   var j = 0
   while (j < tys.len()) {
     val ft: String = tys.get(j)
     if (deriveIsScalar(ft)) { args.push(FArg("", FEInt("0"))) }
     else { if (deriveIsString(ft)) { args.push(FArg("", FEStr("", 0))) }
-      else { args.push(FArg("", FECall(FEStatic(FEIdent(tyTag(ft)), "default"), intBuf()))) } }
+      else { args.push(FArg("", FECall(FEStatic(FEIdent(tyTag(ft)), "default"), list()))) } }
     j = j + 1
   }
   return FEBlock(oneStmt(FSReturnV(FECall(FEIdent(vn), args))), FENoRes)
@@ -2162,25 +2177,25 @@ fun deriveEnumDefaultBody(vnames: IntBuf, vtys: IntBuf): FExpr {
 fun deriveOneEnum(pfuns: IntBuf, fN: IntBuf, fR: IntBuf, implTrait: IntBuf, implType: IntBuf, enName: String, tr: String, vnames: IntBuf, vtys: IntBuf): Int {
   if (deriveIsKnown(tr) == false) { lowFail("cannot @derive(" + (tr + (") for " + (enName + " — not an auto-derivable trait")))); return 0 }
   if (tr == "Eq" || tr == "PartialEq") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "eq", "Bool", FFunc(intBuf(), "eq", "", "self", cons1P(FParam("other", enName)), "Bool", "", deriveEnumEqBody(vnames, vtys)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "eq", "Bool", FFunc(list(), "eq", "", "self", cons1P(FParam("other", enName)), "Bool", "", deriveEnumEqBody(vnames, vtys)))
   }
   if (tr == "Ord") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "cmp", "Int", FFunc(intBuf(), "cmp", "", "self", cons1P(FParam("other", enName)), "Int", "", deriveEnumCmpBody(vnames, vtys)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "cmp", "Int", FFunc(list(), "cmp", "", "self", cons1P(FParam("other", enName)), "Int", "", deriveEnumCmpBody(vnames, vtys)))
   }
   if (tr == "PartialOrd") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "partialCmp", "Int", FFunc(intBuf(), "partialCmp", "", "self", cons1P(FParam("other", enName)), "Int", "", deriveEnumCmpBody(vnames, vtys)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "partialCmp", "Int", FFunc(list(), "partialCmp", "", "self", cons1P(FParam("other", enName)), "Int", "", deriveEnumCmpBody(vnames, vtys)))
   }
   if (tr == "Hash") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "hash", "Int", FFunc(intBuf(), "hash", "", "self", intBuf(), "Int", "", deriveEnumHashBody(vnames, vtys)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "hash", "Int", FFunc(list(), "hash", "", "self", list(), "Int", "", deriveEnumHashBody(vnames, vtys)))
   }
   if (tr == "Clone") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "clone", enName, FFunc(intBuf(), "clone", "", "self", intBuf(), enName, "", deriveEnumCloneBody(vnames, vtys)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "clone", enName, FFunc(list(), "clone", "", "self", list(), enName, "", deriveEnumCloneBody(vnames, vtys)))
   }
   if (tr == "Debug") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "debug", "String", FFunc(intBuf(), "debug", "", "self", intBuf(), "String", "", deriveEnumDebugBody(vnames, vtys)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "debug", "String", FFunc(list(), "debug", "", "self", list(), "String", "", deriveEnumDebugBody(vnames, vtys)))
   }
   if (tr == "Default") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "default", enName, FFunc(intBuf(), "default", "", "", intBuf(), enName, "", deriveEnumDefaultBody(vnames, vtys)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, enName, tr, "default", enName, FFunc(list(), "default", "", "", list(), enName, "", deriveEnumDefaultBody(vnames, vtys)))
   }
   // Copy is a marker: nothing to synthesize.
   return 0
@@ -2238,36 +2253,36 @@ fun deriveEmit(pfuns: IntBuf, fN: IntBuf, fR: IntBuf, implTrait: IntBuf, implTyp
 fun deriveOne(pfuns: IntBuf, fN: IntBuf, fR: IntBuf, implTrait: IntBuf, implType: IntBuf, tyName: String, tr: String, fields: IntBuf, ftys: IntBuf): Int {
   if (deriveIsKnown(tr) == false) { lowFail("cannot @derive(" + (tr + (") for " + (tyName + " — not an auto-derivable trait")))); return 0 }
   if (tr == "Eq" || tr == "PartialEq") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "eq", "Bool", FFunc(intBuf(), "eq", "", "self", cons1P(FParam("other", tyName)), "Bool", "", deriveEqBody(fields)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "eq", "Bool", FFunc(list(), "eq", "", "self", cons1P(FParam("other", tyName)), "Bool", "", deriveEqBody(fields)))
   }
   // Ord's declared method is `cmp`; PartialOrd's is `partialCmp` (lib/core/cmp.kite). Emit under the
   // trait's ACTUAL method name so its dispatcher (__dyn_<Tr>_<m>) resolves to a real <T>_<m> — deriving
   // under the wrong name left __dyn_PartialOrd_partialCmp calling a never-synthesized <T>_partialCmp
   // (dangling symbol, non-loadable binary). The </<=/>/>= desugar (cmpMangledFor) resolves either name.
   if (tr == "Ord") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "cmp", "Int", FFunc(intBuf(), "cmp", "", "self", cons1P(FParam("other", tyName)), "Int", "", deriveCmpBody(fields)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "cmp", "Int", FFunc(list(), "cmp", "", "self", cons1P(FParam("other", tyName)), "Int", "", deriveCmpBody(fields)))
   }
   if (tr == "PartialOrd") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "partialCmp", "Int", FFunc(intBuf(), "partialCmp", "", "self", cons1P(FParam("other", tyName)), "Int", "", deriveCmpBody(fields)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "partialCmp", "Int", FFunc(list(), "partialCmp", "", "self", cons1P(FParam("other", tyName)), "Int", "", deriveCmpBody(fields)))
   }
   if (tr == "Hash") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "hash", "Int", FFunc(intBuf(), "hash", "", "self", intBuf(), "Int", "", deriveHashBody(fields, ftys)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "hash", "Int", FFunc(list(), "hash", "", "self", list(), "Int", "", deriveHashBody(fields, ftys)))
   }
   if (tr == "Clone") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "clone", tyName, FFunc(intBuf(), "clone", "", "self", intBuf(), tyName, "", deriveCloneBody(tyName, fields, ftys)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "clone", tyName, FFunc(list(), "clone", "", "self", list(), tyName, "", deriveCloneBody(tyName, fields, ftys)))
   }
   if (tr == "Debug") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "debug", "String", FFunc(intBuf(), "debug", "", "self", intBuf(), "String", "", deriveDebugBody(tyName, fields, ftys)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "debug", "String", FFunc(list(), "debug", "", "self", list(), "String", "", deriveDebugBody(tyName, fields, ftys)))
   }
   if (tr == "Default") {
-    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "default", tyName, FFunc(intBuf(), "default", "", "", intBuf(), tyName, "", deriveDefaultBody(tyName, fields, ftys)))
+    deriveEmit(pfuns, fN, fR, implTrait, implType, tyName, tr, "default", tyName, FFunc(list(), "default", "", "", list(), tyName, "", deriveDefaultBody(tyName, fields, ftys)))
   }
   // Copy is a marker: nothing to synthesize (value structs already copy bitwise on assignment).
   return 0
 }
 
 // one-element FParam list helper (mirrors oneStmt).
-fun cons1P(p: FParam): IntBuf { val l = intBuf(); l.push(p); return l }
+fun cons1P(p: FParam): IntBuf { val l = list(); l.push(p); return l }
 
 // the concrete method a nested field must provide so its <T>_<method> resolves during structural
 // recursion (Eq/PartialEq->eq, Ord->cmp, PartialOrd->partialCmp, Hash->hash, Clone->clone, Debug->debug,
@@ -2385,12 +2400,12 @@ fun recordDerive(annos: IntBuf, tyName: String, deriveT: IntBuf, deriveTr: IntBu
   return 0
 }
 
-fun lowerFuncFull(pf: PFun, fN: IntBuf, fR: IntBuf, sN: IntBuf, sFN: IntBuf, sFT: IntBuf, lifted: IntBuf, gctr: IntBuf, classN: IntBuf, traitN: IntBuf, constN: IntBuf, constV: IntBuf, cfuncs: IntBuf, traitMethN: IntBuf, traitMethT: IntBuf, pmN: IntBuf, pmM: IntBuf, variantN: IntBuf, variantTys: IntBuf, variantOwn: IntBuf, roleK: IntBuf, roleV: IntBuf, arcE: IntBuf, valueE: IntBuf): Func {
+fun lowerFuncFull(pf: PFun, fN: IntBuf, fR: IntBuf, sN: IntBuf, sFN: IntBuf, sFT: IntBuf, lifted: IntBuf, gctr: IntBuf, classN: IntBuf, traitN: IntBuf, constN: IntBuf, constV: IntBuf, cfuncs: IntBuf, traitMethN: IntBuf, traitMethT: IntBuf, pmN: IntBuf, pmM: IntBuf, variantN: IntBuf, variantTys: IntBuf, variantOwn: IntBuf, roleK: IntBuf, roleV: IntBuf, arcE: IntBuf, valueE: IntBuf, prim: PReg): Func {
   val fd = pf.fd
-  val ctr = intBuf(); ctr.push(0)
-  val lo = Lo(ctr, intBuf(), intBuf(), fN, fR, sN, sFN, sFT, lifted, gctr, classN, intBuf(), traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys, variantOwn, roleK, roleV, arcE, valueE)
-  val names = intBuf()
-  val tys = intBuf()
+  val ctr = list(); ctr.push(0)
+  val lo = Lo(ctr, list(), list(), fN, fR, sN, sFN, sFT, lifted, gctr, classN, list(), traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys, variantOwn, roleK, roleV, arcE, valueE, prim)
+  val names = list()
+  val tys = list()
   if (pf.owner != "" && fd.recv != "") { names.push("this"); tys.push(pf.owner); bindLoc(lo, "this", pf.owner) }
   var i = 0
   while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); val bt = stripMode(pp.ty); names.push(pp.name); tys.push(bt); bindLoc(lo, pp.name, tyTag(bt)); i = i + 1 }
@@ -2417,8 +2432,16 @@ fun confIsComment(line: String): Int {
   return 0
 }
 
-fun preludeConfPaths(): IntBuf {
-  val out = intBuf()
+fun preludeConfPaths(): IntBuf { return preludeConfPathsT(0) }
+
+// t1 (Phase 9): when 1, swap the two T0 primitive-C-string modules (kite::core::string + the allocating
+// kite::alloc::string transforms) for the single boxed-String module (kite::core::string_t1), which defines
+// `class String(len,data)` + deinit and reimplements len/charAt/byteAt/`+`/`==`/cmp/hash/substr/Int_toStr/
+// StrBuilder over the box. The shared lib/core/string.kite cannot be BOTH raw-pointer T0 and boxed T1 at
+// once, so the flag selects one representation. t1 is 0 for the self-host build, so the returned list is
+// byte-identical to today and the fixpoint is untouched.
+fun preludeConfPathsT(t1: Int): IntBuf {
+  val out = list()
   val src = readFile("compiler/prelude.conf")
   val n = src.len()
   var i = 0
@@ -2429,12 +2452,16 @@ fun preludeConfPaths(): IntBuf {
     if (brk == 1) {
       if (confIsComment(line) == 0) {
         val p = impExtractPath("import " + line)
-        if (p != "") { out.push(p) }
+        if (p != "") {
+          if (t1 == 1 && (p == "lib/core/string.kite" || p == "lib/core/strbuilder.kite" || p == "lib/alloc/string.kite")) { 0 }
+          else { out.push(p) }
+        }
       }
       line = ""
     } else { line = line + src.substr(i, 1) }
     i = i + 1
   }
+  if (t1 == 1) { out.push("lib/core/string_t1.kite") }
   return out
 }
 
@@ -2521,8 +2548,8 @@ fun collectDecl(p: P, annos: IntBuf, pfuns: IntBuf, fN: IntBuf, fR: IntBuf, stru
 
 // parse the injected library helpers (prelude modules) into the sig/type tables. A module may declare
 // types (e.g. `class IntBuf`) as well as functions; collectDecl handles every decl kind.
-fun injectHelpers(pfuns: IntBuf, fN: IntBuf, fR: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBuf, classN: IntBuf, traitN: IntBuf, traitDecls: IntBuf, implTrait: IntBuf, implType: IntBuf, constN: IntBuf, constExprs: IntBuf, variantN: IntBuf, variantTag: IntBuf, variantTys: IntBuf, variantOwn: IntBuf, roleK: IntBuf, roleV: IntBuf, arcE: IntBuf, valueE: IntBuf, deriveT: IntBuf, deriveTr: IntBuf, monoN: IntBuf, monoP: IntBuf): Int {
-  val paths = preludeConfPaths()
+fun injectHelpers(pfuns: IntBuf, fN: IntBuf, fR: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBuf, classN: IntBuf, traitN: IntBuf, traitDecls: IntBuf, implTrait: IntBuf, implType: IntBuf, constN: IntBuf, constExprs: IntBuf, variantN: IntBuf, variantTag: IntBuf, variantTys: IntBuf, variantOwn: IntBuf, roleK: IntBuf, roleV: IntBuf, arcE: IntBuf, valueE: IntBuf, deriveT: IntBuf, deriveTr: IntBuf, monoN: IntBuf, monoP: IntBuf, t1: Int): Int {
+  val paths = preludeConfPathsT(t1)
   var pi = 0
   while (pi < paths.len()) {
     val hp = P(lex(readFile(paths.get(pi))), 0)
@@ -2538,21 +2565,21 @@ fun injectHelpers(pfuns: IntBuf, fN: IntBuf, fR: IntBuf, structN: IntBuf, struct
 
 struct LR(val funcs: IntBuf, val structN: IntBuf, val structF: IntBuf, val structFT: IntBuf, val variantN: IntBuf, val variantTag: IntBuf, val variantTys: IntBuf, val funN: IntBuf, val funRet: IntBuf, val arcE: IntBuf)
 
-fun parseLower(toks: IntBuf): LR {
+fun parseLower(toks: IntBuf, t1: Int): LR {
   val p = P(toks, 0)
-  val pfuns = intBuf()
-  val structN = intBuf(); val structF = intBuf(); val structFT = intBuf()
-  val classN = intBuf()
-  val traitN = intBuf(); val traitDecls = intBuf(); val implTrait = intBuf(); val implType = intBuf()
-  val constN = intBuf(); val constExprs = intBuf()
-  val variantN = intBuf(); val variantTag = intBuf(); val variantTys = intBuf(); val variantOwn = intBuf()
-  val fN = intBuf(); val fR = intBuf()
-  val roleK = intBuf(); val roleV = intBuf()
-  val arcE = intBuf()
-  val valueE = intBuf()
-  val deriveT = intBuf(); val deriveTr = intBuf()
-  val monoN = intBuf(); val monoP = intBuf()
-  injectHelpers(pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, variantOwn, roleK, roleV, arcE, valueE, deriveT, deriveTr, monoN, monoP)
+  val pfuns = list()
+  val structN = list(); val structF = list(); val structFT = list()
+  val classN = list()
+  val traitN = list(); val traitDecls = list(); val implTrait = list(); val implType = list()
+  val constN = list(); val constExprs = list()
+  val variantN = list(); val variantTag = list(); val variantTys = list(); val variantOwn = list()
+  val fN = list(); val fR = list()
+  val roleK = list(); val roleV = list()
+  val arcE = list()
+  val valueE = list()
+  val deriveT = list(); val deriveTr = list()
+  val monoN = list(); val monoP = list()
+  injectHelpers(pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, variantOwn, roleK, roleV, arcE, valueE, deriveT, deriveTr, monoN, monoP, t1)
   // phase 1: parse, collect signatures, keep functions unlowered
   var go = 1
   while (go == 1) {
@@ -2617,7 +2644,7 @@ fun allTparams(gen: String): String {
 // split a comma-list ("K,V" / "Int, String") into trimmed segments; interior spaces dropped (type args
 // carry none) so "Int, String" -> ["Int","String"].
 fun splitCsvL(s: String): IntBuf {
-  val out = intBuf()
+  val out = list()
   var cur = ""
   var i = 0
   while (i < s.len()) { val c = s.charAt(i); if (c == 44) { out.push(cur); cur = "" } else { if (c != 32) { cur = cur + s.substr(i, 1) } }; i = i + 1 }
@@ -2776,31 +2803,31 @@ fun monoCollectExpr(monoN: IntBuf, e: FExpr, instN: IntBuf, instA: IntBuf): Int 
 
 // ---- body rewrite: substitute the type parameter (param!="") and retarget mono constructions ----
 fun monoFixArgs(monoN: IntBuf, param: String, concrete: String, args: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < args.len()) { val a: FArg = args.get(i); out.push(FArg(a.name, monoFixExpr(monoN, param, concrete, a.expr))); i = i + 1 }
   return out
 }
 fun monoFixList(monoN: IntBuf, param: String, concrete: String, es: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < es.len()) { out.push(monoFixExpr(monoN, param, concrete, es.get(i))); i = i + 1 }
   return out
 }
 fun monoFixMap(monoN: IntBuf, param: String, concrete: String, ents: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < ents.len()) { val en: FMapEnt = ents.get(i); out.push(FMapEnt(monoFixExpr(monoN, param, concrete, en.k), monoFixExpr(monoN, param, concrete, en.v))); i = i + 1 }
   return out
 }
 fun monoFixParts(monoN: IntBuf, param: String, concrete: String, parts: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < parts.len()) { val pt: FIPart = parts.get(i); val np = when (pt) { FIExpr(e) -> FIExpr(monoFixExpr(monoN, param, concrete, e)); else -> pt }; out.push(np); i = i + 1 }
   return out
 }
 fun monoFixArms(monoN: IntBuf, param: String, concrete: String, arms: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < arms.len()) {
     val a: FArm = arms.get(i)
@@ -2812,7 +2839,7 @@ fun monoFixArms(monoN: IntBuf, param: String, concrete: String, arms: IntBuf): I
   return out
 }
 fun monoFixStmts(monoN: IntBuf, param: String, concrete: String, stmts: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < stmts.len()) {
     val s: FStmt = stmts.get(i)
@@ -2870,7 +2897,7 @@ fun monoFixExpr(monoN: IntBuf, param: String, concrete: String, e: FExpr): FExpr
 // `HashMap$Int_String`-owned method. Type strings substitute ALL params then mangle once; the body is
 // rewritten per param (sequential monoFixExpr; only single-level element types appear in a template body).
 fun monoSpecMethod(monoN: IntBuf, params: IntBuf, concretes: IntBuf, m: FFunc): FFunc {
-  val nps = intBuf()
+  val nps = list()
   var i = 0
   while (i < m.params.len()) { val pp: FParam = m.params.get(i); nps.push(FParam(pp.name, monoMangleTy(monoN, subAllTypeStr(params, concretes, pp.ty)))); i = i + 1 }
   val nret = monoMangleTy(monoN, subAllTypeStr(params, concretes, m.ret))
@@ -2882,7 +2909,7 @@ fun monoSpecMethod(monoN: IntBuf, params: IntBuf, concretes: IntBuf, m: FFunc): 
 
 // instantiate every collected (template, type-arg): register the specialized struct + its methods.
 fun monoInstantiate(monoN: IntBuf, monoP: IntBuf, pfuns: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBuf, classN: IntBuf, fN: IntBuf, fR: IntBuf, arcE: IntBuf): Int {
-  val instN = intBuf(); val instA = intBuf()
+  val instN = list(); val instA = list()
   var pi = 0
   // Collect instantiations from NON-template bodies only: a template's own body uses the symbolic param
   // (a self-construction `Vec::<T>(..)` in Vec's copy method would otherwise instantiate a bogus `Vec$T`).
@@ -2902,7 +2929,7 @@ fun monoInstantiate(monoN: IntBuf, monoP: IntBuf, pfuns: IntBuf, structN: IntBuf
       // specialized struct: field names copied; field types param-substituted (Vec's are plain Int).
       val flds: IntBuf = structF.get(si)
       val ftys: IntBuf = structFT.get(si)
-      val nfl = intBuf(); val nft = intBuf()
+      val nfl = list(); val nft = list()
       var fi = 0
       while (fi < flds.len()) { nfl.push(flds.get(fi)); nft.push(subAllTypeStr(params, concretes, ftys.get(fi))); fi = fi + 1 }
       structN.push(mangled); structF.push(nfl); structFT.push(nft)
@@ -2937,7 +2964,7 @@ fun monoRewriteAll(monoN: IntBuf, pfuns: IntBuf, fR: IntBuf): Int {
     val pf: PFun = pfuns.get(i)
     if (memListL(monoN, pf.owner) == false) {
       val fd = pf.fd
-      val nps = intBuf()
+      val nps = list()
       var j = 0
       while (j < fd.params.len()) { val pp: FParam = fd.params.get(j); nps.push(FParam(pp.name, monoMangleTy(monoN, pp.ty))); j = j + 1 }
       val nret = monoMangleTy(monoN, fd.ret)
@@ -3018,7 +3045,7 @@ fun runMono(monoN: IntBuf, monoP: IntBuf, pfuns: IntBuf, structN: IntBuf, struct
 // phase 2 (shared by parseLower and parseLowerModules): synthesize trait defaults, evaluate consts,
 // register trait-method + dispatcher names, then lower every collected function.
 fun finishLower(pfuns: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBuf, classN: IntBuf, traitN: IntBuf, traitDecls: IntBuf, implTrait: IntBuf, implType: IntBuf, constN: IntBuf, constExprs: IntBuf, variantN: IntBuf, variantTag: IntBuf, variantTys: IntBuf, variantOwn: IntBuf, fN: IntBuf, fR: IntBuf, roleK: IntBuf, roleV: IntBuf, arcE: IntBuf, valueE: IntBuf, deriveT: IntBuf, deriveTr: IntBuf, monoN: IntBuf, monoP: IntBuf): LR {
-  val constV = intBuf()
+  val constV = list()
   // Monomorphization keystone (Phase 6): instantiate every concrete `@mono` template use into a specialized
   // struct + methods and retarget the program onto them, BEFORE derive/dispatch/phase-2 so the concrete
   // instantiations are ordinary types downstream. No-op when nothing is `@mono` (the compiler's own build).
@@ -3051,10 +3078,10 @@ fun finishLower(pfuns: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBu
   }
   // build the compile-time function table (free functions), then evaluate consts in order (a const may
   // reference earlier consts and any function) so `const N = fib(10)` and `comptime(...)` can run them.
-  val cfuncs = intBuf()
+  val cfuncs = list()
   var cfi = 0
   while (cfi < pfuns.len()) { val pf: PFun = pfuns.get(cfi); if (pf.owner == "") { cfuncs.push(pf.fd) }; cfi = cfi + 1 }
-  val ceEnvN = intBuf(); val ceEnvV = intBuf(); val ceEnvK = intBuf()
+  val ceEnvN = list(); val ceEnvV = list(); val ceEnvK = list()
   var cei = 0
   while (cei < constExprs.len()) {
     val ce = constExprs.get(cei)
@@ -3064,7 +3091,7 @@ fun finishLower(pfuns: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBu
     cei = cei + 1
   }
   // trait-method registry (method name -> owning trait) so an erased receiver's method call can dynamic-dispatch
-  val traitMethN = intBuf(); val traitMethT = intBuf()
+  val traitMethN = list(); val traitMethT = list()
   var tmi = 0
   while (tmi < traitDecls.len()) {
     val tr: FTraitDecl = traitDecls.get(tmi)
@@ -3077,25 +3104,31 @@ fun finishLower(pfuns: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBu
   // ownership-mode table for TOP-LEVEL free functions (owner==""): name -> per-param mode list. Used by
   // lowerPlainCall to decide whether a class temp passed as an arg is BORROWED (release after) or
   // TRANSFERRED (consuming — callee owns it). Built once here; empty for the class-free compiler.
-  val pmN = intBuf(); val pmM = intBuf()
+  val pmN = list(); val pmM = list()
   var pmi = 0
   while (pmi < pfuns.len()) {
     val pf0: PFun = pfuns.get(pmi)
     if (pf0.owner == "") {
       pmN.push(pf0.fd.name)
-      val modes = intBuf()
+      val modes = list()
       var ppi = 0
       while (ppi < pf0.fd.params.len()) { val pp0: FParam = pf0.fd.params.get(ppi); modes.push(paramMode(pp0.ty)); ppi = ppi + 1 }
       pmM.push(modes)
     }
     pmi = pmi + 1
   }
+  // primitive registry: source the numeric classification (sizeOf<T>() strides, packed sized loads) from
+  // the lib @prim markers — the SAME table the checker builds. The prelude markers (lib/core/num.kite) are
+  // in `pfuns` (injectHelpers pushed them), each FFunc carrying its @prim annotation, so one scan builds it.
+  val prim = PReg(list(), list(), list())
+  var pri = 0
+  while (pri < pfuns.len()) { val ppf: PFun = pfuns.get(pri); recordPrim(ppf.fd.annos, ppf.fd.name, prim); pri = pri + 1 }
   // phase 2: lower every function now that all signatures are known; lambdas lift into `lifted`
-  val funcs = intBuf()
-  val lifted = intBuf()
-  val gctr = intBuf(); gctr.push(0)
+  val funcs = list()
+  val lifted = list()
+  val gctr = list(); gctr.push(0)
   var i = 0
-  while (i < pfuns.len()) { val pf: PFun = pfuns.get(i); if (memListL(monoN, pf.owner)) { i = i + 1 } else { funcs.push(lowerFuncFull(pf, fN, fR, structN, structF, structFT, lifted, gctr, classN, traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys, variantOwn, roleK, roleV, arcE, valueE)); i = i + 1 } }
+  while (i < pfuns.len()) { val pf: PFun = pfuns.get(i); if (memListL(monoN, pf.owner)) { i = i + 1 } else { funcs.push(lowerFuncFull(pf, fN, fR, structN, structF, structFT, lifted, gctr, classN, traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys, variantOwn, roleK, roleV, arcE, valueE, prim)); i = i + 1 } }
   var j = 0
   while (j < lifted.len()) { funcs.push(lifted.get(j)); j = j + 1 }
   var d = 0
@@ -3280,8 +3313,8 @@ fun collectModImports(src: String, seen: IntBuf, mods: IntBuf): Int {
 }
 
 fun collectModules(rawInput: String): IntBuf {
-  val mods = intBuf()
-  val seen = intBuf()
+  val mods = list()
+  val seen = list()
   // Prelude modules (compiler/prelude.conf) are auto-injected ONCE via injectHelpers; seed `seen` with
   // their paths so a module that is BOTH prelude-injected AND explicitly (pub-)imported is not collected
   // (and thus lowered) a second time. E.g. `import kite::alloc::collections` pub-imports list & map, which
@@ -3311,28 +3344,28 @@ fun renStatic(rc: Ren, bound: IntBuf, a: FExpr, nm: String): FExpr {
 }
 
 fun renArgs(rc: Ren, bound: IntBuf, args: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < args.len()) { val ar: FArg = args.get(i); out.push(FArg(ar.name, renExpr(rc, bound, ar.expr))); i = i + 1 }
   return out
 }
 
 fun renExprList(rc: Ren, bound: IntBuf, es: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < es.len()) { out.push(renExpr(rc, bound, es.get(i))); i = i + 1 }
   return out
 }
 
 fun renMap(rc: Ren, bound: IntBuf, ents: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < ents.len()) { val en: FMapEnt = ents.get(i); out.push(FMapEnt(renExpr(rc, bound, en.k), renExpr(rc, bound, en.v))); i = i + 1 }
   return out
 }
 
 fun renParts(rc: Ren, bound: IntBuf, parts: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < parts.len()) {
     val pt: FIPart = parts.get(i)
@@ -3344,7 +3377,7 @@ fun renParts(rc: Ren, bound: IntBuf, parts: IntBuf): IntBuf {
 }
 
 fun renArms(rc: Ren, bound: IntBuf, arms: IntBuf): IntBuf {
-  val out = intBuf()
+  val out = list()
   var i = 0
   while (i < arms.len()) {
     val a: FArm = arms.get(i)
@@ -3372,7 +3405,7 @@ fun renStmtInto(rc: Ren, bound: IntBuf, s: FStmt, out: IntBuf): IntBuf {
 }
 
 fun renBlock(rc: Ren, bound: IntBuf, stmts: IntBuf, res: FExpr): FExpr {
-  val out = intBuf()
+  val out = list()
   var b = bound
   var i = 0
   while (i < stmts.len()) { b = renStmtInto(rc, b, stmts.get(i), out); i = i + 1 }
@@ -3407,11 +3440,69 @@ fun renExpr(rc: Ren, bound: IntBuf, e: FExpr): FExpr {
 }
 
 fun renFunc(rc: Ren, fd: FFunc): FFunc {
-  val bound = intBuf()
+  val bound = list()
   if (fd.recv != "") { bound.push("this"); bound.push(fd.recv) }
   var i = 0
   while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); bound.push(pp.name); i = i + 1 }
   return FFunc(fd.annos, mangleMod(rc.m, fd.name), fd.gen, fd.recv, fd.params, fd.ret, fd.whr, renExpr(rc, bound, fd.body))
+}
+
+// Rename a METHOD/impl body (free-function references resolved through the owning module's scope) while
+// KEEPING the method name (types stay global — a method is `<Type>_<name>`, not module-mangled). Types are
+// declared in a module but their method bodies reference that module's own + imported free functions, so
+// they must be renamed exactly like free functions — otherwise a `Vec` method calling `rawBufDrop` from an
+// imported `rawbuf` module would emit the bare name and fail to link (undefined symbol). `self` is the
+// receiver (recv), bound to `this`; params (incl. the trailing ones after self) are bound too.
+fun renMethodBody(rc: Ren, m: FFunc): FFunc {
+  val bound = list()
+  if (m.recv != "") { bound.push("this"); bound.push(m.recv) }
+  var i = 0
+  while (i < m.params.len()) { val pp: FParam = m.params.get(i); bound.push(pp.name); i = i + 1 }
+  return FFunc(m.annos, m.name, m.gen, m.recv, m.params, m.ret, m.whr, renExpr(rc, bound, m.body))
+}
+
+// module-aware collectMethodSigs: register each method owned by the type, body scope-renamed for the module.
+fun collectMethodSigsRen(rc: Ren, td: FTDecl, pfuns: IntBuf, fN: IntBuf, fR: IntBuf): Int {
+  var i = 0
+  while (i < td.methods.len()) {
+    val m: FFunc = renMethodBody(rc, td.methods.get(i))
+    pfuns.push(PFun(td.name, m)); fN.push(mangleMethod(td.name, m.name)); fR.push(m.ret)
+    i = i + 1
+  }
+  return 0
+}
+
+// module-aware collectDeinit: the class `deinit` body is scope-renamed for the module.
+fun collectDeinitRen(rc: Ren, td: FTDecl, pfuns: IntBuf, fN: IntBuf, fR: IntBuf): Int {
+  if (isNoResF(td.dtor)) { return 0 }
+  val bound = list(); bound.push("this"); bound.push("self")
+  val df = FFunc(list(), "deinit", "", "self", list(), "Int", "", renExpr(rc, bound, td.dtor))
+  pfuns.push(PFun(td.name, df)); fN.push(mangleMethod(td.name, "deinit")); fR.push("Int")
+  return 0
+}
+
+// module-aware collectImplMethods: impl methods (trait or inherent) body scope-renamed for the module.
+fun collectImplMethodsRen(rc: Ren, im: FImplDecl, pfuns: IntBuf, fN: IntBuf, fR: IntBuf): Int {
+  var i = 0
+  while (i < im.methods.len()) {
+    val m: FFunc = renMethodBody(rc, im.methods.get(i))
+    pfuns.push(PFun(im.forTy, m)); fN.push(mangleMethod(im.forTy, m.name)); fR.push(m.ret)
+    i = i + 1
+  }
+  return 0
+}
+
+// module-aware trait decl: each trait method's DEFAULT body is scope-renamed for the owning module so that
+// finishLower's default-method synthesis (`impl Trait for T` not overriding a defaulted method emits
+// `<T>_<m>` FROM this body) links a body that references the module's own / imported free functions against
+// the module-mangled name — the same parity renMethodBody gives struct/impl method bodies. Signature-only
+// methods (FENoRes body) pass through unchanged. Renaming a body never touches a method name, so the shared
+// trait registries downstream (traitMethN, dispatchers) are byte-identical either way.
+fun renTraitDecl(rc: Ren, trd: FTraitDecl): FTraitDecl {
+  val ms = list()
+  var i = 0
+  while (i < trd.methods.len()) { ms.push(renMethodBody(rc, trd.methods.get(i))); i = i + 1 }
+  return FTraitDecl(trd.annos, trd.name, trd.gen, trd.supers, trd.whr, trd.assoc, ms)
 }
 
 // ---- parse one module's decls into a RawMod (no renaming yet; L = its free-function names) ----
@@ -3425,9 +3516,9 @@ fun nsLastSeg(s: String): String {
 
 fun parseModuleRaw(name: String, src: String): RawMod {
   val p = P(lex(src), 0)
-  val funcs = intBuf(); val tdecls = intBuf(); val edecls = intBuf()
-  val traits = intBuf(); val impls = intBuf(); val consts = intBuf()
-  val uses = intBuf(); val L = intBuf(); val imps = intBuf(); val impPub = intBuf()
+  val funcs = list(); val tdecls = list(); val edecls = list()
+  val traits = list(); val impls = list(); val consts = list()
+  val uses = list(); val L = list(); val imps = list(); val impPub = list()
   var go = 1
   while (go == 1) {
     if (pk(p) == 0) { go = 0 }
@@ -3480,12 +3571,12 @@ fun exportSurface(rawmods: IntBuf, name: String, outN: IntBuf, outT: IntBuf, see
 // a module's alias table: `use` aliases first, then the EXPORT SURFACE of every module IT imports (pub or
 // private — a module may use what it privately imports). Own names and use-aliases win over auto-imports.
 fun buildRen(rm: RawMod, rawmods: IntBuf, MODS: IntBuf): Ren {
-  val aN = intBuf(); val aT = intBuf()
+  val aN = list(); val aT = list()
   var i = 0
   while (i < rm.uses.len()) { val u: FUse = rm.uses.get(i); aN.push(u.name); aT.push(mangleMod(u.mod, u.name)); i = i + 1 }
   var mi = 0
   while (mi < rm.imps.len()) {
-    val sN = intBuf(); val sT = intBuf(); val seen = intBuf()
+    val sN = list(); val sT = list(); val seen = list()
     exportSurface(rawmods, rm.imps.get(mi), sN, sT, seen)
     var si = 0
     while (si < sN.len()) {
@@ -3499,11 +3590,12 @@ fun buildRen(rm: RawMod, rawmods: IntBuf, MODS: IntBuf): Ren {
 }
 
 // rename this module's free functions and collect ALL its decls into the shared aggregate lists
-fun collectModuleDecls(rc: Ren, rm: RawMod, pfuns: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBuf, classN: IntBuf, traitN: IntBuf, traitDecls: IntBuf, implTrait: IntBuf, implType: IntBuf, constN: IntBuf, constExprs: IntBuf, variantN: IntBuf, variantTag: IntBuf, variantTys: IntBuf, variantOwn: IntBuf, fN: IntBuf, fR: IntBuf, deriveT: IntBuf, deriveTr: IntBuf): Int {
+fun collectModuleDecls(rc: Ren, rm: RawMod, pfuns: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBuf, classN: IntBuf, traitN: IntBuf, traitDecls: IntBuf, implTrait: IntBuf, implType: IntBuf, constN: IntBuf, constExprs: IntBuf, variantN: IntBuf, variantTag: IntBuf, variantTys: IntBuf, variantOwn: IntBuf, fN: IntBuf, fR: IntBuf, deriveT: IntBuf, deriveTr: IntBuf, roleK: IntBuf, roleV: IntBuf, arcE: IntBuf, valueE: IntBuf, monoN: IntBuf, monoP: IntBuf): Int {
   var i = 0
   while (i < rm.funcs.len()) {
     val nfd = renFunc(rc, rm.funcs.get(i))
     pfuns.push(PFun("", nfd)); fN.push(nfd.name); fR.push(nfd.ret)
+    recordLang(nfd.annos, nfd.name, roleK, roleV)
     i = i + 1
   }
   var ti = 0
@@ -3511,20 +3603,31 @@ fun collectModuleDecls(rc: Ren, rm: RawMod, pfuns: IntBuf, structN: IntBuf, stru
     val td: FTDecl = rm.tdecls.get(ti)
     collectStruct(td, structN, structF, structFT)
     if (td.kind == 1) { classN.push(td.name) }
-    collectMethodSigs(td, pfuns, fN, fR)
-    if (td.kind == 1) { collectDeinit(td, pfuns, fN, fR) }
+    // method bodies are scope-renamed for the module (collectMethodSigsRen), so a type's method calling an
+    // imported free function links against the module-mangled name — the parity with the flat/quoted path.
+    collectMethodSigsRen(rc, td, pfuns, fN, fR)
+    if (td.kind == 1) { collectDeinitRen(rc, td, pfuns, fN, fR) }
+    recordLangMethods(td.methods, td.name, 1, roleK, roleV)
+    recordArc(td.annos, td.name, arcE)
+    recordValue(td.annos, td.name, valueE)
     recordDerive(td.annos, td.name, deriveT, deriveTr)
+    // @mono: register the template so finishLower's runMono instantiates it — this is what lets a namespace
+    // `import kite::alloc::collections::vec` + `Vec::<Int>(..)` monomorphize under the module pipeline, not just the
+    // quoted/flat path. Without it the generic body links with an undefined element-typed symbol.
+    recordMono(td.annos, td.name, td.gen, monoN, monoP)
     ti = ti + 1
   }
   var ei = 0
   while (ei < rm.edecls.len()) { val ed: FEDecl = rm.edecls.get(ei); collectEnum(ed, variantN, variantTag, variantTys, variantOwn); recordDerive(ed.annos, ed.name, deriveT, deriveTr); ei = ei + 1 }
   var tr = 0
-  while (tr < rm.traits.len()) { val trd: FTraitDecl = rm.traits.get(tr); traitN.push(trd.name); traitDecls.push(trd); tr = tr + 1 }
+  while (tr < rm.traits.len()) { val trd: FTraitDecl = renTraitDecl(rc, rm.traits.get(tr)); traitN.push(trd.name); traitDecls.push(trd); recordLangMethods(trd.methods, "", 0, roleK, roleV); tr = tr + 1 }
   var ii = 0
   while (ii < rm.impls.len()) {
     val im: FImplDecl = rm.impls.get(ii)
-    collectImplMethods(im, pfuns, fN, fR)
+    collectImplMethodsRen(rc, im, pfuns, fN, fR)
     if (im.traitName != "") { implTrait.push(im.traitName); implType.push(im.forTy) }
+    recordLangMethods(im.methods, im.forTy, 1, roleK, roleV)
+    recordArc(im.annos, im.forTy, arcE)
     ii = ii + 1
   }
   var ci = 0
@@ -3532,9 +3635,9 @@ fun collectModuleDecls(rc: Ren, rm: RawMod, pfuns: IntBuf, structN: IntBuf, stru
   return 0
 }
 
-fun parseLowerModules(mods: IntBuf): LR {
-  val rawmods = intBuf()
-  val MODS = intBuf()
+fun parseLowerModules(mods: IntBuf, t1: Int): LR {
+  val rawmods = list()
+  val MODS = list()
   var mp = 0
   while (mp < mods.len()) {
     val md: Mod = mods.get(mp)
@@ -3542,26 +3645,27 @@ fun parseLowerModules(mods: IntBuf): LR {
     if (md.name != "") { MODS.push(md.name) }
     mp = mp + 1
   }
-  val pfuns = intBuf()
-  val structN = intBuf(); val structF = intBuf(); val structFT = intBuf()
-  val classN = intBuf()
-  val traitN = intBuf(); val traitDecls = intBuf(); val implTrait = intBuf(); val implType = intBuf()
-  val constN = intBuf(); val constExprs = intBuf()
-  val variantN = intBuf(); val variantTag = intBuf(); val variantTys = intBuf(); val variantOwn = intBuf()
-  val fN = intBuf(); val fR = intBuf()
-  val roleK = intBuf(); val roleV = intBuf()
-  val arcE = intBuf()
-  val valueE = intBuf()
-  val deriveT = intBuf(); val deriveTr = intBuf()
-  // The namespace-module path does not yet collect `@mono` templates (collectModuleDecls has no mono hook);
-  // monomorphized generics are reached via quoted includes / inline decls (parseLower). Empty here -> inert.
-  val monoN = intBuf(); val monoP = intBuf()
-  injectHelpers(pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, variantOwn, roleK, roleV, arcE, valueE, deriveT, deriveTr, monoN, monoP)
+  val pfuns = list()
+  val structN = list(); val structF = list(); val structFT = list()
+  val classN = list()
+  val traitN = list(); val traitDecls = list(); val implTrait = list(); val implType = list()
+  val constN = list(); val constExprs = list()
+  val variantN = list(); val variantTag = list(); val variantTys = list(); val variantOwn = list()
+  val fN = list(); val fR = list()
+  val roleK = list(); val roleV = list()
+  val arcE = list()
+  val valueE = list()
+  val deriveT = list(); val deriveTr = list()
+  // @mono templates ARE collected here (collectModuleDecls -> recordMono), so finishLower's runMono
+  // instantiates a namespace-imported `@mono` collection (`import kite::alloc::collections::vec` + `Vec::<Int>(..)`)
+  // exactly as the flat/quoted path does. Empty when no imported module is `@mono` (e.g. the jq stdlib).
+  val monoN = list(); val monoP = list()
+  injectHelpers(pfuns, fN, fR, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, variantOwn, roleK, roleV, arcE, valueE, deriveT, deriveTr, monoN, monoP, t1)
   var rj = 0
   while (rj < rawmods.len()) {
     val rm: RawMod = rawmods.get(rj)
     val rc = buildRen(rm, rawmods, MODS)
-    collectModuleDecls(rc, rm, pfuns, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, variantOwn, fN, fR, deriveT, deriveTr)
+    collectModuleDecls(rc, rm, pfuns, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, variantOwn, fN, fR, deriveT, deriveTr, roleK, roleV, arcE, valueE, monoN, monoP)
     rj = rj + 1
   }
   return finishLower(pfuns, structN, structF, structFT, classN, traitN, traitDecls, implTrait, implType, constN, constExprs, variantN, variantTag, variantTys, variantOwn, fN, fR, roleK, roleV, arcE, valueE, deriveT, deriveTr, monoN, monoP)
@@ -3576,10 +3680,12 @@ fun parseLowerModules(mods: IntBuf): LR {
 // a pure quoted/flat program. A file may freely MIX quoted includes (its own files) with namespace
 // imports (the standard library). The compiler itself uses only quoted includes, so `flat` has no
 // namespace imports and this stays byte-identical to the old quoted-only path.
-fun lowerInput(raw: String): LR {
-  val flat = resolveImports(raw, intBuf())
-  if (hasNamespaceImport(flat)) { return parseLowerModules(collectModules(flat)) }
-  return parseLower(lex(flat))
+fun lowerInput(raw: String): LR { return lowerInputT(raw, 0) }
+
+fun lowerInputT(raw: String, t1: Int): LR {
+  val flat = resolveImports(raw, list())
+  if (hasNamespaceImport(flat)) { return parseLowerModules(collectModules(flat), t1) }
+  return parseLower(lex(flat), t1)
 }
 
 // concatenate every module's source (namespace-import inputs) so the checker sees lib definitions too
@@ -3591,15 +3697,17 @@ fun concatModuleSrcs(mods: IntBuf): String {
   return s
 }
 
-fun gateDiags(raw: String): IntBuf {
+fun gateDiags(raw: String): IntBuf { return gateDiagsT(raw, 0) }
+
+fun gateDiagsT(raw: String, t1: Int): IntBuf {
   // Mirror lowerInput: flatten quoted includes FIRST, then decide on namespace modules. A namespace
   // import may be buried inside a quoted-included file (mixed imports), so it only becomes visible
   // after flattening — checking `raw` directly would miss it and false-flag stdlib names as unresolved.
-  val flat = resolveImports(raw, intBuf())
+  val flat = resolveImports(raw, list())
   val nsImp = hasNamespaceImport(flat)
   val checkSrc = if (nsImp) { concatModuleSrcs(collectModules(flat)) } else { flat }
   val skipDup = if (nsImp) { 1 } else { 0 }
-  return checkDiags(lex(checkSrc), skipDup)
+  return checkDiagsT(lex(checkSrc), skipDup, t1)
 }
 
 // Render a collected checker/parser diagnostic list through the ONE Diagnostic sink (Phase 0.5, §3h): each
@@ -3616,17 +3724,19 @@ fun reportDiags(cdiags: IntBuf, trailer: String): Int {
 
 // compile inPath -> a signed native binary at outPath. Gated by the type-checker unless noGate;
 // the peephole optimizer runs unless opt==0.
-fun compileFile(inPath: String, outPath: String, noGate: Int, opt: Int): Int {
+fun compileFile(inPath: String, outPath: String, noGate: Int, opt: Int): Int { return compileFileT(inPath, outPath, noGate, opt, 0) }
+
+fun compileFileT(inPath: String, outPath: String, noGate: Int, opt: Int, t1: Int): Int {
   val raw = readFile(inPath)
   if (noGate == 0) {
-    val cdiags = gateDiags(raw)
+    val cdiags = gateDiagsT(raw, t1)
     if (cdiags.len() > 0) {
       reportDiags(cdiags, " error(s); no binary written")
       return cdiags.len()
     }
   }
-  val lr = lowerInput(raw)
-  val gen = genProgramG(lr.funcs, lr.structN, lr.structF, lr.structFT, lr.variantN, lr.variantTag, lr.variantTys, lr.funN, lr.funRet, lr.arcE)
+  val lr = lowerInputT(raw, t1)
+  val gen = genProgramG(lr.funcs, lr.structN, lr.structF, lr.structFT, lr.variantN, lr.variantTag, lr.variantTys, lr.funN, lr.funRet, lr.arcE, t1)
   val code = if (opt == 1) { optimize(gen.code) } else { gen.code }
   val asmR = assembleReloc(code)
   val cs = buildCstr(gen.cstrN, gen.cstrV)
@@ -3637,8 +3747,10 @@ fun compileFile(inPath: String, outPath: String, noGate: Int, opt: Int): Int {
 }
 
 // `kitec check <file>`: type-check only, print diagnostics (no binary).
-fun checkOnly(inPath: String): Int {
-  val cdiags = gateDiags(readFile(inPath))
+fun checkOnly(inPath: String): Int { return checkOnlyT(inPath, 0) }
+
+fun checkOnlyT(inPath: String, t1: Int): Int {
+  val cdiags = gateDiagsT(readFile(inPath), t1)
   if (cdiags.len() == 0) { println("ok"); return 0 }
   reportDiags(cdiags, " error(s)")
   return cdiags.len()
@@ -3676,6 +3788,7 @@ fun main(argc: Int, argv: Int): Int {
   var noGate = 0
   var opt = 1
   var emitFuncs = 0
+  var t1 = 0
   var i = 1
   while (i < argc) {
     val a = __argv(argv, i)
@@ -3688,6 +3801,7 @@ fun main(argc: Int, argv: Int): Int {
     if (a == "--check") { mode = 1; consumed = 1 }
     if (a == "--no-check") { noGate = 1; consumed = 1 }
     if (a == "--emit-funcs") { emitFuncs = 1; consumed = 1 }
+    if (a == "--string-t1") { t1 = 1; consumed = 1 }
     if (a == "-O0") { opt = 0; consumed = 1 }
     if (a == "-O1") { opt = 1; consumed = 1 }
     // positionals: first = input, second = output (so `kitec in out` works like `kitec in -o out`)
@@ -3695,9 +3809,9 @@ fun main(argc: Int, argv: Int): Int {
     i = i + 1
   }
   if (input == "") { println("kitec: no input file (try --help)"); return 1 }
-  if (mode == 1) { return checkOnly(input) }
+  if (mode == 1) { return checkOnlyT(input, t1) }
   if (output == "") { output = defaultOut(input) }
-  val rc = compileFile(input, output, noGate, opt)
+  val rc = compileFileT(input, output, noGate, opt, t1)
   if (rc == 0) { if (emitFuncs == 1) { println("wrote " + output) } }
   return rc
 }

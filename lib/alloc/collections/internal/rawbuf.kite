@@ -1,4 +1,4 @@
-// lib/alloc/rawbuf.kite — the CoW backing buffer for the value-semantics collections (Vec/Array/Deque).
+// lib/alloc/collections/internal/rawbuf.kite — the CoW backing buffer for the value-semantics collections (Vec/Array/Deque).
 // A distinct ARC object whose REFCOUNT IS THE UNIQUENESS SIGNAL (STDLIB-REDESIGN §124): the collection
 // handle is a `@value` struct that shares this buffer; a mutator clones it (ensureUnique) when the
 // refcount shows another owner, so mutating a copy copy-on-writes instead of corrupting the original.

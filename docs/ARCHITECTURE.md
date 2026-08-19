@@ -37,13 +37,11 @@ compiler/
   kitec.kite    entry / module manifest — quoted-includes the four units below so the compiler assembles
                 ITSELF via its own import (dogfooding), replacing a shell `cat`; byte-identical build.
   frontend/     kfront.kite  (lexer + surface AST + parser)   kprint.kite  (AST printer + test main)
-                klex.kite    (standalone lexer, historical)
   sema/         kcheck.kite  (name resolution + type check → `kitec check`-form diagnostics)
   codegen/      codegen.kite (core AST + the IR type `Instr` + AST→IR codegen)   ← target-independent
   backend/
     arm64/      arm64.kite   (IR→AArch64 encoder + two-pass assembler + Mach-O writer + SHA-256 signer)
   driver/       klower.kite  (the integrated full-language compiler driver)
-                kc.kite      (legacy scalar-parser driver — the first self-hosting fixpoint)
   prelude.conf  the default-prelude CONFIG (data): names the lib modules auto-included into every
                 program (see "Prelude" below). The compiler's only tie to the stdlib — a list of names.
   tests/        run-parser-tests.sh · run-check-tests.sh · run-compiler-tests.sh
@@ -141,11 +139,9 @@ Then the integrated compiler is `frontend/kfront + codegen/codegen + backend/<ta
 
 ## Self-hosting fixpoints (do not break these)
 
-- **kc fixpoint**: `codegen + arm64 + driver/kc` compiled by itself is byte-identical across generations
-  (kc1 == kc2). The original self-host.
 - **integrated fixpoint**: `frontend/kfront + codegen + arm64 + driver/klower` compiled by itself is
   byte-identical (kcc2 == kcc3). The full-language compiler self-hosts.
-Any backend/codegen change must keep both. The three test scripts + the two fixpoint checks are the gate.
+Any backend/codegen change must keep it. The test scripts + the integrated fixpoint check are the gate.
 
 ## Current capabilities & gaps
 

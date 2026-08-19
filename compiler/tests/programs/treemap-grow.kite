@@ -3,7 +3,7 @@
 // A stale-base-pointer store hazard used to orphan the node whose insert forced the realloc, so
 // size() over-counted while get/has missed the orphans. Assert every key is findable AND the
 // in-order walk (min+higher) visits exactly size() keys. Exit 3 on full success.
-import "lib/alloc/treemap.kite"
+import "lib/alloc/collections/treemap.kite"
 fun main(): Int {
   var acc = 0
   val t = TreeMap::<Int, Int>(0 - 1, 0, 0, 0, 0, 0, 0, 0)

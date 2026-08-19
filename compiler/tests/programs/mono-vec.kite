@@ -2,7 +2,7 @@
 // concrete element type; each instantiation packs its storage by sizeOf<T>() stride and reads/writes with
 // the width/sign-correct element ops — the same behaviour sized-arrays.kite gets from six HAND-WRITTEN
 // classes, here derived from a single template. Exit code is a checksum (12), matching sized-arrays.kite.
-import "lib/alloc/vec.kite"
+import "lib/alloc/collections/vec.kite"
 
 fun main(): Int {
   var acc = 0

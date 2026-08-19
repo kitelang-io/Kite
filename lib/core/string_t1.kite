@@ -1,0 +1,183 @@
+// lib/core/string_t1.kite — the String-T1 boxed representation (kite::core::string_t1, Phase 9).
+//
+// Selected instead of the T0 kite::core::string + kite::alloc::string modules when the compiler is run with
+// `--string-t1` (see preludeConfPathsT). Where T0's String is a bare NUL-terminated C-string word that is
+// @arc(manual) (never freed — the documented leak), T1's String is a real reference-counted CLASS holding
+// an OWNED heap byte buffer:
+//
+//     class String(val len: Int, val data: Int)   // len = byte count (NOT strlen); data = malloc'd bytes
+//
+// with a `deinit` that frees `data`. Because it is an ordinary class (NO @arc(manual) tag), the auto-ARC in
+// klower retains/releases String locals and, on the last release, ___rel_String runs `deinit` → __rawFree —
+// which is what ENDS the String leak. A string literal is emitted (codegen genStrLit) as a call to __mkStr,
+// which heap-copies the interned literal bytes into an owned buffer, so `deinit` may free it and an embedded
+// \x00 is preserved (`"a\x00b".len()` == 3, not the strlen-truncated 2). print/%s and readFile/__argv load /
+// box `.data` in codegen. This module reimplements the whole String surface (len/charAt/byteAt/`+`/`==`/cmp/
+// hash/substr/Int_toStr/StrBuilder) over the box; the shared T0 module cannot be both raw-pointer and boxed.
+
+class String(val len: Int, val data: Int) {
+  deinit { __rawFree(self.data) }
+}
+
+// __mkStr(raw, n): box `n` bytes from the raw pointer `raw` into a fresh owned String (NUL-terminated so it
+// also round-trips through libc %s). codegen's genStrLit / genBoxCstr emit calls to this for string literals
+// and for the raw results of readFile / __argv.
+fun __mkStr(raw: Int, n: Int): String {
+  val d = __rawAlloc(n + 1)
+  var i = 0
+  while (i < n) { __rawStoreByte(d, i, __rawLoadByte(raw, i)) i = i + 1 }
+  __rawStoreByte(d, n, 0)
+  return String(n, d)
+}
+
+// Non-allocating queries. `.len` is the stored byte count (a field load, so an embedded NUL counts); charAt /
+// byteAt load one byte out of the owned buffer. @lang("str.get") makes charAt the landing point for `s[i]`.
+fun String_len(s: String): Int { return s.len }
+
+fun String_length(s: String): Int { return s.len }
+
+@lang("str.get")
+fun String_charAt(s: String, i: Int): Int { return __rawLoadByte(s.data, i) }
+
+fun String_byteAt(s: String, i: Int): Int { return __rawLoadByte(s.data, i) }
+
+// `+` concatenation via the Add operator trait: allocate len(self)+len(rhs)+1, copy both buffers, box the
+// result. A FRESH owned String (klower binds it as a move, so scope exit frees it). @lang("str.concat") also
+// makes it the interpolation two-piece join landing point.
+impl Add for String {
+  @lang("str.concat")
+  fun add(self, rhs: String): String {
+    val la = self.len
+    val lb = rhs.len
+    val d = __rawAlloc(la + lb + 1)
+    var i = 0
+    while (i < la) { __rawStoreByte(d, i, __rawLoadByte(self.data, i)) i = i + 1 }
+    var j = 0
+    while (j < lb) { __rawStoreByte(d, la + j, __rawLoadByte(rhs.data, j)) j = j + 1 }
+    __rawStoreByte(d, la + lb, 0)
+    return String(la + lb, d)
+  }
+}
+
+// Value equality (Eq): compare the two byte windows (length then bytes). Returns Bool.
+impl Eq for String {
+  fun eq(self, rhs: String): Bool {
+    if (self.len != rhs.len) { return false }
+    var i = 0
+    while (i < self.len) {
+      if (__rawLoadByte(self.data, i) != __rawLoadByte(rhs.data, i)) { return false }
+      i = i + 1
+    }
+    return true
+  }
+}
+
+// Total order (Ord): lexicographic over unsigned bytes, -1/0/1, shorter-is-less on a common prefix.
+impl Ord for String {
+  fun cmp(self, rhs: String): Int {
+    var i = 0
+    var go = 1
+    while (go == 1) {
+      if (i >= self.len) { if (i >= rhs.len) { return 0 } return 0 - 1 }
+      if (i >= rhs.len) { return 1 }
+      val ca = __rawLoadByte(self.data, i)
+      val cb = __rawLoadByte(rhs.data, i)
+      if (ca < cb) { return 0 - 1 }
+      if (ca > cb) { return 1 }
+      i = i + 1
+    }
+    return 0
+  }
+}
+
+// FNV-1a hash over the byte window (the HashMap/HashSet key contract, with Eq above).
+impl Hash for String {
+  fun hash(self): Int {
+    var h = 14695981039346656037
+    var i = 0
+    while (i < self.len) { h = (h ^ __rawLoadByte(self.data, i)) * 1099511628211 i = i + 1 }
+    return h
+  }
+}
+
+// Int base-10 rendering into a fresh boxed String (handles 0 and negatives). @lang("str.show") makes it the
+// interpolation `$expr` show landing point for a non-String piece.
+@lang("str.show")
+fun Int_toStr(n: Int): String {
+  if (n == 0) { val z = __rawAlloc(2) __rawStoreByte(z, 0, 48) __rawStoreByte(z, 1, 0) return String(1, z) }
+  var neg = 0
+  var m = n
+  if (n < 0) { neg = 1 m = 0 - n }
+  var digits = 0
+  var t = m
+  while (t > 0) { digits = digits + 1 t = t / 10 }
+  val total = digits + neg
+  val r = __rawAlloc(total + 1)
+  __rawStoreByte(r, total, 0)
+  var pos = total - 1
+  var mm = m
+  while (mm > 0) { val d = mm - (mm / 10) * 10 __rawStoreByte(r, pos, 48 + d) pos = pos - 1 mm = mm / 10 }
+  if (neg == 1) { __rawStoreByte(r, 0, 45) }
+  return String(total, r)
+}
+
+fun toStr(n: Int): String { return Int_toStr(n) }
+
+// --- StrView: a NON-OWNING window into a String's bytes (Phase 9, §5). substr returns one instead of copying;
+// materialize a real owned String with toStr() when a copy is actually needed. `data` aliases the source
+// buffer, so a StrView must not outlive the String it views (no deinit — it owns nothing).
+class StrView(val data: Int, val off: Int, val len: Int)
+
+fun StrView_len(v: StrView): Int { return v.len }
+
+fun StrView_byteAt(v: StrView, i: Int): Int { return __rawLoadByte(v.data, v.off + i) }
+
+fun StrView_charAt(v: StrView, i: Int): Int { return __rawLoadByte(v.data, v.off + i) }
+
+// materialize the window into a fresh owned String (NUL-terminated).
+fun StrView_toStr(v: StrView): String {
+  val d = __rawAlloc(v.len + 1)
+  var i = 0
+  while (i < v.len) { __rawStoreByte(d, i, __rawLoadByte(v.data, v.off + i)) i = i + 1 }
+  __rawStoreByte(d, v.len, 0)
+  return String(v.len, d)
+}
+
+// s.substr(off, n) -> a StrView window (no copy). Use .toStr() to own it.
+fun String_substr(s: String, off: Int, n: Int): StrView { return StrView(s.data, off, n) }
+
+// --- StrBuilder: the growable byte buffer; finish() seals into a boxed String (ownership transfer). -------
+class StrBuilder(var n: Int, var cap: Int, var data: Int) {
+  fun pushByte(self, b: Int): Int {
+    if (self.n == self.cap) { self.cap = self.cap * 2 self.data = __rawRealloc(self.data, self.cap) }
+    __rawStoreByte(self.data, self.n, b)
+    self.n = self.n + 1
+    return 0
+  }
+  @lang("str.build.push")
+  fun pushStr(self, s: String): StrBuilder {
+    var i = 0
+    while (i < s.len) { self.pushByte(__rawLoadByte(s.data, i)) i = i + 1 }
+    return self
+  }
+  fun pushChar(self, c: Int): StrBuilder { self.pushByte(c) return self }
+  fun pushInt(self, v: Int): StrBuilder { self.pushStr(Int_toStr(v)) return self }
+  fun byteAt(self, i: Int): Int { return __rawLoadByte(self.data, i) }
+  fun size(self): Int { return self.n }
+  // seal: NUL-terminate, hand the buffer to a fresh String box, and null out `data` so the builder's deinit
+  // frees nothing (the String now owns the buffer — no copy, no double free).
+  @lang("str.build.finish")
+  fun finish(self): String {
+    if (self.n == self.cap) { self.cap = self.cap + 1 self.data = __rawRealloc(self.data, self.cap) }
+    __rawStoreByte(self.data, self.n, 0)
+    val r = String(self.n, self.data)
+    self.data = 0
+    self.n = 0
+    self.cap = 0
+    return r
+  }
+  deinit { __rawFree(self.data) }
+}
+
+@lang("str.build.new")
+fun strNew(): StrBuilder { return StrBuilder(0, 8, __rawAlloc(8)) }

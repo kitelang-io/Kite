@@ -1,0 +1,13 @@
+// __isUnique(obj): true iff refcount == 1 (sole owner) — the reserved CoW-over-ARC primitive.
+// Fresh alloc is unique (1). A retain makes it shared (0). Releasing back makes it unique again (1).
+fun boolToInt(b: Bool): Int { if (b) { return 1 } return 0 }
+
+fun main(): Int {
+  val obj = __allocRC(16)
+  val u1 = boolToInt(__isUnique(obj)) // 1 — fresh, refcount 1
+  __retain(obj)
+  val u2 = boolToInt(__isUnique(obj)) // 0 — refcount 2, shared
+  __release(obj)
+  val u3 = boolToInt(__isUnique(obj)) // 1 — back to refcount 1
+  return u1 * 100 + u2 * 10 + u3       // 101
+}

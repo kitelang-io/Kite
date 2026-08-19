@@ -1,4 +1,4 @@
-// lib/alloc/vec.kite — the monomorphized, CoW value-semantics growable array (kite::alloc::vec), the
+// lib/alloc/collections/vec.kite — the monomorphized, CoW value-semantics growable array (kite::alloc::collections::vec), the
 // Phase-7 target-tier Vec<T>. `@mono` marks it a TEMPLATE: the compiler emits nothing for the generic
 // form; each concrete construction `Vec::<U16>(..)` instantiates a specialized `Vec$U16` whose storage is
 // PACKED by sizeOf<T>() stride and whose element ops are the width/sign-correct sized load/store chosen at
@@ -17,11 +17,11 @@
 //
 // Storage: {n: element count, cap: capacity in elements, buf: RawBuf holding the packed byte-buffer}.
 //
-// QUOTED include (not `import kite::core::panic`): a namespace import inside a monomorphized template would
-// flip the whole program onto the module pipeline, which does not run the @mono instantiation pass — so the
-// target-tier collections are consumed via quoted `import "lib/..."` includes (cwd-relative, deduped).
-import "lib/core/panic.kite"
-import "lib/alloc/rawbuf.kite"
+// Deps via NAMESPACE import: the module pipeline runs the @mono instantiation pass (klower's collectModuleDecls
+// records the @mono/@value templates and finishLower's runMono instantiates them), so `import kite::alloc::collections::vec`
+// + `Vec::<Int>(..)` monomorphizes exactly as a quoted/flat include does — no quoted-path workaround needed.
+import kite::core::panic
+import kite::alloc::collections::internal::rawbuf
 
 @mono
 @value

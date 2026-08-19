@@ -1,4 +1,4 @@
-import "lib/alloc/hashset.kite"
+import "lib/alloc/collections/hashset.kite"
 fun main(): Int {
   var acc = 0
   val s = HashSet::<Int>(0, 0, 0, 0, 0)

@@ -28,6 +28,11 @@ zsh compiler/tests/run-fmt-tests.sh >"$T/fmt.log" 2>&1
 tail -1 "$T/fmt.log"
 grep -q "FMT TESTS PASSED" "$T/fmt.log" || fail "kitefmt tests failed ($(tail -3 "$T/fmt.log" | tr '\n' ' '))"
 
+echo "=== [string-t1] boxed class String: box+deinit+concat+substr+print + leak-end (Phase 9) ==="
+zsh compiler/tests/run-string-t1-tests.sh >"$T/t1.log" 2>&1
+tail -1 "$T/t1.log"
+grep -q "0 fail" "$T/t1.log" || fail "string-T1 tests failed ($(tail -3 "$T/t1.log" | tr '\n' ' '))"
+
 echo "=== [robustness] malformed input rejected, never segfaults ==="
 BAD=compiler/tests/bugs/malformed-input-must-not-segfault.kite
 "$T/k2" check "$BAD" >/dev/null 2>&1; rc=$?

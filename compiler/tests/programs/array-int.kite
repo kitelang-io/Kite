@@ -1,4 +1,4 @@
-import "lib/alloc/array.kite"
+import "lib/alloc/collections/array.kite"
 fun main(): Int {
   var acc = 0
   val a = Array::<Int>(5, RawBuf(__rawAlloc(5 * sizeOf::<Int>())))

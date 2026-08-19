@@ -1,12 +1,12 @@
-// lib/alloc/treeset.kite — the monomorphized ordered set TreeSet<T> (kite::alloc::treeset). The set analogue
+// lib/alloc/collections/treeset.kite — the monomorphized ordered set TreeSet<T> (kite::alloc::collections::treeset). The set analogue
 // of TreeMap<K,V>: a binary search tree over parallel packed element + child-index buffers, ordered by the
 // concrete T's `<`/`==` (String content order, Int machine order). A STANDALONE template (a monomorphized
 // template cannot nest a TreeMap<T,Unit>).
 //
 // Navigation returns Option: min/max/floor(<=x)/ceil(>=x)/higher(>x)/lower(<x); ordered iteration = `min()`
-// then `higher(prev)`. (Self-balancing is a deferred optimization; ordering is exact.) Consumed via QUOTED
-// includes. Construct empty: `TreeSet::<Int>(0 - 1, 0, 0, 0, 0, 0, 0)`.
-import "lib/core/panic.kite"
+// then `higher(prev)`. (Self-balancing is a deferred optimization; ordering is exact.) Importable via `import
+// kite::alloc::collections::treeset`. Construct empty: `TreeSet::<Int>(0 - 1, 0, 0, 0, 0, 0, 0)`.
+import kite::core::panic
 
 @mono
 @arc(manual)

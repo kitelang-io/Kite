@@ -1,7 +1,7 @@
 // lib/core/string.kite — the canonical CORE home for String (kite::core::string): the built-in String
-// type's non-allocating queries + its `+`/`==` operator overloads, the `StrBuilder` growable byte buffer
-// (with finish()), the `Int.toStr`/interpolation-`show` path, and String's trait impls (Add/Eq/Ord/Hash/
-// Display). The ALLOCATING string transforms (substr/repeat/join) live in kite::alloc::string.
+// type's non-allocating queries + its `+`/`==` operator overloads, the `Int.toStr`/interpolation-`show`
+// path, and String's trait impls (Add/Eq/Ord/Hash/Display). The growable `StrBuilder` byte buffer lives in
+// kite::core::strbuilder; the ALLOCATING string transforms (substr/repeat/join) live in kite::alloc::string.
 //
 // The built-in String is a primitive (a NUL-terminated C-string, one Int word). Following Kotlin, its
 // convention methods live WITH the type: the byte-loop bodies are the METHODS/OPERATORS here — `s.charAt(i)`
@@ -136,55 +136,6 @@ impl Hash for String {
 // Show { fun show }` (see the generic-trait-bound tests) already owns that name; a second prelude trait on
 // the same method would cross the two dispatchers. String Display therefore rides the identity `str.show`
 // passthrough, not a colliding trait impl.
-
-// --- StrBuilder: the growable String (byte-buffer) builder ---------------------------------------------
-// A mutable byte buffer on the raw-memory intrinsics: the amortized way to assemble a String incrementally
-// (doubling growth) instead of a chain of whole-string `concat`s (O(n^2) copies + a leak per intermediate).
-// `+`-heavy loops and string interpolation build onto ONE StrBuilder and `finish()` once. finish() SEALS the
-// builder: it NUL-terminates the scratch buffer and TRANSFERS its ownership to the returned String (no extra
-// copy, no leak — the buffer IS the result), leaving data=0 so the builder's deinit frees nothing.
-class StrBuilder(var n: Int, var cap: Int, var data: Int) {
-  // append one raw byte (grow by doubling when full).
-  fun pushByte(self, b: Int): Int {
-    if (self.n == self.cap) { self.cap = self.cap * 2 self.data = __rawRealloc(self.data, self.cap) }
-    __rawStoreByte(self.data, self.n, b)
-    self.n = self.n + 1
-    return 0
-  }
-  // append every byte of a String; returns self so pushes chain (the interpolation desugar relies on this).
-  @lang("str.build.push")
-  fun pushStr(self, s: String): StrBuilder {
-    val ln = String_len(s)
-    var i = 0
-    while (i < ln) { self.pushByte(__rawLoadByte(s, i)) i = i + 1 }
-    return self
-  }
-  // append a single char/byte; returns self.
-  fun pushChar(self, c: Int): StrBuilder { self.pushByte(c) return self }
-  // append the base-10 rendering of an Int; returns self.
-  fun pushInt(self, v: Int): StrBuilder { self.pushStr(Int_toStr(v)) return self }
-  fun byteAt(self, i: Int): Int { return __rawLoadByte(self.data, i) }
-  fun size(self): Int { return self.n }
-  // seal to a real String: NUL-terminate and hand the buffer to the caller (ownership transfer).
-  @lang("str.build.finish")
-  fun finish(self): String {
-    if (self.n == self.cap) { self.cap = self.cap + 1 self.data = __rawRealloc(self.data, self.cap) }
-    __rawStoreByte(self.data, self.n, 0)
-    val r = self.data
-    self.data = 0
-    self.n = 0
-    self.cap = 0
-    return r
-  }
-  deinit { __rawFree(self.data) }
-}
-
-@lang("str.build.new")
-fun strNew(): StrBuilder { return StrBuilder(0, 8, __rawAlloc(8)) }
-
-fun strFrom(lit: String): StrBuilder {
-  val s = strNew()
-  var i = 0
-  while (i < lit.len()) { s.pushByte(lit.charAt(i)) i = i + 1 }
-  return s
-}
+//
+// The growable StrBuilder (byte-buffer) builder + its strNew/strFrom ctors have moved to their own module,
+// kite::core::strbuilder (auto-included right after this one via compiler/prelude.conf).

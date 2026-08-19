@@ -2,9 +2,9 @@
 // COPY must never corrupt the original — the aliasing UAF/leak hazard the phase eliminates. Pre-CoW these
 // were reference-aliased classes, so `val b = a; b.set(0, 999); a.get(0)` returned 999 (this fixture would
 // exit with the wrong accumulator). Each assertion adds a distinct weight so a specific regression is legible.
-import "lib/alloc/vec.kite"
-import "lib/alloc/array.kite"
-import "lib/alloc/deque.kite"
+import "lib/alloc/collections/vec.kite"
+import "lib/alloc/collections/array.kite"
+import "lib/alloc/collections/deque.kite"
 
 // a value-type argument is passed by COPY: this mutation must not reach the caller's binding.
 fun clobber(v: Vec<Int>): Int { v.set(0, 999) v.push(88) return 0 }

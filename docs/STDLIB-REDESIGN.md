@@ -245,6 +245,22 @@ Each phase is independently gated: full test suite + parser/checker differential
 
 **Gate discipline for the §3f/§3g cleanup (Phase 0):** the manifest-drive of `genCall`, the `typeNameOf` de-duplication, the role-sourced string nominal, the dead-lowering + dead-`opInstr`-arm deletions, and the host/path fixes are all designed to be **byte-neutral** — they touch dispatch tables and unreferenced code, not emitted instructions, so `kcc2==kcc3` holds trivially but is gated anyway. The **one exception** is the `Lfmt_ld` `%ld`-cstring removal: deleting a `__cstring` entry shifts section layout + `PAGEOFF12` relocations, so it **moves bytes** and must be re-fixpointed deliberately (deferred to Phase 10's batched cstring cleanup, not assumed free). Every added row carries the same full gate as the numbered phases: test suite + parser/checker differentials + `kcc2==kcc3` (and the integrated compiler's fixpoint).
 
+**Phase 10 status (deferred bucket — what has landed vs. what stays deferred).** The bucket is a grab-bag; only the clearly-tractable, safe, additive slices are taken, the rest are honestly deferred with rationale.
+
+*Landed:*
+- **`__isUnique(obj): Bool`** — the reserved CoW-over-ARC floor primitive (refcount at `[obj-16] == 1`). It is the machine primitive a value type's `mut self` write path needs to choose copy-vs-mutate-in-place; providing it now unblocks a future `@arc(manual)` retirement without doing the risky library migration. Zero-byte to the fixpoint (the compiler never calls it; intrinsics emit only at call sites). Regression: `compiler/tests/programs/arc-isunique.kite`.
+- **`I128`/`U128` reserved-and-rejected** (landed in Phase 1a) — locked with a checker fixture `compiler/tests/check/18-reserved-prim.kite` so the "reserved and not yet implemented" diagnostic cannot silently regress into acceptance.
+- **`Lfmt_ld` `%ld`-cstring removal** — the byte-moving cleanup flagged above was already completed (its sole consumer `genIntToStr` was deleted); the surviving `Lfmt_*` cstrings (`%ld\n`/`%ld`/`%s\n`/`%s`/`%g\n`/`%g`) are all live print/println formatters.
+- **Retire the in-tree duplicate lexers** — `compiler/driver/kc.kite` (legacy scalar-subset driver, superseded by `kitec`) and `compiler/frontend/klex.kite` (standalone lexer test program) deleted; neither is in the self-host import graph (`kitec.kite` includes only kfront/kcheck/codegen/arm64/klower), and the real lexer lives once in `kfront.kite`.
+
+*Still deferred (intentional, unchanged rationale):*
+- **`f32` / unboxed `Double`** — need the S/D-register bank + `fcvt`; a codegen-representation change with direct fixpoint risk. Large.
+- **Full `I128`/`U128`** — register-pair + carry lowering; nothing in the value proposition needs it. Kept reserved-rejected.
+- **Full CoW-over-ARC migration (retire `@arc(manual)`)** — needs `mut self` write-back + deep-retain-on-copy across the target collections; the `__isUnique` primitive above is its foundation, but the library rewrite is large and fixpoint-sensitive.
+- **libc `@extern` FFI** — deliberately not forced; an open-ended FFI surface is out of scope for this bucket.
+- **debug overflow-trap flag** — additive but must be OFF for the self-host build (fixpoint must be flag-independent); no current consumer.
+- **2nd-backend seams** — typed-AST channel, pass-manager/compile-unit→object→link split, Darwin underscore-ABI + vararg relocation into a backend-owned target manifest: all 2nd-backend prep, and the 2nd backend itself is out of scope.
+
 **The single invariant across all of it:** the compiler's own source stays 100% `Int` (the word) and stays on `IntBuf`/`RawMap` + concrete free functions. As long as that holds, every phase is additive and the fixpoint is untouched.
 
 ---

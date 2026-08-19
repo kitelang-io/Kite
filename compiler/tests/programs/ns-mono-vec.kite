@@ -1,0 +1,44 @@
+// Regression: the monomorphized target-tier Vec<T> reached through a NAMESPACE import (`import kite::...`),
+// not a quoted include. The module pipeline (klower collectModuleDecls -> recordMono, finishLower runMono)
+// must instantiate `Vec$Int` under the namespace path exactly as the flat/quoted path does — packed storage,
+// width-correct __packedGet/Set, CoW value semantics. Before the fix a namespace import routed the program
+// onto the module pipeline, which never ran the @mono instantiation pass, so `Vec::<Int>(..)` linked with an
+// undefined element-typed symbol (dyld abort). The vec module's OWN deps (panic, rawbuf) are namespace
+// imports too, so this also exercises method-body scope-renaming across modules (rawBufDrop -> rawbuf__…).
+import kite::alloc::collections::vec
+
+// pass-by-value: the callee mutates its own COPY; the caller's Vec is untouched (CoW-over-ARC).
+fun clobber(v: Vec<Int>): Int { v.set(0, 999) v.push(88) return 0 }
+
+fun main(): Int {
+  var acc = 0
+
+  // push/get/len on a growing Vec (starts cap 0, reallocs past 4).
+  val v = Vec::<Int>(0, 0, RawBuf(0))
+  v.push(10) v.push(20) v.push(30) v.push(40) v.push(50)   // triggers a realloc
+  if (v.len() == 5) { acc = acc + 1 }                       // 1
+  if (v.get(0) == 10) { acc = acc + 1 }                     // 2
+  if (v.get(4) == 50) { acc = acc + 1 }                     // 3  (survives growth)
+
+  // set + non-panicking bounds read.
+  v.set(2, 333)
+  if (v.get(2) == 333) { acc = acc + 1 }                    // 4
+  if (v.getOr(99, 7) == 7) { acc = acc + 1 }                // 5  (OOB -> default, no panic)
+  if (v.getOr(1, 7) == 20) { acc = acc + 1 }                // 6  (in-range -> element)
+
+  // CoW: a bound copy shares the buffer until it writes, then copies away — the original is intact.
+  val c = v
+  c.set(0, 111)
+  c.push(60)
+  if (v.get(0) == 10) { acc = acc + 1 }                     // 7  (original element untouched)
+  if (v.len() == 5) { acc = acc + 1 }                       // 8  (original length untouched)
+  if (c.get(0) == 111) { acc = acc + 1 }                    // 9  (copy mutated)
+  if (c.len() == 6) { acc = acc + 1 }                       // 10 (copy grew independently)
+
+  // pass-by-value isolation.
+  clobber(v)
+  if (v.get(0) == 10) { acc = acc + 1 }                     // 11 (callee copy did not reach caller)
+  if (v.len() == 5) { acc = acc + 1 }                       // 12
+
+  return acc                                                // 12
+}

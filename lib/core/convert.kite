@@ -1,52 +1,53 @@
-// kite::core::convert — From / Into / TryFrom conversions for the fixed-width integer types. Opt in with
-// `import kite::core::convert`.
+// kite::core::convert — From / Into / TryFrom conversions for the fixed-width integer types, as extension
+// methods on the SOURCE type. Opt in with `import kite::core::convert`.
 //
 // Under erasure the "trait" impls are concrete monomorphic functions (STDLIB-REDESIGN §2a: "From/Into for
 // lossless widening — each impl is a concrete monomorphic function, expressible under erasure"). Rust's
 // `T::from(x)` / `x.into()` need expected-type-directed dispatch that Kite (name-convention, no return-type
-// dispatch) does not have, so each conversion is a named function:
+// dispatch) does not have, so each conversion is a `to<Dest>` method on the source, dispatched by UFCS on
+// the receiver's concrete type:
 //
-//   *From*  (From/Into): LOSSLESS widening to a wider type — the value always fits, cannot fail.
-//   *TryFrom*          : FALLIBLE narrowing to a narrower type -> Option (None when the value doesn't fit).
+//   *From*  (From/Into): LOSSLESS widening to a wider type — `x.toU16()` etc., the value always fits.
+//   *TryFrom*          : FALLIBLE narrowing to a narrower type -> `x.toU8()` : Option (None when it doesn't fit).
 //
 // Widening is `x as WiderType`, which preserves the value (zero-extend for unsigned); narrowing checks the
 // destination range first and returns Some(x)/None.
 
-// ---- From / Into: lossless unsigned widening ----
-fun u16FromU8(x: U8): U16 { return x as U16 }
+// ---- From / Into: lossless unsigned widening (x.toUN()) ----
+fun U8_toU16(x: U8): U16 { return x as U16 }
 
-fun u32FromU8(x: U8): U32 { return x as U32 }
+fun U8_toU32(x: U8): U32 { return x as U32 }
 
-fun u32FromU16(x: U16): U32 { return x as U32 }
+fun U16_toU32(x: U16): U32 { return x as U32 }
 
-fun u64FromU8(x: U8): U64 { return x as U64 }
+fun U8_toU64(x: U8): U64 { return x as U64 }
 
-fun u64FromU16(x: U16): U64 { return x as U64 }
+fun U16_toU64(x: U16): U64 { return x as U64 }
 
-fun u64FromU32(x: U32): U64 { return x as U64 }
+fun U32_toU64(x: U32): U64 { return x as U64 }
 
-// ---- From / Into: lossless signed widening (sign-preserving) ----
-fun i16FromI8(x: I8): I16 { return x as I16 }
+// ---- From / Into: lossless signed widening (sign-preserving, x.toIN()) ----
+fun I8_toI16(x: I8): I16 { return x as I16 }
 
-fun i32FromI8(x: I8): I32 { return x as I32 }
+fun I8_toI32(x: I8): I32 { return x as I32 }
 
-fun i32FromI16(x: I16): I32 { return x as I32 }
+fun I16_toI32(x: I16): I32 { return x as I32 }
 
-fun i64FromI8(x: I8): Int { return x as I64 }
+fun I8_toI64(x: I8): Int { return x as I64 }
 
-fun i64FromI16(x: I16): Int { return x as I64 }
+fun I16_toI64(x: I16): Int { return x as I64 }
 
-fun i64FromI32(x: I32): Int { return x as I64 }
+fun I32_toI64(x: I32): Int { return x as I64 }
 
-// ---- TryFrom: fallible unsigned narrowing (-> Option, None when out of range) ----
-fun u8TryFromU16(x: U16): Option { if (x > 255) { return None } return Some(x as U8) }
+// ---- TryFrom: fallible unsigned narrowing (x.toUN() -> Option, None when out of range) ----
+fun U16_toU8(x: U16): Option { if (x > 255) { return None } return Some(x as U8) }
 
-fun u8TryFromU32(x: U32): Option { if (x > 255) { return None } return Some(x as U8) }
+fun U32_toU8(x: U32): Option { if (x > 255) { return None } return Some(x as U8) }
 
-fun u8TryFromU64(x: U64): Option { if (x > 255) { return None } return Some(x as U8) }
+fun U64_toU8(x: U64): Option { if (x > 255) { return None } return Some(x as U8) }
 
-fun u16TryFromU32(x: U32): Option { if (x > 65535) { return None } return Some(x as U16) }
+fun U32_toU16(x: U32): Option { if (x > 65535) { return None } return Some(x as U16) }
 
-fun u16TryFromU64(x: U64): Option { if (x > 65535) { return None } return Some(x as U16) }
+fun U64_toU16(x: U64): Option { if (x > 65535) { return None } return Some(x as U16) }
 
-fun u32TryFromU64(x: U64): Option { if (x > 4294967295) { return None } return Some(x as U32) }
+fun U64_toU32(x: U64): Option { if (x > 4294967295) { return None } return Some(x as U32) }

@@ -1,8 +1,8 @@
 // stdlib-demo — exercises the standard library's higher-order IntBuf methods (map/filter/fold/find) and
-// the Option helpers, all from the prelude (kite::alloc::collections::list + kite::core::option). No
+// the Option helpers, all from the prelude (kite::alloc::collections::internal::intbuf + kite::core::option). No
 // local reimplementations: these ARE the shipped methods.
 fun main(): Int {
-  val xs = intBuf()
+  val xs = list()
   xs.push(1); xs.push(2); xs.push(3); xs.push(4); xs.push(5)
   val doubled = xs.map({ n -> n * 2 })
   val evens = doubled.filter({ n -> n % 4 == 0 })

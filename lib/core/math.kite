@@ -1,12 +1,20 @@
-// kite::core::math — integer math. No allocation, no OS.
-fun absI(x: Int): Int { if (x < 0) { return 0 - x } return x }
+// kite::core::math — integer math, as extension methods on Int. No allocation, no OS.
+// Convention-by-name (Kotlin style): the bodies are the mangled `Int_<name>` methods, so `x.abs()` /
+// `a.min(b)` / `a.max(b)` / `x.clamp(lo, hi)` / `base.pow(exp)` / `a.gcd(b)` resolve here via UFCS on an
+// Int-typed receiver. Opt in with `import kite::core::math` (or `import kite::core`).
+//
+// The bodies call their SIBLINGS by direct name (Int_min(...), Int_abs(...)) rather than method sugar: a
+// module-mangled free function is reached via its mangled name under a namespace import, and method dispatch
+// resolves against the flat/global registry — so intra-module method sugar would not bind (same convention
+// the String methods in kite::core::string follow: internal callers use String_len(self), not self.len()).
+fun Int_abs(x: Int): Int { if (x < 0) { return 0 - x } return x }
 
-fun maxI(a: Int, b: Int): Int { if (a > b) { return a } return b }
+fun Int_max(a: Int, b: Int): Int { if (a > b) { return a } return b }
 
-fun minI(a: Int, b: Int): Int { if (a < b) { return a } return b }
+fun Int_min(a: Int, b: Int): Int { if (a < b) { return a } return b }
 
-fun clampI(x: Int, lo: Int, hi: Int): Int { return maxI(lo, minI(x, hi)) }
+fun Int_clamp(x: Int, lo: Int, hi: Int): Int { return Int_max(lo, Int_min(x, hi)) }
 
-fun powI(base: Int, exp: Int): Int { var r = 1 var i = 0 while (i < exp) { r = r * base i = i + 1 } return r }
+fun Int_pow(base: Int, exp: Int): Int { var r = 1 var i = 0 while (i < exp) { r = r * base i = i + 1 } return r }
 
-fun gcdI(a: Int, b: Int): Int { var x = absI(a) var y = absI(b) while (y != 0) { val t = y y = x % y x = t } return x }
+fun Int_gcd(a: Int, b: Int): Int { var x = Int_abs(a) var y = Int_abs(b) while (y != 0) { val t = y y = x % y x = t } return x }

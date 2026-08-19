@@ -1,0 +1,28 @@
+// Phase 8: the index operator `a[i]` / `a[i] = v` points at the TARGET tier per the static element type.
+// A Vec/Array (a nominal with concrete `<T>_get`/`<T>_set`) drives indexing through those methods instead
+// of the bootstrap IntBuf `listGet`/`listSet` — whose different memory layout would read/write garbage.
+// IntBuf and the RawMap `{..}` map keep their default roles (checked by the other fixtures). This program
+// reads and writes both a Vec and an Array by index and folds the results into one exit code.
+//   Vec: [10,20,5], set [1]=99 -> read 0,1,2 = 10+99+5 = 114
+//   Arr: alloc 3, set 0,1,2 = 7,8,9 -> read = 24;  cross-index Vec[0]+Arr[2] = 10+9 = 19
+//   total = 114 + 24 + 19 = 157
+import "lib/alloc/collections/vec.kite"
+import "lib/alloc/collections/array.kite"
+
+fun main(): Int {
+  var v = Vec::<Int>(0, 0, RawBuf(0))
+  v.push(10)
+  v.push(20)
+  v.push(5)
+  v[1] = 99
+  val vsum = v[0] + v[1] + v[2]        // 10 + 99 + 5 = 114
+
+  var a = Array::<Int>(3, RawBuf(__rawAlloc(3 * sizeOf::<Int>())))
+  a[0] = 7
+  a[1] = 8
+  a[2] = 9
+  val asum = a[0] + a[1] + a[2]        // 24
+
+  val cross = v[0] + a[2]              // 10 + 9 = 19
+  return vsum + asum + cross           // 157
+}

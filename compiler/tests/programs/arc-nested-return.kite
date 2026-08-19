@@ -9,7 +9,7 @@ fun f(flag: Int, log: IntBuf): Int {
 }
 
 fun main(): Int {
-  val log = intBuf()
+  val log = list()
   log.push(0)
   val a = f(1, log)
   val b = f(0, log)

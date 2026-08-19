@@ -1,4 +1,4 @@
-// lib/alloc/treemap.kite — the monomorphized ordered map TreeMap<K,V> (kite::alloc::treemap), the Phase-7
+// lib/alloc/collections/treemap.kite — the monomorphized ordered map TreeMap<K,V> (kite::alloc::collections::treemap), the Phase-7
 // sorted map. `@mono` specializes it per concrete (K,V); the key ORDER is the concrete K's `<`/`==`, chosen
 // at instantiation (String -> String_cmp content order, Int -> machine compare), so in-order navigation is
 // sorted for free. A binary search tree over parallel packed node buffers (key/val by sizeOf stride, left/
@@ -8,9 +8,9 @@
 // `min()` then `higher(prev)` to exhaustion. (Self-balancing LLRB rotations are a deferred optimization;
 // ordering/semantics are exact, worst-case depth is not yet bounded.)
 //
-// Consumed via QUOTED includes (the @mono pass runs only on the flat/quoted pipeline).
+// Importable via `import kite::alloc::collections::treemap` (the module pipeline runs the @mono instantiation pass).
 // Construct empty: `TreeMap::<Int, Int>(0 - 1, 0, 0, 0, 0, 0, 0, 0)`.
-import "lib/core/panic.kite"
+import kite::core::panic
 
 // root node index (-1 = empty); n live entries; nalloc high-water node slots (freed nodes are not reused);
 // cap node-array capacity; keys/vals packed node payloads; left/right child-index word arrays.

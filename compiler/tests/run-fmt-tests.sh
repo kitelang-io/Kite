@@ -28,7 +28,7 @@ echo "=== [2/3] idempotency on a corpus sample ==="
 CORPUS=(
   compiler/driver/kfmt.kite
   compiler/driver/klower.kite
-  compiler/frontend/klex.kite
+  compiler/frontend/kfront.kite
   compiler/tools/kitefmt.kite
   examples/jq/jv.kite
   lib/core/ops.kite

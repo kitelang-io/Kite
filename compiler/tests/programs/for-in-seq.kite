@@ -2,7 +2,7 @@
 // the bootstrap IntBuf. A String iterates its bytes (String_charAt/String_len); a target-tier Vec iterates
 // its elements (Vec$Int_get/_len); an IntBuf keeps the default roles. Exit code = 233 = (65+66+67) over the
 // string "ABC" + (10+20+5) over the Vec.
-import "lib/alloc/vec.kite"
+import "lib/alloc/collections/vec.kite"
 
 fun main(): Int {
   var sum = 0

@@ -76,7 +76,7 @@ fun opKind(c: Int): Int {
 }
 
 fun lex(src: String): IntBuf {
-  val toks = intBuf()
+  val toks = list()
   val n = src.len()
   var i = 0
   while (i < n) {
@@ -144,7 +144,7 @@ fun isAdd(k: Int): Bool { return k == 10 || k == 11 }
 fun isMul(k: Int): Bool { return k == 12 || k == 13 || k == 14 }
 
 fun parseArgs(p: P): IntBuf {
-  val args = intBuf()
+  val args = list()
   if (peekKind(p) != 3) {
     var more = 1
     while (more == 1) {
@@ -212,7 +212,7 @@ fun parseExpr(p: P): Expr {
 }
 
 fun parseBlock(p: P): IntBuf {
-  val b = intBuf()
+  val b = list()
   while (peekKind(p) != 5 && peekKind(p) != 99) { b.push(parseStmt(p)) }
   return b
 }
@@ -251,7 +251,7 @@ fun parseStmt(p: P): Stmt {
     advance(p) // consume '{'
     val thenB = parseBlock(p)
     advance(p) // consume '}'
-    var elseB = intBuf()
+    var elseB = list()
     if (peekKind(p) == 35) {
       advance(p) // consume 'else'
       advance(p) // consume '{'
@@ -268,7 +268,7 @@ fun parseFunc(p: P): Func {
   val name = peekText(p)
   advance(p) // consume name
   advance(p) // consume '('
-  val params = intBuf()
+  val params = list()
   if (peekKind(p) != 3) {
     var more = 1
     while (more == 1) {
@@ -285,7 +285,7 @@ fun parseFunc(p: P): Func {
 }
 
 fun parseProgram(p: P): IntBuf {
-  val fns = intBuf()
+  val fns = list()
   while (peekKind(p) == 30) { fns.push(parseFunc(p)) }
   return fns
 }
@@ -344,7 +344,7 @@ fun findFunc(funcs: IntBuf, name: String): Func {
 }
 
 fun callFunc(f: Func, args: IntBuf, caller: Env, funcs: IntBuf): Int {
-  val local = Env(intBuf(), intBuf())
+  val local = Env(list(), list())
   var i = 0
   while (i < f.params.len()) {
     val pname: String = f.params.get(i)
@@ -407,8 +407,8 @@ fun evalStmts(stmts: IntBuf, env: Env, funcs: IntBuf, ret: Ret): Int {
 fun run(src: String): Int {
   val p = P(lex(src), 0)
   val funcs = parseProgram(p)
-  val top = Env(intBuf(), intBuf())
-  return callFunc(findFunc(funcs, "main"), intBuf(), top, funcs)
+  val top = Env(list(), list())
+  return callFunc(findFunc(funcs, "main"), list(), top, funcs)
 }
 
 fun main(): Int {
