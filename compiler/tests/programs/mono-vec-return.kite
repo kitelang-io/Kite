@@ -1,0 +1,48 @@
+// Phase 6 regression: a `@mono` instantiation RETURNED from a factory and bound to an INFERRED-type local
+// must dispatch its methods to the CONCRETE instantiation, not the dropped template. Before the fR return-
+// type re-mangle this compiled clean (rc=0, no diagnostic) yet the binary referenced an undefined symbol
+// `_Vec_get` and dyld aborted at load: `val w = makeVec()` inferred `w`'s type from the fN/fR return table,
+// which still held the un-specialized head `Vec`, so `w.get(0)` resolved to the template method `Vec_get`
+// that was never lowered. The mono pass now re-mangles the return-type table in lockstep with the PFun's
+// own return annotation, so the inferred binding types as `Vec$Int`/`Vec$U8` and dispatches correctly.
+// Exercises: inferred-type binding, two coexisting instantiations (Vec<Int> + Vec<U8>), and a factory
+// result method-chained without an intermediate binding. Exit code is a checksum (7).
+import "lib/alloc/vec.kite"
+
+fun makeInts(): Vec<Int> {
+  val v = Vec::<Int>(0, 4, __rawAlloc(4 * sizeOf::<Int>()))
+  v.push(42)
+  v.push(99)
+  return v
+}
+
+fun makeBytes(): Vec<U8> {
+  val v = Vec::<U8>(0, 4, __rawAlloc(4 * sizeOf::<U8>()))
+  v.push(200)
+  v.push(300)                                          // 300 & 0xff = 44
+  return v
+}
+
+fun main(): Int {
+  var acc = 0
+
+  // inferred-type local bound to a factory return: dispatch through it.
+  val w = makeInts()
+  if (w.get(0) == 42) { acc = acc + 1 }               // 1
+  if (w.get(1) == 99) { acc = acc + 1 }               // 2
+  if (w.len() == 2) { acc = acc + 1 }                 // 3
+
+  // a second coexisting instantiation, also via an inferred-type binding (packed stride 1, wraps at 256).
+  val b = makeBytes()
+  if (b.get(0) == 200) { acc = acc + 1 }              // 4
+  if (b.get(1) == 44) { acc = acc + 1 }               // 5
+
+  // factory result method-chained with no intermediate binding.
+  if (makeInts().get(1) == 99) { acc = acc + 1 }      // 6
+
+  // explicit-typed binding of a factory return still works (was never broken; guards against regressing it).
+  val e: Vec<Int> = makeInts()
+  if (e.get(0) == 42) { acc = acc + 1 }               // 7
+
+  return acc                                          // 7
+}

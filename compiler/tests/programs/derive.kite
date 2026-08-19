@@ -1,0 +1,86 @@
+// Phase 4 — Traits + derive. Exercises @derive over structs (Eq/Ord/Hash/Clone/Debug/Default), the
+// ordering-operator desugar (< <= > >= routed through cmp), nested-struct structural recursion, mixed
+// scalar/String/Bool fields, and a hand-written impl Ord/Hash. Returns the count of passed assertions.
+@derive(Eq, Ord, Hash, Clone, Debug, Default) struct Point(val x: Int, val y: Int)
+
+@derive(Eq, Ord, Debug) struct Line(val a: Point, val b: Point)
+
+@derive(Eq, Clone, Debug, Default) struct Rec(val name: String, val age: Int, val active: Bool)
+
+// @derive(PartialOrd): the trait's method is `partialCmp`, so its dispatcher references <T>_partialCmp —
+// deriving must synthesize under that exact name (regression: dangling _Money_partialCmp = non-loadable).
+@derive(PartialOrd) struct Money(val cents: Int)
+
+// @derive(Hash) over a String + a Double field: the FNV mix folds INT surrogates (String -> .len(),
+// Double -> toInt), never the raw String/boxed-Double word into integer `*`/`+` (regression: concat-crash).
+@derive(Hash) struct Blob(val tag: String, val ratio: Double, val n: Int)
+
+// hand impls resolve identically to derived ones (convention-by-name binding)
+struct Ver(val major: Int, val minor: Int)
+
+impl Ord for Ver {
+  fun cmp(self, other: Ver): Int {
+    if (self.major < other.major) { return 0 - 1 }
+    if (self.major > other.major) { return 1 }
+    if (self.minor < other.minor) { return 0 - 1 }
+    if (self.minor > other.minor) { return 1 }
+    return 0
+  }
+}
+
+impl Hash for Ver { fun hash(self): Int { return self.major * 100 + self.minor } }
+
+fun main(): Int {
+  var acc = 0
+  val p = Point(3, 4)
+  val q = Point(3, 4)
+  val r = Point(3, 9)
+  if (p == q) { acc = acc + 1 } // derived Eq
+  if (p != r) { acc = acc + 1 } // != = not(eq)
+  if (p < r) { acc = acc + 1 } // Ord < via cmp
+  if (r > p) { acc = acc + 1 } // >
+  if (p <= q) { acc = acc + 1 } // <=
+  if (r >= p) { acc = acc + 1 } // >=
+  val c = p.clone()
+  if (c == p) { acc = acc + 1 } // derived Clone
+  if (p.hash() == q.hash()) { acc = acc + 1 } // Hash consistent for equal values
+  val pd = Point::default()
+  if (pd.x == 0 && pd.y == 0) { acc = acc + 1 } // derived Default
+
+  // nested-struct structural recursion
+  val l1 = Line(Point(1, 2), Point(3, 4))
+  val l2 = Line(Point(1, 2), Point(3, 5))
+  if (l1 != l2) { acc = acc + 1 } // nested Eq (b.y differs)
+  if (l1 < l2) { acc = acc + 1 } // nested Ord
+
+  // mixed scalar / String / Bool fields
+  val rec = Rec("kite", 3, true)
+  val rc = rec.clone()
+  if (rec == rc) { acc = acc + 1 } // Eq over String + Int + Bool
+  val rd = Rec::default()
+  if (rd.age == 0 && rd.name == "") { acc = acc + 1 } // Default: 0 / ""
+
+  // hand impls
+  val va = Ver(1, 5)
+  val vb = Ver(1, 9)
+  if (va < vb) { acc = acc + 1 } // manual Ord
+  if (va.hash() == 105) { acc = acc + 1 } // manual Hash
+
+  // @derive(PartialOrd): < / > route through the derived partialCmp (its dispatcher must resolve)
+  val m1 = Money(50)
+  val m2 = Money(100)
+  if (m1 < m2) { acc = acc + 1 } // PartialOrd <
+  if (m2 > m1) { acc = acc + 1 } // PartialOrd >
+
+  // @derive(Hash) over String + Double: computes and prints without crashing; equal values hash equal
+  val b1 = Blob("x", 2.5, 7)
+  val b2 = Blob("x", 2.5, 7)
+  val bh = b1.hash()
+  if (bh == b2.hash()) { acc = acc + 1 } // Hash over String/Double/Int fields, consistent
+
+  println(p.debug()) // Point(3, 4)
+  println(l1.debug()) // Line(Point(1, 2), Point(3, 4))
+  println(rec.debug()) // Rec(kite, 3, 1)
+  println(bh) // 1030 (String len 1 -> *31 + toInt(2.5)=2 -> *31 + 7)
+  return acc // 18
+}

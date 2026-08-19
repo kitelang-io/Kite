@@ -1,0 +1,40 @@
+// Phase 5 — String T0 refactor. Exercises the StrBuilder (pushStr/pushInt/pushChar/finish ownership-
+// transfer seal), multi-piece string interpolation lowered onto ONE builder (not an O(n^2) concat chain),
+// single-piece interpolation passthrough, the String Ord impl (`<`/`>` lexicographic), and the builder-
+// based joinList / String_repeat transforms in kite::alloc::string. Returns the count of passed assertions.
+fun main(): Int {
+  var acc = 0
+
+  // StrBuilder: append a string, an int, a char; seal with finish().
+  val b = strNew()
+  b.pushStr("ab")
+  b.pushInt(7)
+  b.pushChar(33) // '!'
+  val r = b.finish()
+  if (r == "ab7!") { acc = acc + 1 }     // 1
+  if (r.length() == 4) { acc = acc + 1 } // 2
+
+  // multi-piece interpolation -> finish(pushStr(pushStr(strNew(), ...), ...))
+  val name = "kite"
+  val n = 3
+  val s = "hi $name #$n = ${n + 1}"
+  if (s == "hi kite #3 = 4") { acc = acc + 1 } // 3
+
+  // single-piece interpolation short-circuits to the piece (no builder allocation)
+  val one = "$name"
+  if (one == "kite") { acc = acc + 1 } // 4
+  val two = "$n"
+  if (two == "3") { acc = acc + 1 } // 5
+
+  // String Ord (impl Ord for String): `<`/`>` route to String_cmp (lexicographic, unsigned bytes)
+  if ("apple" < "apricot") { acc = acc + 1 } // 6
+  if ("zebra" > "apple") { acc = acc + 1 }   // 7
+  if ("abc" < "abc") { acc = acc + 0 } else { acc = acc + 1 } // 8 (equal -> not less)
+
+  // builder-based transforms (kite::alloc::string)
+  val xs = ["x", "y", "z"]
+  if (joinList(xs, ",") == "x,y,z") { acc = acc + 1 } // 9
+  if ("ab".repeat(3) == "ababab") { acc = acc + 1 }   // 10
+
+  return acc // 10
+}

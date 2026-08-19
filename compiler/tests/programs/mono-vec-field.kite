@@ -1,0 +1,41 @@
+// Phase 6 regression: a `@mono` Vec used as a STRUCT/CLASS FIELD-type annotation must be rewritten onto the
+// concrete instantiation name (Vec<Int> -> Vec$Int). Before the field-type mangle this compiled clean (rc=0)
+// yet segfaulted at runtime: `box.v`'s static type stayed the un-monomorphized template, so method dispatch
+// resolved `box.v.get(0)` to the DROPPED template method (never lowered) and jumped to a bad address. This
+// exercises the field through a struct field, a class field, a U16 field (packed stride 2), and a re-bind of
+// a field to a typed local — every declaration position the rewrite now covers. Exit code is a checksum (5).
+import "lib/alloc/vec.kite"
+
+struct SBox(val v: Vec<Int>)
+struct WBox(val v: Vec<U16>)
+class CBox(val v: Vec<Int>)
+
+fun main(): Int {
+  var acc = 0
+
+  // Vec<Int> stored in a STRUCT field, method called through the field.
+  val a = Vec::<Int>(0, 4, __rawAlloc(4 * sizeOf::<Int>()))
+  a.push(77)
+  val sb = SBox(a)
+  if (sb.v.get(0) == 77) { acc = acc + 1 }           // 1
+
+  // Vec<U16> STRUCT field: packed stride-2 storage survives being stored in the field.
+  val b = Vec::<U16>(0, 4, __rawAlloc(4 * sizeOf::<U16>()))
+  b.push(300)
+  b.push(70000)                                       // 70000 & 0xffff = 4464
+  val wb = WBox(b)
+  if (wb.v.get(0) == 300) { acc = acc + 1 }           // 2
+  if (wb.v.get(1) == 4464) { acc = acc + 1 }          // 3
+
+  // re-bind a field to a TYPED LOCAL, then dispatch through the local.
+  val w: Vec<U16> = wb.v
+  if (w.get(1) == 4464) { acc = acc + 1 }             // 4
+
+  // Vec<Int> stored in a CLASS field, method called through the field.
+  val c = Vec::<Int>(0, 4, __rawAlloc(4 * sizeOf::<Int>()))
+  c.push(31)
+  val cb = CBox(c)
+  if (cb.v.get(0) == 31) { acc = acc + 1 }            // 5
+
+  return acc                                          // 5
+}

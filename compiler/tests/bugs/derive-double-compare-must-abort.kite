@@ -1,0 +1,8 @@
+// Phase 4 §2b well-formedness (Phase 10 tie-in): derived Eq/Ord/PartialOrd/Debug/Default over a Double
+// field silently miscompiles today — tagOf can't infer `self.c: Double`, so the synthesized `==`/`<`
+// emit an INTEGER compare of the boxed-Double POINTERS (equal values compare UNEQUAL; Debug prints the
+// pointer; Default stores an Int 0 into a Double slot). Until Double is unboxed the lowerer must reject
+// rather than emit wrong code. Hash over Double stays legal (it folds a toInt() surrogate).
+@derive(Eq, Ord, Debug) struct Temp(val c: Double, val n: Int)
+
+fun main(): Int { return 0 }

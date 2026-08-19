@@ -51,5 +51,32 @@ grep -q "unsupported construct" "$T/uc_err" || fail "unsupported-construct diagn
 [ -s "$T/uc_stdout" ] && fail "unsupported-construct diagnostic leaked to stdout (must be stderr-only)"
 echo "  unsupported construct -> exit $rc, no binary, diagnostic on stderr ✓"
 
+echo "=== [robustness] @derive of a non-derivable trait hard-aborts, no silent binary ==="
+DR=compiler/tests/bugs/derive-nonderivable-must-abort.kite
+rm -f "$T/dr_out"
+"$T/k2" --no-check "$DR" "$T/dr_out" >"$T/dr_stdout" 2>"$T/dr_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on @derive(Display) — non-derivable-trait guard regressed"
+[ -f "$T/dr_out" ] && fail "compiler wrote a binary despite @derive of a non-derivable trait"
+grep -q "auto-derivable" "$T/dr_err" || fail "non-derivable-derive diagnostic not on stderr"
+echo "  @derive(Display) -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] @derive over a non-derivable FIELD hard-aborts, no silent binary ==="
+DF=compiler/tests/bugs/derive-nonderivable-field-must-abort.kite
+rm -f "$T/df_out"
+"$T/k2" --no-check "$DF" "$T/df_out" >"$T/df_stdout" 2>"$T/df_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on @derive(Eq) over a field lacking Eq — WF field guard regressed"
+[ -f "$T/df_out" ] && fail "compiler wrote a binary despite a non-derivable field (silent pointer-compare)"
+grep -q "does not implement" "$T/df_err" || fail "non-derivable-field diagnostic not on stderr"
+echo "  @derive(Eq) over non-Eq field -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] @derive compare/print over a Double field hard-aborts, no silent miscompile ==="
+DD=compiler/tests/bugs/derive-double-compare-must-abort.kite
+rm -f "$T/dd_out"
+"$T/k2" --no-check "$DD" "$T/dd_out" >"$T/dd_stdout" 2>"$T/dd_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on @derive(Eq,Ord,Debug) over a Double field — float WF guard regressed"
+[ -f "$T/dd_out" ] && fail "compiler wrote a binary despite a Double compare derive (silent pointer-compare)"
+grep -q "floating-point" "$T/dd_err" || fail "double-derive diagnostic not on stderr"
+echo "  @derive(Eq,Ord,Debug) over Double -> exit $rc, no binary, diagnostic on stderr ✓"
+
 echo "✅ GATE PASSED (no OCaml, no shared /tmp) — suite green, kcc2==kcc3, robust to malformed input"
 rm -rf "$T"

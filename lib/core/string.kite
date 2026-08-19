@@ -1,19 +1,19 @@
-// lib/core/string.kite — the ONE canonical home for String: the built-in String type (its convention
-// methods, its `+` / `==` operator overloads), the allocating String utility joinList, and the growable
-// `Str` byte-buffer builder — all co-located (kite::core::string). The former kite::alloc::string /
-// kite::alloc::string::strbuf modules were folded in here.
+// lib/core/string.kite — the canonical CORE home for String (kite::core::string): the built-in String
+// type's non-allocating queries + its `+`/`==` operator overloads, the `StrBuilder` growable byte buffer
+// (with finish()), the `Int.toStr`/interpolation-`show` path, and String's trait impls (Add/Eq/Ord/Hash/
+// Display). The ALLOCATING string transforms (substr/repeat/join) live in kite::alloc::string.
 //
-// The built-in String is a primitive (a C-string). Following Kotlin, its convention methods live WITH the
-// type: the byte-loop bodies are the METHODS/OPERATORS here — `s.charAt(i)` -> String_charAt, `s.len()`/
-// `s.length` -> String_len/String_length, `s.substr(a,b)` -> String_substr, `s.repeat(n)` -> String_repeat,
-// `a + b` -> `impl Add for String` (String_add), `a == b`/`a != b` -> `impl Eq for String` (String_eq),
-// and `n.toStr()` -> Int_toStr. Method dispatch on the String builtin-nominal mangles `s.m(..)` to
-// `String_m(s, ..)`; the desugar roles str.get/str.concat/str.show land on these too. Auto-included via
-// compiler/prelude.conf (after kite::core::ops, which declares Add/Eq); names are global (unmangled).
+// The built-in String is a primitive (a NUL-terminated C-string, one Int word). Following Kotlin, its
+// convention methods live WITH the type: the byte-loop bodies are the METHODS/OPERATORS here — `s.charAt(i)`
+// -> String_charAt, `s.len()`/`s.length` -> String_len/String_length, `a + b` -> `impl Add for String`
+// (String_add), `a == b`/`a != b` -> `impl Eq for String` (String_eq), `a < b` -> `impl Ord for String`
+// (String_cmp), and `n.toStr()` -> Int_toStr. Method dispatch on the String builtin-nominal mangles
+// `s.m(..)` to `String_m(s, ..)`; the desugar roles str.get/str.concat/str.show land on these too. Auto-
+// included via compiler/prelude.conf (after kite::core::ops/cmp, which declare Add/Eq/Ord/Hash); names are
+// global (unmangled).
 
-// Pure-Kite string ops on the null-terminated byte representation (were libc-backed codegen builtins).
-// String_charAt is just a byte load; String_len scans to the terminating 0. @lang("str.get") makes
-// String_charAt the landing point for `s[i]` indexing on a String.
+// Pure-Kite string ops on the NUL-terminated byte representation. String_charAt is just a byte load;
+// String_len scans to the terminating 0. @lang("str.get") makes String_charAt the landing point for `s[i]`.
 @lang("str.get")
 fun String_charAt(s: String, i: Int): Int { return __rawLoadByte(s, i) }
 
@@ -23,21 +23,13 @@ fun String_len(s: String): Int { var i = 0 var go = 1 while (go == 1) { if (__ra
 // via klower's getter routing.
 fun String_length(s: String): Int { return String_len(s) }
 
-// String_substr(s, start, length): copy length bytes from s+start into a fresh NUL-terminated buffer.
-fun String_substr(s: String, st: Int, len: Int): String {
-  val r = __rawAlloc(len + 1)
-  var i = 0
-  while (i < len) { __rawStoreByte(r, i, __rawLoadByte(s, st + i)) i = i + 1 }
-  __rawStoreByte(r, len, 0)
-  return r
-}
-
-// `s.repeat(n)` — n copies of s, concatenated (n<=0 yields ""). Allocating, but only via `+`.
-fun String_repeat(s: String, n: Int): String { var out = "" var i = 0 while (i < n) { out = out + s i = i + 1 } return out }
+// String_byteAt / s.byteAt(i): the core-tier byte accessor (§2c — the T0 self-host iteration primitive,
+// distinct from a future T1 `chars()` that decodes UTF-8). Same load as charAt, named per the design.
+fun String_byteAt(s: String, i: Int): Int { return __rawLoadByte(s, i) }
 
 // Int_toStr / n.toStr(): base-10, handles 0 and negatives, into a fresh NUL-terminated buffer. `%` avoided
-// via d = mm - (mm/10)*10. (ASCII '0'=48, '-'=45.) Was libc snprintf("%ld"). @lang("str.show") makes it the
-// landing point for `$expr` string interpolation on a non-String value.
+// via d = mm - (mm/10)*10. (ASCII '0'=48, '-'=45.) @lang("str.show") makes it the landing point for `$expr`
+// string interpolation on a non-String value (the "interpolation calls show" path).
 @lang("str.show")
 fun Int_toStr(n: Int): String {
   if (n == 0) { val z = __rawAlloc(2) __rawStoreByte(z, 0, 48) __rawStoreByte(z, 1, 0) return z }
@@ -63,11 +55,12 @@ fun toStr(n: Int): String { return Int_toStr(n) }
 
 // String overloads `+` as concatenation via the Add operator trait (see kite::core::ops): klower's
 // lowerBin desugars `a + b` where a (or b) is a String to String_add(a, b). @lang("str.concat") also makes
-// it the interpolation-join landing point. Allocates la+lb+1 bytes, copies both, NUL-terminated (leaks like
-// the old libc version). @arc(manual): String is a primitive C-string word — never ref-counted, exempt from
-// automatic ARC. It has no class/struct decl, so the exemption tag rides this canonical `impl Add for
-// String` (the collector records the impl's for-type). This is what registers "String" as a builtin
-// nominal (String_charAt, ...).
+// it the interpolation-join landing point for a two-piece splice. Allocates la+lb+1 bytes, copies both,
+// NUL-terminated (leaks like the old libc version — a single `+` is one allocation; a long chain / a loop
+// should use StrBuilder below). @arc(manual): String is a primitive C-string word — never ref-counted,
+// exempt from automatic ARC. It has no class/struct decl, so the exemption tag rides this canonical
+// `impl Add for String` (the collector records the impl's for-type). This is what registers "String" as a
+// builtin nominal (String_charAt, ...).
 @arc(manual)
 impl Add for String {
   @lang("str.concat")
@@ -101,27 +94,95 @@ impl Eq for String {
   }
 }
 
-// joinList — concatenate the string elements of `xs`, separated by `sep`.
-fun joinList(xs: List, sep: String): String { var out = "" var i = 0 while (i < xs.len()) { if (i > 0) { out = out + sep } out = out + xs.get(i) i = i + 1 } return out }
+// String total order (Ord, kite::core::cmp): lexicographic over UNSIGNED byte values, returning -1/0/1.
+// klower's ordering-operator desugar (< <= > >=) routes to String_cmp when an operand is concretely String
+// (comparing its -1/0/1 result against 0). The compiler's own sources never `<`/`>` a String — those stay
+// on the numeric machine-compare path — so this only lights up user-level String ordering (and TreeMap keys).
+impl Ord for String {
+  fun cmp(self, rhs: String): Int {
+    var i = 0
+    var go = 1
+    while (go == 1) {
+      val ca = __rawLoadByte(self, i)
+      val cb = __rawLoadByte(rhs, i)
+      if (ca < cb) { return 0 - 1 }
+      if (ca > cb) { return 1 }
+      if (ca == 0) { go = 0 }
+      i = i + 1
+    }
+    return 0
+  }
+}
 
-// --- the growable String (byte-buffer) builder (folded in from kite::alloc::string::strbuf) -----------
-// A mutable byte buffer built on the raw-memory intrinsics; the canonical way to assemble a String
-// incrementally without repeated whole-string concat allocations.
-class Str(var n: Int, var cap: Int, var data: Int) {
+// String hash (Hash, kite::core::cmp): FNV-1a over the bytes, 64-bit machine word (wraps naturally on the
+// register). The key contract a hashed Map/Set needs for String keys (Eq + Hash). FNV-1a: h = 14695981039346656037;
+// for each byte b: h = (h ^ b) * 1099511628211. Both constants are the standard 64-bit FNV primes.
+impl Hash for String {
+  fun hash(self): Int {
+    var h = 14695981039346656037
+    var i = 0
+    var go = 1
+    while (go == 1) {
+      val b = __rawLoadByte(self, i)
+      if (b == 0) { go = 0 } else { h = (h ^ b) * 1099511628211 i = i + 1 }
+    }
+    return h
+  }
+}
+
+// NOTE on Display/`show`: interpolation's "call show" path is the `str.show` role (Int_toStr for a
+// non-String piece; a String piece passes through unchanged). A prelude `trait Display { fun show }` is
+// deliberately NOT added here — the dynamic `.show()` dispatch keys on the method NAME, and a user `trait
+// Show { fun show }` (see the generic-trait-bound tests) already owns that name; a second prelude trait on
+// the same method would cross the two dispatchers. String Display therefore rides the identity `str.show`
+// passthrough, not a colliding trait impl.
+
+// --- StrBuilder: the growable String (byte-buffer) builder ---------------------------------------------
+// A mutable byte buffer on the raw-memory intrinsics: the amortized way to assemble a String incrementally
+// (doubling growth) instead of a chain of whole-string `concat`s (O(n^2) copies + a leak per intermediate).
+// `+`-heavy loops and string interpolation build onto ONE StrBuilder and `finish()` once. finish() SEALS the
+// builder: it NUL-terminates the scratch buffer and TRANSFERS its ownership to the returned String (no extra
+// copy, no leak — the buffer IS the result), leaving data=0 so the builder's deinit frees nothing.
+class StrBuilder(var n: Int, var cap: Int, var data: Int) {
+  // append one raw byte (grow by doubling when full).
   fun pushByte(self, b: Int): Int {
     if (self.n == self.cap) { self.cap = self.cap * 2 self.data = __rawRealloc(self.data, self.cap) }
     __rawStoreByte(self.data, self.n, b)
     self.n = self.n + 1
     return 0
   }
+  // append every byte of a String; returns self so pushes chain (the interpolation desugar relies on this).
+  @lang("str.build.push")
+  fun pushStr(self, s: String): StrBuilder {
+    val ln = String_len(s)
+    var i = 0
+    while (i < ln) { self.pushByte(__rawLoadByte(s, i)) i = i + 1 }
+    return self
+  }
+  // append a single char/byte; returns self.
+  fun pushChar(self, c: Int): StrBuilder { self.pushByte(c) return self }
+  // append the base-10 rendering of an Int; returns self.
+  fun pushInt(self, v: Int): StrBuilder { self.pushStr(Int_toStr(v)) return self }
   fun byteAt(self, i: Int): Int { return __rawLoadByte(self.data, i) }
   fun size(self): Int { return self.n }
+  // seal to a real String: NUL-terminate and hand the buffer to the caller (ownership transfer).
+  @lang("str.build.finish")
+  fun finish(self): String {
+    if (self.n == self.cap) { self.cap = self.cap + 1 self.data = __rawRealloc(self.data, self.cap) }
+    __rawStoreByte(self.data, self.n, 0)
+    val r = self.data
+    self.data = 0
+    self.n = 0
+    self.cap = 0
+    return r
+  }
   deinit { __rawFree(self.data) }
 }
 
-fun strNew(): Str { return Str(0, 8, __rawAlloc(8)) }
+@lang("str.build.new")
+fun strNew(): StrBuilder { return StrBuilder(0, 8, __rawAlloc(8)) }
 
-fun strFrom(lit: String): Str {
+fun strFrom(lit: String): StrBuilder {
   val s = strNew()
   var i = 0
   while (i < lit.len()) { s.pushByte(lit.charAt(i)) i = i + 1 }
