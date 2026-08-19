@@ -1,0 +1,74 @@
+// Phase 6 regression: the monomorphization keystone. ONE generic `@mono class Vec<T>` is instantiated per
+// concrete element type; each instantiation packs its storage by sizeOf<T>() stride and reads/writes with
+// the width/sign-correct element ops — the same behaviour sized-arrays.kite gets from six HAND-WRITTEN
+// classes, here derived from a single template. Exit code is a checksum (12), matching sized-arrays.kite.
+import "lib/alloc/vec.kite"
+
+fun main(): Int {
+  var acc = 0
+
+  // sizeOf<T>() folds to the packed byte width at compile time.
+  if (sizeOf::<U8>() == 1) { acc = acc + 1 }        // 1
+  if (sizeOf::<U16>() == 2) { acc = acc + 1 }       // 2
+  if (sizeOf::<U32>() == 4) { acc = acc + 1 }       // 3
+  if (sizeOf::<Int>() == 8) { acc = acc + 1 }       // 4
+  if (sizeOf::<Bool>() == 1) { acc = acc + 1 }      // 5
+  if (sizeOf::<Char>() == 4) { acc = acc + 1 }      // 6
+
+  // Vec<U8>: stride 1, wraps at 256, zero-extended load.
+  val b = Vec::<U8>(0, 4, __rawAlloc(4 * sizeOf::<U8>()))
+  b.push(200)
+  b.push(300)                                        // 300 & 0xff = 44
+  b.push(255)
+  if (b.get(0) == 200) { acc = acc + 1 }             // 7
+  if (b.get(1) == 44) { acc = acc + 1 }              // 8
+  if (b.get(2) == 255) { acc = acc + 1 }             // 9
+
+  // Vec<U16>: stride 2, wraps at 65536, packed neighbours stay independent.
+  val h = Vec::<U16>(0, 4, __rawAlloc(4 * sizeOf::<U16>()))
+  h.push(0xFFFF)                                      // 65535
+  h.push(0x0001)                                     // 1
+  h.push(70000)                                      // 70000 & 0xffff = 4464
+  if (h.get(0) == 65535) { acc = acc + 1 }           // 10
+  if (h.get(2) == 4464) { acc = acc + 1 }            // 11
+  h.set(1, 42)
+  if (h.get(1) == 42) { acc = acc + 1 }              // 12  (neighbour of a 0xFFFF cell)
+  if (h.get(0) == 65535) { acc = acc + 1 }           // 13  (unchanged after neighbour set)
+
+  // Vec<U32>: stride 4, holds full 32-bit values, zero-extended.
+  val w = Vec::<U32>(0, 4, __rawAlloc(4 * sizeOf::<U32>()))
+  w.push(0xDEADBEEF)                                  // 3735928559
+  w.push(0xFFFFFFFF)                                 // 4294967295
+  if (w.get(0) == 3735928559) { acc = acc + 1 }      // 14
+  if (w.get(1) == 4294967295) { acc = acc + 1 }      // 15
+
+  // Vec<I8>: stride 1, sign-extended load.
+  val sb = Vec::<I8>(0, 4, __rawAlloc(4 * sizeOf::<I8>()))
+  sb.push(0xFF)                                       // -1
+  sb.push(0x80)                                       // -128
+  if (sb.get(0) == 0 - 1) { acc = acc + 1 }          // 16
+  if (sb.get(1) == 0 - 128) { acc = acc + 1 }        // 17
+
+  // Vec<I16>: stride 2, sign-extended load.
+  val sh = Vec::<I16>(0, 4, __rawAlloc(4 * sizeOf::<I16>()))
+  sh.push(0x8000)                                     // -32768
+  if (sh.get(0) == 0 - 32768) { acc = acc + 1 }      // 18
+
+  // Vec<I32>: stride 4, sign-extended load.
+  val sw = Vec::<I32>(0, 4, __rawAlloc(4 * sizeOf::<I32>()))
+  sw.push(0xFFFFFFFF)                                 // -1
+  if (sw.get(0) == 0 - 1) { acc = acc + 1 }          // 19
+
+  // Vec<Int>: stride 8, full word, exercises growth (push past cap 4).
+  val v = Vec::<Int>(0, 4, __rawAlloc(4 * sizeOf::<Int>()))
+  v.push(10)
+  v.push(20)
+  v.push(30)
+  v.push(40)
+  v.push(50)                                          // triggers realloc (cap 4 -> 8)
+  if (v.len() == 5) { acc = acc + 1 }                // 20
+  if (v.get(0) == 10) { acc = acc + 1 }              // 21
+  if (v.get(4) == 50) { acc = acc + 1 }              // 22  (survives growth)
+
+  return acc - 10                                     // 12
+}

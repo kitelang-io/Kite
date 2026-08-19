@@ -1,0 +1,29 @@
+// lib/alloc/vec.kite — the monomorphized growable array (kite::alloc::vec), the Phase-6 keystone artifact.
+//
+// ONE generic template replaces the six hand-written concrete arrays of kite::alloc::bytes. `@mono` marks
+// it a TEMPLATE: the compiler emits nothing for the generic form. For each concrete construction
+// `Vec::<U16>(..)` it instantiates a specialized `Vec$U16` whose storage is PACKED by sizeOf<T>() stride
+// and whose element ops are the width/sign-correct sized load/store chosen at instantiation — zero-cost,
+// exactly the code a programmer would hand-write per type. `Vec<Point>` (a reference element) stores one
+// pointer word per element (sizeOf<T>() = 8); true inline value storage of composite elements arrives with
+// the collections target tier (Phase 7). Like List, an instantiation OWNS a heap buffer and is @arc(manual)
+// (leak-managed) — real CoW value semantics is Phase 7.
+//
+// Storage: {n: element count, cap: capacity in elements, data: raw byte-buffer}. Element i lives at byte
+// offset i*sizeOf<T>(); __packedGet/__packedSet compute the address and issue the width-specific op.
+@mono
+@arc(manual)
+class Vec<T>(var n: Int, var cap: Int, var data: Int) {
+  fun push(self, x: consuming T): Int {
+    if (self.n == self.cap) {
+      if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.data = __rawRealloc(self.data, self.cap * sizeOf::<T>())
+    }
+    __packedSet::<T>(self.data, self.n, x)
+    self.n = self.n + 1
+    return 0
+  }
+  fun get(self, i: Int): T { return __packedGet::<T>(self.data, i) }
+  fun set(self, i: Int, x: consuming T): Int { __packedSet::<T>(self.data, i, x) return 0 }
+  fun len(self): Int { return self.n }
+}

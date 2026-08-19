@@ -1,0 +1,63 @@
+// Phase 4 — @derive over ENUMS (STDLIB-REDESIGN §2b). Regression for the silent miscompile where a
+// `@derive` on an enum was skipped (runDerives only handled structs) so enum `==` fell through to a
+// pointer compare and returned a WRONG answer with no diagnostic. Exercises the tag-then-payload eq, the
+// variant-order-then-payload cmp (Ord), tag+payload hash, structural clone, per-variant debug, first-variant
+// default, a nullary variant used as a value (`Unit`), and a nested derived-struct payload. Also covers the
+// qualified `Enum.Variant(x)` constructor path (previously mislowered as a UFCS method call that dropped the
+// payload). Returns the count of passed assertions.
+@derive(Eq, Debug) struct PtD(val x: Int, val y: Int)
+
+@derive(Eq, Ord, Hash, Clone, Debug, Default) enum Shape {
+  Circle(Int);
+  Rect(Int, Int);
+  Unit
+}
+
+@derive(Eq, Debug) enum Node { Leaf(PtD); Empty }
+
+fun main(): Int {
+  var acc = 0
+
+  // --- Eq: the exact task repro (tag then payload) ---
+  if (Circle(5) == Circle(5)) { acc = acc + 1 } // same variant, same payload -> equal
+  if (Circle(5) != Rect(5, 5)) { acc = acc + 1 } // different variant -> unequal
+  if (Circle(5) != Circle(6)) { acc = acc + 1 } // same variant, different payload -> unequal
+  // qualified constructor form must construct correctly (payload not dropped)
+  if (Shape.Circle(5) == Shape.Circle(5)) { acc = acc + 1 }
+  if (Shape.Circle(5) != Shape.Circle(6)) { acc = acc + 1 }
+  if (Rect(2, 3) == Rect(2, 3)) { acc = acc + 1 } // multi-payload eq
+  if (Rect(2, 3) != Rect(2, 4)) { acc = acc + 1 } // multi-payload, second differs
+  if (Unit == Unit) { acc = acc + 1 } // nullary variant equal
+  if (Circle(5) != Unit) { acc = acc + 1 } // payload vs nullary -> unequal
+
+  // --- Ord: variant declaration order first (Circle<Rect<Unit), then payload ---
+  if (Circle(1) < Circle(2)) { acc = acc + 1 }
+  if (Circle(9) < Rect(0, 0)) { acc = acc + 1 }
+  if (Rect(1, 1) < Unit) { acc = acc + 1 }
+  if (Rect(1, 1) < Rect(1, 2)) { acc = acc + 1 }
+  if (Unit > Circle(100)) { acc = acc + 1 }
+
+  // --- Hash: equal values hash equal; distinct variants hash apart ---
+  if (Circle(5).hash() == Circle(5).hash()) { acc = acc + 1 }
+  if (Circle(5).hash() != Unit.hash()) { acc = acc + 1 }
+
+  // --- Clone: structural reconstruction ---
+  val cl = Rect(7, 8).clone()
+  if (cl == Rect(7, 8)) { acc = acc + 1 }
+
+  // --- Default: first variant with defaulted payloads -> Circle(0) ---
+  val d: Shape = Shape::default()
+  if (d == Circle(0)) { acc = acc + 1 }
+
+  // --- nested derived-struct payload ---
+  if (Leaf(PtD(1, 2)) == Leaf(PtD(1, 2))) { acc = acc + 1 }
+  if (Leaf(PtD(1, 2)) != Leaf(PtD(1, 3))) { acc = acc + 1 }
+
+  // --- Debug: per-variant rendering (printed, not asserted) ---
+  println(Circle(5).debug()) // Circle(5)
+  println(Rect(2, 3).debug()) // Rect(2, 3)
+  println(Unit.debug()) // Unit
+  println(Leaf(PtD(1, 2)).debug()) // Leaf(PtD(1, 2))
+
+  return acc // 20
+}

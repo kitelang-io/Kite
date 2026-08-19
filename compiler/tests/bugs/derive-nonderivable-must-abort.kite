@@ -1,0 +1,5 @@
+// Phase 4: @derive of a non-auto-derivable trait (Display/From/Iterator/operator traits) is a hard build
+// error, not a silent no-op. The lowerer aborts with a diagnostic on stderr and writes no binary.
+@derive(Display) struct P(val x: Int)
+
+fun main(): Int { return 0 }

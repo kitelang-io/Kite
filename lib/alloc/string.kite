@@ -1,0 +1,34 @@
+// lib/alloc/string.kite — the ALLOCATING String transforms (kite::alloc::string), split out of
+// kite::core::string per the STDLIB-REDESIGN core/alloc layering (§2c). core holds the non-allocating
+// queries + operators + StrBuilder; the transforms that produce a FRESH String heap buffer live here.
+// Auto-included via compiler/prelude.conf AFTER kite::core::string (these call String_len / `+` / charAt).
+//
+// All of these leak under the T0 String regime (a NUL-terminated C-string is @arc(manual), never freed) —
+// exactly as before the split; Phase 9's T1 `class String` + deinit ends the leak. Nothing here changes
+// representation or emission; this is a pure relocation of the transform surface out of the core module.
+
+// String_substr(s, start, length): copy length bytes from s+start into a fresh NUL-terminated buffer.
+fun String_substr(s: String, st: Int, len: Int): String {
+  val r = __rawAlloc(len + 1)
+  var i = 0
+  while (i < len) { __rawStoreByte(r, i, __rawLoadByte(s, st + i)) i = i + 1 }
+  __rawStoreByte(r, len, 0)
+  return r
+}
+
+// `s.repeat(n)` — n copies of s, concatenated (n<=0 yields ""). Builds onto ONE StrBuilder (amortized),
+// then seals with finish() — no O(n^2) concat chain, no per-iteration leak.
+fun String_repeat(s: String, n: Int): String {
+  val b = strNew()
+  var i = 0
+  while (i < n) { b.pushStr(s) i = i + 1 }
+  return b.finish()
+}
+
+// joinList — concatenate the string elements of `xs`, separated by `sep`, onto one StrBuilder.
+fun joinList(xs: List, sep: String): String {
+  val b = strNew()
+  var i = 0
+  while (i < xs.len()) { if (i > 0) { b.pushStr(sep) } b.pushStr(xs.get(i)) i = i + 1 }
+  return b.finish()
+}

@@ -1,0 +1,27 @@
+// kite::core::cmp — comparison + hashing trait declarations (STDLIB-REDESIGN §2b, Phase 4).
+//
+// These are DECLARATIONS (contracts); a type participates by implementing them — by hand, or via
+// `@derive(...)` which synthesizes the concrete `<Type>_<method>` structurally over the fields. The
+// binding is convention-by-name (locked decision #4, Kotlin style), not by trait witness:
+//   `a == b` / `a != b`  ->  the `eq` method   (Eq, declared in kite::core::ops)
+//   `a <  b` / `<=`/`>`/`>=`  ->  the `cmp` method, comparing its -1/0/1 result against 0
+// The desugar fires ONLY when the LEFT (else RIGHT) operand's concrete type defines the method, so
+// primitive Int/Char comparisons keep their zero-cost machine `cmp`+condition-code path untouched (the
+// compiler's own sources compare only integers). `Self` denotes the implementing type.
+//
+// Auto-injected via compiler/prelude.conf (§2b prelude policy: operator traits + Eq + Ord). Hash rides
+// along here so map/set keys have a home; Clone/Copy/Default/Debug are derive-only markers with no
+// standing decl (deriving them synthesizes the method directly; requesting a non-derivable trait such as
+// Display/From/Iterator is a hard build error).
+
+// total equality (reflexive); alias of Eq for the partial/total distinction. `eq` lives in ops::Eq.
+trait PartialEq { fun eq(self, other: Self): Bool }
+
+// total order: cmp returns -1 (less) / 0 (equal) / 1 (greater). `<`/`<=`/`>`/`>=` desugar through it.
+trait Ord { fun cmp(self, other: Self): Int }
+
+// partial order: partialCmp returns -1/0/1, or -2 when the two values are incomparable.
+trait PartialOrd { fun partialCmp(self, other: Self): Int }
+
+// a hash of the value (FNV-style field mix under @derive); the HashMap/HashSet key contract.
+trait Hash { fun hash(self): Int }
