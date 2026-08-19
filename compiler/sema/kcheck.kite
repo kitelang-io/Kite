@@ -12,9 +12,9 @@ enum Decl { DFun(FFunc); DType(Int, FTDecl); DEnum(FEDecl); DTrait(FTraitDecl); 
 // Parse the whole program, returning the decl list AND (index-aligned, via the `lines` out-param) the
 // 1-based source line where each decl begins — captured from the first token of the decl (its leading
 // annotation, if any). Diagnostics are later attributed to their enclosing decl's line.
-fun parseProgramLn(toks: List, lines: List): List {
+fun parseProgramLn(toks: IntBuf, lines: IntBuf): IntBuf {
   val p = P(toks, 0)
-  val decls = list()
+  val decls = intBuf()
   var go = 1
   while (go == 1) {
     if (pk(p) == 0) { go = 0 }
@@ -41,7 +41,7 @@ fun parseProgramLn(toks: List, lines: List): List {
 fun linePrefix(n: Int): String { return "line " + (n.toStr() + ": ") }
 
 // ---- small helpers ----
-fun memList(l: List, n: String): Bool {
+fun memList(l: IntBuf, n: String): Bool {
   var i = 0
   while (i < l.len()) { val x: String = l.get(i); if (x == n) { return true }; i = i + 1 }
   return false
@@ -57,8 +57,8 @@ fun isBuiltin(n: String): Bool {
 }
 
 // lambda param string "x: Int, y" -> ["x","y"]; "" -> []
-fun splitLamParams(s: String): List {
-  val out = list()
+fun splitLamParams(s: String): IntBuf {
+  val out = intBuf()
   if (s == "") { return out }
   val n = s.len()
   var i = 0
@@ -84,34 +84,34 @@ fun whenBindName(b: String): String {
 }
 
 // ================= RESOLVE PASS =================
-struct RCtx(val globals: List, var scopes: List, val diags: List, var curLine: Int)
+struct RCtx(val globals: IntBuf, var scopes: IntBuf, val diags: IntBuf, var curLine: Int)
 
 fun rErr(ctx: RCtx, msg: String): Int { ctx.diags.push(linePrefix(ctx.curLine) + msg); return 0 }
 
 fun rBound(ctx: RCtx, n: String): Bool {
   var i = 0
-  while (i < ctx.scopes.len()) { val sc: List = ctx.scopes.get(i); if (memList(sc, n)) { return true }; i = i + 1 }
+  while (i < ctx.scopes.len()) { val sc: IntBuf = ctx.scopes.get(i); if (memList(sc, n)) { return true }; i = i + 1 }
   if (memList(ctx.globals, n)) { return true }
   return isBuiltin(n)
 }
 
 fun rBind(ctx: RCtx, n: String): Int {
-  val top: List = ctx.scopes.get(ctx.scopes.len() - 1)
+  val top: IntBuf = ctx.scopes.get(ctx.scopes.len() - 1)
   top.push(n)
   return 0
 }
 
-fun rPush(ctx: RCtx): List { // returns saved scopes for restore
+fun rPush(ctx: RCtx): IntBuf { // returns saved scopes for restore
   val saved = ctx.scopes
-  val ns = list()
+  val ns = intBuf()
   var i = 0
   while (i < saved.len()) { ns.push(saved.get(i)); i = i + 1 }
-  ns.push(list())
+  ns.push(intBuf())
   ctx.scopes = ns
   return saved
 }
 
-fun rPop(ctx: RCtx, saved: List): Int { ctx.scopes = saved; return 0 }
+fun rPop(ctx: RCtx, saved: IntBuf): Int { ctx.scopes = saved; return 0 }
 
 fun rExpr(ctx: RCtx, e: FExpr): Int {
   return when (e) {
@@ -123,6 +123,7 @@ fun rExpr(ctx: RCtx, e: FExpr): Int {
     FEStatic(a, f) -> rExpr(ctx, a)
     FETypeApp(a, t) -> rExpr(ctx, a)
     FECast(a, ty) -> rExpr(ctx, a)
+    FEQuestion(a) -> rExpr(ctx, a)
     FEBin(op, a, b) -> { rExpr(ctx, a); rExpr(ctx, b) }
     FEElvis(a, b) -> { rExpr(ctx, a); rExpr(ctx, b) }
     FEIndex(a, b) -> { rExpr(ctx, a); rExpr(ctx, b) }
@@ -139,25 +140,25 @@ fun rExpr(ctx: RCtx, e: FExpr): Int {
   }
 }
 
-fun rArgs(ctx: RCtx, args: List): Int {
+fun rArgs(ctx: RCtx, args: IntBuf): Int {
   var i = 0
   while (i < args.len()) { val a: FArg = args.get(i); rExpr(ctx, a.expr); i = i + 1 }
   return 0
 }
 
-fun rExprList(ctx: RCtx, es: List): Int {
+fun rExprList(ctx: RCtx, es: IntBuf): Int {
   var i = 0
   while (i < es.len()) { val x: FExpr = es.get(i); rExpr(ctx, x); i = i + 1 }
   return 0
 }
 
-fun rMap(ctx: RCtx, ents: List): Int {
+fun rMap(ctx: RCtx, ents: IntBuf): Int {
   var i = 0
   while (i < ents.len()) { val en: FMapEnt = ents.get(i); rExpr(ctx, en.k); rExpr(ctx, en.v); i = i + 1 }
   return 0
 }
 
-fun rInterp(ctx: RCtx, parts: List): Int {
+fun rInterp(ctx: RCtx, parts: IntBuf): Int {
   var i = 0
   while (i < parts.len()) {
     val pt: FIPart = parts.get(i)
@@ -180,7 +181,7 @@ fun rLambda(ctx: RCtx, params: String, body: FExpr): Int {
   return 0
 }
 
-fun rBlock(ctx: RCtx, stmts: List, res: FExpr): Int {
+fun rBlock(ctx: RCtx, stmts: IntBuf, res: FExpr): Int {
   val saved = rPush(ctx)
   var i = 0
   while (i < stmts.len()) { val s: FStmt = stmts.get(i); rStmt(ctx, s); i = i + 1 }
@@ -221,13 +222,13 @@ fun rPat(ctx: RCtx, pat: FPat): Int {
   }
 }
 
-fun rPatList(ctx: RCtx, subs: List): Int {
+fun rPatList(ctx: RCtx, subs: IntBuf): Int {
   var i = 0
   while (i < subs.len()) { val sp: FPat = subs.get(i); rPat(ctx, sp); i = i + 1 }
   return 0
 }
 
-fun rRecordPat(ctx: RCtx, flds: List): Int {
+fun rRecordPat(ctx: RCtx, flds: IntBuf): Int {
   var i = 0
   while (i < flds.len()) {
     val f: FRFld = flds.get(i)
@@ -237,7 +238,7 @@ fun rRecordPat(ctx: RCtx, flds: List): Int {
   return 0
 }
 
-fun rWhen(ctx: RCtx, hasSubj: Int, bind: String, subj: FExpr, arms: List): Int {
+fun rWhen(ctx: RCtx, hasSubj: Int, bind: String, subj: FExpr, arms: IntBuf): Int {
   if (hasSubj == 1) { rExpr(ctx, subj) }
   val bn = whenBindName(bind)
   var i = 0
@@ -265,7 +266,7 @@ fun rFun(ctx: RCtx, fd: FFunc): Int {
   return 0
 }
 
-fun rMethods(ctx: RCtx, methods: List): Int {
+fun rMethods(ctx: RCtx, methods: IntBuf): Int {
   var i = 0
   while (i < methods.len()) { val m: FFunc = methods.get(i); rFun(ctx, m); i = i + 1 }
   return 0
@@ -284,8 +285,8 @@ fun rDecl(ctx: RCtx, d: Decl): Int {
 // collect globals + flag duplicate top-level definitions
 // skipDup=1 suppresses duplicate-definition errors: used when checking a MERGED multi-module source
 // (namespace imports), where two modules legitimately share a name (the module system mangles them).
-fun collectGlobals(decls: List, lines: List, globals: List, diags: List, skipDup: Int): Int {
-  val seen = list()
+fun collectGlobals(decls: IntBuf, lines: IntBuf, globals: IntBuf, diags: IntBuf, skipDup: Int): Int {
+  val seen = intBuf()
   var i = 0
   while (i < decls.len()) {
     val d: Decl = decls.get(i)
@@ -302,13 +303,13 @@ fun collectGlobals(decls: List, lines: List, globals: List, diags: List, skipDup
   return 0
 }
 
-fun defineG(seen: List, globals: List, diags: List, n: String, ln: Int, skipDup: Int): Int {
+fun defineG(seen: IntBuf, globals: IntBuf, diags: IntBuf, n: String, ln: Int, skipDup: Int): Int {
   if (skipDup == 0) { if (memList(seen, n)) { diags.push(linePrefix(ln) + ("duplicate top-level definition: " + n)) } }
   seen.push(n); globals.push(n)
   return 0
 }
 
-fun addVariants(globals: List, variants: List): Int {
+fun addVariants(globals: IntBuf, variants: IntBuf): Int {
   var i = 0
   while (i < variants.len()) { val v: FVariant = variants.get(i); globals.push(v.name); i = i + 1 }
   return 0
@@ -317,7 +318,7 @@ fun addVariants(globals: List, variants: List): Int {
 // Collect the top-level global names (functions, types, enums+variants, traits) a parsed program
 // declares, WITHOUT dup-checking or diagnostics. Used to harvest the prelude's public names so the
 // checker can treat them as DEFINED, not merely whitelisted.
-fun collectDeclNames(decls: List, out: List): Int {
+fun collectDeclNames(decls: IntBuf, out: IntBuf): Int {
   var i = 0
   while (i < decls.len()) {
     val d: Decl = decls.get(i)
@@ -341,14 +342,14 @@ fun collectDeclNames(decls: List, out: List): Int {
 // The prelude's top-level declarations, parsed ONCE from the same module list preludeSigs/injectHelpers
 // read. Returned so BOTH the resolver (names only) and the type-checker (full param/return signatures)
 // can seed themselves from one source of truth.
-fun preludeDeclList(): List {
-  val out = list()
+fun preludeDeclList(): IntBuf {
+  val out = intBuf()
   val paths = preludeConfPaths()
   var pi = 0
   while (pi < paths.len()) {
     val src = readFile(paths.get(pi))
     if (src.len() > 0) {
-      val plines = list()
+      val plines = intBuf()
       val decls = parseProgramLn(lex(src), plines)
       var di = 0
       while (di < decls.len()) { out.push(decls.get(di)); di = di + 1 }
@@ -358,20 +359,20 @@ fun preludeDeclList(): List {
   return out
 }
 
-fun preludeSigs(): List {
-  val out = list()
+fun preludeSigs(): IntBuf {
+  val out = intBuf()
   collectDeclNames(preludeDeclList(), out)
   return out
 }
 
-fun resolveCheck(decls: List, lines: List, skipDup: Int): List {
-  val diags = list()
-  val globals = list()
+fun resolveCheck(decls: IntBuf, lines: IntBuf, skipDup: Int): IntBuf {
+  val diags = intBuf()
+  val globals = intBuf()
   val pre = preludeSigs()
   var pj = 0
   while (pj < pre.len()) { globals.push(pre.get(pj)); pj = pj + 1 }
   collectGlobals(decls, lines, globals, diags, skipDup)
-  val scopes = list()
+  val scopes = intBuf()
   val ctx = RCtx(globals, scopes, diags, 0)
   var i = 0
   while (i < decls.len()) { val d: Decl = decls.get(i); ctx.curLine = lines.get(i); rDecl(ctx, d); i = i + 1 }
@@ -379,7 +380,7 @@ fun resolveCheck(decls: List, lines: List, skipDup: Int): List {
 }
 
 // ================= TYPE CHECK PASS =================
-enum Ty { TPrim(String); TNamed(String, List); TNull(Ty); TFun(List, Ty); TUnknown }
+enum Ty { TPrim(String); TNamed(String, IntBuf); TNull(Ty); TFun(IntBuf, Ty); TUnknown }
 
 // ===== primitive-type REGISTRY (STDLIB-REDESIGN §2a numeric tower + scalars) =====
 // The checker consults this instead of ad-hoc strEq chains. Kind codes:
@@ -475,20 +476,20 @@ fun adoptNegLit(env: TEnv, x: FExpr, dt: Ty): Bool {
   }
 }
 
-fun cons1(t: Ty): List { val l = list(); l.push(t); return l }
+fun cons1(t: Ty): IntBuf { val l = intBuf(); l.push(t); return l }
 
 // --- type-string parser (reuses kfront's lexer + P) ---
 fun tyBase(p: P): Ty {
   if (pk(p) == 20) {
     eat(p)
-    val args = list()
+    val args = intBuf()
     if (pk(p) != 21) { args.push(parseTyC(p)); while (pk(p) == 24) { eat(p); args.push(parseTyC(p)) } }
     eat(p); eat(p) // ')' '->'
     return TFun(args, parseTyC(p))
   }
   var name = ptext(p); eat(p)
   while (pk(p) == 26) { eat(p); name = ptext(p); eat(p) }
-  val args = list()
+  val args = intBuf()
   if (pk(p) == 37) { eat(p); args.push(parseTyC(p)); while (pk(p) == 24) { eat(p); args.push(parseTyC(p)) }; eat(p) }
   if (isPrimitive(name) && args.len() == 0) { return TPrim(name) }
   return TNamed(name, args)
@@ -539,7 +540,7 @@ fun isNumOk(t: Ty): Bool {
 
 fun tyEqPrim(t: Ty, name: String): Bool { return when (t) { TPrim(x) -> x == name; else -> false } }
 
-fun compatList(a: List, b: List): Bool {
+fun compatList(a: IntBuf, b: IntBuf): Bool {
   if (a.len() != b.len()) { return false }
   var i = 0
   while (i < a.len()) { val x: Ty = a.get(i); val y: Ty = b.get(i); if (compat(x, y) == false) { return false }; i = i + 1 }
@@ -599,13 +600,13 @@ fun isTypeParam(n: String): Bool {
   return true
 }
 
-fun compatNamedR(n1: String, a1: List, b: Ty): Bool {
+fun compatNamedR(n1: String, a1: IntBuf, b: Ty): Bool {
   if (isTypeParam(n1)) { return true }
   return when (b) {
     TNamed(n2, a2) -> {
       if (isTypeParam(n2)) { true }
       else { if (n1 != n2) { false }
-        // same base type: with type erasure, `List<Int>` and `List` are compatible — only compare type
+        // same base type: with type erasure, `IntBuf<Int>` and `IntBuf` are compatible — only compare type
         // args when BOTH sides carry them.
         else { if (a1.len() == 0) { true } else { if (a2.len() == 0) { true } else { compatList(a1, a2) } } } }
     }
@@ -614,13 +615,13 @@ fun compatNamedR(n1: String, a1: List, b: Ty): Bool {
   }
 }
 
-fun compatFunR(p1: List, r1: Ty, b: Ty): Bool {
+fun compatFunR(p1: IntBuf, r1: Ty, b: Ty): Bool {
   return when (b) { TFun(p2, r2) -> compatList(p1, p2) && compat(r1, r2); TNull(y) -> compat(TFun(p1, r1), y); else -> false }
 }
 
 fun joinTy(a: Ty, b: Ty): Ty { if (compat(a, b)) { return b } if (compat(b, a)) { return a } return TUnknown }
 
-fun showTyList(l: List): String {
+fun showTyList(l: IntBuf): String {
   var s = ""
   var i = 0
   while (i < l.len()) { val t: Ty = l.get(i); if (i == 0) { s = showTy(t) } else { s = s + (", " + showTy(t)) }; i = i + 1 }
@@ -645,7 +646,7 @@ struct Look(val found: Int, val ty: Ty)
 
 struct LP(val name: String, val ty: String)
 
-struct TEnv(val funN: List, val funP: List, val funR: List, val funG: List, val structN: List, val structFN: List, val structFT: List, val enumN: List, var locals: List, var curRet: Ty, var hasRet: Int, val implN: List, val implT: List, val diags: List, var curLine: Int)
+struct TEnv(val funN: IntBuf, val funP: IntBuf, val funR: IntBuf, val funG: IntBuf, val structN: IntBuf, val structFN: IntBuf, val structFT: IntBuf, val enumN: IntBuf, var locals: IntBuf, var curRet: Ty, var hasRet: Int, val implN: IntBuf, val implT: IntBuf, val diags: IntBuf, var curLine: Int)
 
 // trait subtyping: a concrete type is assignable to a trait it impls. implN/implT are parallel
 // (type name -> trait name), collected from `impl Trait for Type`. subtypeOk is checked ALONGSIDE
@@ -677,20 +678,20 @@ fun reservedTyErr(env: TEnv, t: Ty): Int {
   }
 }
 
-fun tPush(env: TEnv): List {
+fun tPush(env: TEnv): IntBuf {
   val saved = env.locals
-  val ns = list()
+  val ns = intBuf()
   var i = 0
   while (i < saved.len()) { ns.push(saved.get(i)); i = i + 1 }
-  ns.push(list())
+  ns.push(intBuf())
   env.locals = ns
   return saved
 }
 
-fun tPop(env: TEnv, saved: List): Int { env.locals = saved; return 0 }
+fun tPop(env: TEnv, saved: IntBuf): Int { env.locals = saved; return 0 }
 
 fun tBind(env: TEnv, name: String, ty: Ty): Int {
-  val top: List = env.locals.get(env.locals.len() - 1)
+  val top: IntBuf = env.locals.get(env.locals.len() - 1)
   top.push(Binding(name, ty))
   return 0
 }
@@ -698,7 +699,7 @@ fun tBind(env: TEnv, name: String, ty: Ty): Int {
 fun tLocal(env: TEnv, name: String): Look {
   var i = env.locals.len() - 1
   while (i >= 0) {
-    val sc: List = env.locals.get(i)
+    val sc: IntBuf = env.locals.get(i)
     var j = sc.len() - 1
     while (j >= 0) { val b: Binding = sc.get(j); if (b.name == name) { return Look(1, b.ty) }; j = j - 1 }
     i = i - 1
@@ -706,8 +707,8 @@ fun tLocal(env: TEnv, name: String): Look {
   return Look(0, TUnknown)
 }
 
-fun splitLamPairs(s: String): List {
-  val out = list()
+fun splitLamPairs(s: String): IntBuf {
+  val out = intBuf()
   if (s == "") { return out }
   val n = s.len()
   var i = 0
@@ -747,7 +748,7 @@ fun inferIdent(env: TEnv, s: String): Ty {
   var i = 0
   while (i < env.funN.len()) { if (env.funN.get(i) == s) { return TFun(env.funP.get(i), env.funR.get(i)) }; i = i + 1 }
   var j = 0
-  while (j < env.structN.len()) { if (env.structN.get(j) == s) { return TFun(env.structFT.get(j), TNamed(s, list())) }; j = j + 1 }
+  while (j < env.structN.len()) { if (env.structN.get(j) == s) { return TFun(env.structFT.get(j), TNamed(s, intBuf())) }; j = j + 1 }
   return TUnknown
 }
 
@@ -854,8 +855,8 @@ fun inferFieldNamed(env: TEnv, n: String, f: String, isSafe: Int): Ty {
   var i = 0
   while (i < env.structN.len()) {
     if (env.structN.get(i) == n) {
-      val fns: List = env.structFN.get(i)
-      val fts: List = env.structFT.get(i)
+      val fns: IntBuf = env.structFN.get(i)
+      val fts: IntBuf = env.structFT.get(i)
       var j = 0
       while (j < fns.len()) {
         if (fns.get(j) == f) { val ft: Ty = fts.get(j); if (isSafe == 1) { return TNull(ft) } return ft }
@@ -877,7 +878,7 @@ fun inferField(env: TEnv, a: FExpr, f: String, isSafe: Int): Ty {
 
 fun inferStatic(env: TEnv, a: FExpr): Ty {
   val base = when (a) { FEIdent(b) -> b; else -> "" }
-  if (base != "" && memList(env.enumN, base)) { return TNamed(base, list()) }
+  if (base != "" && memList(env.enumN, base)) { return TNamed(base, intBuf()) }
   infer(env, a)
   return TUnknown
 }
@@ -895,10 +896,10 @@ fun isConcreteTy(t: Ty): Bool {
   }
 }
 
-// the head name of a type (Int, List, T, ...), "" for function/unknown types.
+// the head name of a type (Int, IntBuf, T, ...), "" for function/unknown types.
 fun headNameOf(t: Ty): String { return when (t) { TPrim(x) -> x; TNamed(n, args) -> n; TNull(x) -> headNameOf(x); else -> "" } }
 
-fun subFind(subN: List, n: String): Int {
+fun subFind(subN: IntBuf, n: String): Int {
   var i = 0
   while (i < subN.len()) { val x: String = subN.get(i); if (x == n) { return i }; i = i + 1 }
   return 0 - 1
@@ -910,7 +911,7 @@ fun subFind(subN: List, n: String): Int {
 // definite type error under any instantiation (e.g. `fun f<T>(a: T, b: T)` called `f(1, "x")`). Any
 // opaque binding (Unknown / another type-parameter) is permissive and upgrades toward the concrete one,
 // so the checker never false-positives on genuinely-polymorphic code.
-fun bindTypeVar(env: TEnv, subN: List, subT: List, n: String, at: Ty): Int {
+fun bindTypeVar(env: TEnv, subN: IntBuf, subT: IntBuf, n: String, at: Ty): Int {
   val j = subFind(subN, n)
   if (j < 0) { subN.push(n); subT.push(at); return 0 }
   val prev: Ty = subT.get(j)
@@ -924,8 +925,8 @@ fun bindTypeVar(env: TEnv, subN: List, subT: List, n: String, at: Ty): Int {
   return 0
 }
 
-fun instTyList(l: List, subN: List, subT: List): List {
-  val out = list()
+fun instTyList(l: IntBuf, subN: IntBuf, subT: IntBuf): IntBuf {
+  val out = intBuf()
   var i = 0
   while (i < l.len()) { out.push(instTy(l.get(i), subN, subT)); i = i + 1 }
   return out
@@ -933,7 +934,7 @@ fun instTyList(l: List, subN: List, subT: List): List {
 
 // Substitute bound type parameters into a type (used to instantiate a generic return type: `f(1)` where
 // `fun f<T>(x: T): T` yields Int instead of the opaque T).
-fun instTy(t: Ty, subN: List, subT: List): Ty {
+fun instTy(t: Ty, subN: IntBuf, subT: IntBuf): Ty {
   return when (t) {
     TNamed(n, args) -> {
       if (isTypeParam(n) && args.len() == 0) { val j = subFind(subN, n); if (j >= 0) { subT.get(j) } else { t } }
@@ -948,7 +949,7 @@ fun instTy(t: Ty, subN: List, subT: List): Ty {
 // ---- trait-bounds enforcement (Target 2) ----
 // GBounds is a callee's generic-parameter -> trait-bounds table (parallel lists), parsed from a FFunc's
 // `gen` clause string (e.g. "<T: Show + Eq, U = Int>" -> names=[T,U], traits=[[Show,Eq],[]]).
-struct GBounds(val names: List, val traits: List)
+struct GBounds(val names: IntBuf, val traits: IntBuf)
 
 fun trimStr(s: String): String {
   val n = s.len()
@@ -959,10 +960,10 @@ fun trimStr(s: String): String {
   return s.substr(a, b - a)
 }
 
-// split `s` on separator char `sep`, but only at angle-bracket depth 0 (so `Map<K, V>` stays whole);
+// split `s` on separator char `sep`, but only at angle-bracket depth 0 (so `RawMap<K, V>` stays whole);
 // each piece is trimmed.
-fun topSplit(s: String, sep: Int): List {
-  val out = list()
+fun topSplit(s: String, sep: Int): IntBuf {
+  val out = intBuf()
   val n = s.len()
   var depth = 0
   var start = 0
@@ -989,8 +990,8 @@ fun headIdent(s: String): String {
 }
 
 fun parseGenBounds(gen: String): GBounds {
-  val names = list()
-  val traits = list()
+  val names = intBuf()
+  val traits = intBuf()
   if (gen == "") { return GBounds(names, traits) }
   val n = gen.len()
   var body = gen
@@ -1015,7 +1016,7 @@ fun parseGenBounds(gen: String): GBounds {
     var nameEnd = sl
     if (colon >= 0) { nameEnd = colon } else { if (eq >= 0) { nameEnd = eq } }
     val nm = trimStr(seg.substr(0, nameEnd))
-    val trs = list()
+    val trs = intBuf()
     if (colon >= 0) {
       var bEnd = sl
       if (eq >= 0 && eq > colon) { bEnd = eq }
@@ -1031,10 +1032,10 @@ fun parseGenBounds(gen: String): GBounds {
   return GBounds(names, traits)
 }
 
-fun boundsOf(gb: GBounds, n: String): List {
+fun boundsOf(gb: GBounds, n: String): IntBuf {
   var i = 0
   while (i < gb.names.len()) { if (gb.names.get(i) == n) { return gb.traits.get(i) }; i = i + 1 }
-  return list()
+  return intBuf()
 }
 
 // When a type parameter `n: SomeTrait` is instantiated with a CONCRETE type `at`, require that type to
@@ -1059,19 +1060,19 @@ fun checkBound(env: TEnv, gb: GBounds, n: String, at: Ty): Int {
 // other callee (struct constructor, local, method) has no bounds.
 fun calleeBounds(env: TEnv, f: FExpr): GBounds {
   val nm = when (f) { FEIdent(s) -> s; else -> "" }
-  if (nm == "") { return GBounds(list(), list()) }
+  if (nm == "") { return GBounds(intBuf(), intBuf()) }
   var i = 0
   while (i < env.funN.len()) { if (env.funN.get(i) == nm) { return parseGenBounds(env.funG.get(i)) }; i = i + 1 }
-  return GBounds(list(), list())
+  return GBounds(intBuf(), intBuf())
 }
 
-fun checkCallArgs(env: TEnv, params: List, args: List, ret: Ty, gb: GBounds): Ty {
+fun checkCallArgs(env: TEnv, params: IntBuf, args: IntBuf, ret: Ty, gb: GBounds): Ty {
   if (params.len() != args.len()) {
     tErr(env, "wrong number of arguments: expected " + (params.len().toStr() + (", got " + args.len().toStr())))
     return ret
   }
-  val subN = list()
-  val subT = list()
+  val subN = intBuf()
+  val subT = intBuf()
   var i = 0
   while (i < params.len()) {
     val pt: Ty = params.get(i)
@@ -1088,7 +1089,7 @@ fun checkCallArgs(env: TEnv, params: List, args: List, ret: Ty, gb: GBounds): Ty
   return instTy(ret, subN, subT)
 }
 
-fun inferArgList(env: TEnv, args: List): Int {
+fun inferArgList(env: TEnv, args: IntBuf): Int {
   var i = 0
   while (i < args.len()) { val ar: FArg = args.get(i); infer(env, ar.expr); i = i + 1 }
   return 0
@@ -1097,7 +1098,7 @@ fun inferArgList(env: TEnv, args: List): Int {
 // A call whose callee is a field-expr is a METHOD CALL (`recv.m(args)`), not a field access. Check the
 // receiver and args, but do NOT run field-access checking on the callee (which would falsely report
 // "type X has no field m"). Method dispatch/return types aren't modeled → TUnknown.
-fun inferCall(env: TEnv, f: FExpr, args: List): Ty {
+fun inferCall(env: TEnv, f: FExpr, args: IntBuf): Ty {
   return when (f) {
     FEField(recv, m) -> { infer(env, recv); inferArgList(env, args); TUnknown }
     FESafeField(recv, m) -> { infer(env, recv); inferArgList(env, args); TUnknown }
@@ -1109,23 +1110,23 @@ fun inferCall(env: TEnv, f: FExpr, args: List): Ty {
   }
 }
 
-fun inferList(env: TEnv, es: List): Ty {
+fun inferList(env: TEnv, es: IntBuf): Ty {
   var acc = TUnknown
   var i = 0
   while (i < es.len()) { val x: FExpr = es.get(i); acc = joinTy(acc, infer(env, x)); i = i + 1 }
-  return TNamed("List", cons1(acc))
+  return TNamed("IntBuf", cons1(acc))
 }
 
-fun inferMap(env: TEnv, ents: List): Ty {
+fun inferMap(env: TEnv, ents: IntBuf): Ty {
   var i = 0
   while (i < ents.len()) { val en: FMapEnt = ents.get(i); infer(env, en.k); infer(env, en.v); i = i + 1 }
-  val l = list(); l.push(TUnknown); l.push(TUnknown)
-  return TNamed("Map", l)
+  val l = intBuf(); l.push(TUnknown); l.push(TUnknown)
+  return TNamed("RawMap", l)
 }
 
 fun inferLambda(env: TEnv, params: String, body: FExpr): Ty {
   val saved = tPush(env)
-  val ptys = list()
+  val ptys = intBuf()
   val pairs = splitLamPairs(params)
   var i = 0
   while (i < pairs.len()) {
@@ -1145,7 +1146,7 @@ fun inferIf(env: TEnv, c: FExpr, t: FExpr, el: FExpr): Ty {
   return joinTy(tt, infer(env, el))
 }
 
-fun inferInterp(env: TEnv, parts: List): Int {
+fun inferInterp(env: TEnv, parts: IntBuf): Int {
   var i = 0
   while (i < parts.len()) { val pt: FIPart = parts.get(i); when (pt) { FIExpr(e) -> infer(env, e); else -> TUnknown }; i = i + 1 }
   return 0
@@ -1161,13 +1162,13 @@ fun bindPattern(env: TEnv, pat: FPat): Int {
   }
 }
 
-fun bindRecordPat(env: TEnv, flds: List): Int {
+fun bindRecordPat(env: TEnv, flds: IntBuf): Int {
   var i = 0
   while (i < flds.len()) { val f: FRFld = flds.get(i); if (f.hasPat == 1) { bindPattern(env, f.pat) } else { tBind(env, f.name, TUnknown) }; i = i + 1 }
   return 0
 }
 
-fun inferWhen(env: TEnv, hasSubj: Int, bind: String, subj: FExpr, arms: List): Ty {
+fun inferWhen(env: TEnv, hasSubj: Int, bind: String, subj: FExpr, arms: IntBuf): Ty {
   if (hasSubj == 1) { infer(env, subj) }
   val bn = whenBindName(bind)
   var acc = TUnknown
@@ -1186,7 +1187,7 @@ fun inferWhen(env: TEnv, hasSubj: Int, bind: String, subj: FExpr, arms: List): T
   return acc
 }
 
-fun inferBlock(env: TEnv, stmts: List, res: FExpr): Ty {
+fun inferBlock(env: TEnv, stmts: IntBuf, res: FExpr): Ty {
   val saved = tPush(env)
   var i = 0
   while (i < stmts.len()) { checkStmt(env, stmts.get(i)); i = i + 1 }
@@ -1219,6 +1220,7 @@ fun infer(env: TEnv, e: FExpr): Ty {
     FEStatic(a, f) -> inferStatic(env, a)
     FETypeApp(a, t) -> infer(env, a)
     FECast(a, ty) -> inferCast(env, a, ty)
+    FEQuestion(a) -> { infer(env, a); TUnknown }
     FECall(f, args) -> inferCall(env, f, args)
     FEIndex(a, ix) -> { infer(env, a); infer(env, ix); TUnknown }
     FEList(es) -> inferList(env, es)
@@ -1301,7 +1303,7 @@ fun checkFun(env: TEnv, fd: FFunc): Int {
   return 0
 }
 
-fun checkMethods(env: TEnv, methods: List): Int {
+fun checkMethods(env: TEnv, methods: IntBuf): Int {
   var i = 0
   while (i < methods.len()) { checkFun(env, methods.get(i)); i = i + 1 }
   return 0
@@ -1318,7 +1320,7 @@ fun checkDecl(env: TEnv, d: Decl): Int {
 }
 
 fun addFunSig(env: TEnv, fd: FFunc): Int {
-  val ptys = list()
+  val ptys = intBuf()
   var i = 0
   while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); ptys.push(parseTyStr(pp.ty)); i = i + 1 }
   env.funN.push(fd.name); env.funP.push(ptys); env.funR.push(retTy(fd.ret)); env.funG.push(fd.gen)
@@ -1326,7 +1328,7 @@ fun addFunSig(env: TEnv, fd: FFunc): Int {
 }
 
 fun addStructSig(env: TEnv, td: FTDecl): Int {
-  val fns = list(); val fts = list()
+  val fns = intBuf(); val fts = intBuf()
   var i = 0
   while (i < td.fields.len()) { val f: FFld = td.fields.get(i); fns.push(f.name); fts.push(parseTyStr(f.ty)); i = i + 1 }
   env.structN.push(td.name); env.structFN.push(fns); env.structFT.push(fts)
@@ -1335,7 +1337,7 @@ fun addStructSig(env: TEnv, td: FTDecl): Int {
 
 // Seed ONLY function signatures from a decl list (used for the prelude): structs/enums/impls are
 // deliberately skipped so prelude nominal types stay opaque to field-access checking.
-fun collectFunSigsOnly(env: TEnv, decls: List): Int {
+fun collectFunSigsOnly(env: TEnv, decls: IntBuf): Int {
   var i = 0
   while (i < decls.len()) {
     val d: Decl = decls.get(i)
@@ -1345,7 +1347,7 @@ fun collectFunSigsOnly(env: TEnv, decls: List): Int {
   return 0
 }
 
-fun collectSigs(env: TEnv, decls: List): Int {
+fun collectSigs(env: TEnv, decls: IntBuf): Int {
   var i = 0
   while (i < decls.len()) {
     val d: Decl = decls.get(i)
@@ -1361,14 +1363,14 @@ fun collectSigs(env: TEnv, decls: List): Int {
   return 0
 }
 
-fun typecheckCheck(decls: List, lines: List): List {
-  val diags = list()
-  val env = TEnv(list(), list(), list(), list(), list(), list(), list(), list(), list(), TUnknown, 0, list(), list(), diags, 0)
+fun typecheckCheck(decls: IntBuf, lines: IntBuf): IntBuf {
+  val diags = intBuf()
+  val env = TEnv(intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), TUnknown, 0, intBuf(), intBuf(), diags, 0)
   collectSigs(env, decls)
   // Seed prelude/lib FUNCTION signatures so their calls are arg-type-checked exactly like user calls (an
   // unsound gap otherwise: a wrong-typed argument to a stdlib function slipped through). Only functions
   // are seeded — NOT prelude structs/enums — so field-access checking is unaffected (prelude nominal
-  // types like List keep their erased/opaque treatment, and property-getter accessors on them are not
+  // types like IntBuf keep their erased/opaque treatment, and property-getter accessors on them are not
   // mis-flagged as missing fields). User decls are collected FIRST, so on a name collision inferIdent's
   // first-match keeps the user's definition.
   collectFunSigsOnly(env, preludeDeclList())
@@ -1381,8 +1383,8 @@ fun typecheckCheck(decls: List, lines: List): List {
 // combined diagnostics list (empty = clean). No `main` here — kcheck is a LIBRARY now, so it can be
 // quoted-included into kitec.kite alongside klower (which owns `main`). The standalone `kitec check`
 // tool lives in kcheck_main.kite.
-fun checkDiags(toks: List, skipDup: Int): List {
-  val lines = list()
+fun checkDiags(toks: IntBuf, skipDup: Int): IntBuf {
+  val lines = intBuf()
   val decls = parseProgramLn(toks, lines)
   val diags = resolveCheck(decls, lines, skipDup)
   val td = typecheckCheck(decls, lines)

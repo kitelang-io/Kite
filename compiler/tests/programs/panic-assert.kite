@@ -1,0 +1,14 @@
+// Phase 8: panic/assert/todo/unreachable are language built-ins that desugar (at parse time, with the
+// call-site line injected) into the floor abort funnel `{ eprintln("panic at line N: " + msg); __abort() }`.
+// This fixture exercises the PASS-THROUGH: a satisfied `assert` is a no-op and control continues, so the
+// program returns 42. (The failing/abort path exits 134 with a located message on stderr — covered by the
+// standalone panic tests, not runnable as a fixed exit-code fixture here.)
+fun checked(n: Int): Int {
+  assert(n > 0, "n must be positive")
+  assert(n < 1000)
+  return n * 2
+}
+
+fun main(): Int {
+  return checked(21)
+}

@@ -4,7 +4,7 @@ import kite::collections
   ident Eq
   ident Ord
 class Registry<K: Hash + Eq, V> where V: Clone
-  pub val store : Map<K, V>
+  pub val store : RawMap<K, V>
   var count : Int
   deinit
     block
@@ -40,16 +40,16 @@ class Registry<K: Hash + Eq, V> where V: Clone
 
 trait Codec<T> : Show where T: Clone
   type Wire
-  fun encode(self, x: T) : List<Int>
+  fun encode(self, x: T) : IntBuf<Int>
     (signature)
-  fun decode(self, bytes: List<Int>) : T
+  fun decode(self, bytes: IntBuf<Int>) : T
     call
       field .zero
         this
 
 impl<T> Codec<T> for Json<T> where T: Serialize
   type Wire = String
-  fun encode(self, x: T) : List<Int>
+  fun encode(self, x: T) : IntBuf<Int>
     list
       call
         field .hash

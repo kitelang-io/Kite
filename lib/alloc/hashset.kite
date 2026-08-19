@@ -1,0 +1,91 @@
+// lib/alloc/hashset.kite — the monomorphized, insertion-ordered HashSet<T> (kite::alloc::hashset). The set
+// analogue of HashMap<K,V>: an insertion-ordered element vector + an open-addressing bucket array, element
+// hash/eq specialized per instantiation (String -> content, Int -> machine). A STANDALONE template rather
+// than a HashMap<T,Unit> wrapper, because a monomorphized template cannot nest another (the instantiation
+// collector sees the inner turbofish with the OUTER param still unbound).
+//
+// add -> Bool (true when newly inserted), contains, remove -> Bool, insertion-ordered `elemAt(i)` over
+// `0..size`. Consumed via QUOTED includes. Construct empty: `HashSet::<Int>(0, 0, 0, 0, 0)`.
+import "lib/core/panic.kite"
+import "lib/core/hashable.kite"
+
+@mono
+@arc(manual)
+class HashSet<T>(var n: Int, var ecap: Int, var bcap: Int, var elems: Int, var buckets: Int) {
+  fun rehashAll(self): Int {
+    var b = 0
+    while (b < self.bcap) { __rawStore(self.buckets, b * 8, 0) b = b + 1 }
+    var e = 0
+    while (e < self.n) {
+      val x: T = __packedGet::<T>(self.elems, e)
+      var idx = x.hash() & (self.bcap - 1)
+      var go = 1
+      while (go == 1) {
+        if (__rawLoad(self.buckets, idx * 8) == 0) { __rawStore(self.buckets, idx * 8, e + 1) go = 0 }
+        else { idx = (idx + 1) & (self.bcap - 1) }
+      }
+      e = e + 1
+    }
+    return 0
+  }
+  fun findIdx(self, x: T): Int {
+    if (self.bcap == 0) { return 0 - 1 }
+    var idx = x.hash() & (self.bcap - 1)
+    var go = 1
+    while (go == 1) {
+      val slot = __rawLoad(self.buckets, idx * 8)
+      if (slot == 0) { go = 0 }
+      else {
+        val e = slot - 1
+        if (__packedGet::<T>(self.elems, e) == x) { return e }
+        idx = (idx + 1) & (self.bcap - 1)
+      }
+    }
+    return 0 - 1
+  }
+  fun add(self, x: consuming T): Bool {
+    if (self.bcap == 0) { self.bcap = 8 self.buckets = __rawAlloc(self.bcap * 8) self.rehashAll() }
+    if (self.findIdx(x) >= 0) { return false }
+    if ((self.n + 1) * 4 >= self.bcap * 3) {
+      self.bcap = self.bcap * 2
+      self.buckets = __rawRealloc(self.buckets, self.bcap * 8)
+      self.rehashAll()
+    }
+    if (self.n == self.ecap) {
+      if (self.ecap == 0) { self.ecap = 8 } else { self.ecap = self.ecap * 2 }
+      self.elems = __rawRealloc(self.elems, self.ecap * sizeOf::<T>())
+    }
+    val ni = self.n
+    __packedSet::<T>(self.elems, ni, x)
+    self.n = ni + 1
+    var idx = x.hash() & (self.bcap - 1)
+    var go = 1
+    while (go == 1) {
+      if (__rawLoad(self.buckets, idx * 8) == 0) { __rawStore(self.buckets, idx * 8, ni + 1) go = 0 }
+      else { idx = (idx + 1) & (self.bcap - 1) }
+    }
+    return true
+  }
+  fun contains(self, x: T): Bool { return self.findIdx(x) >= 0 }
+  fun remove(self, x: T): Bool {
+    val e = self.findIdx(x)
+    if (e < 0) { return false }
+    var i = e
+    while (i < self.n - 1) { __packedSet::<T>(self.elems, i, __packedGet::<T>(self.elems, i + 1)) i = i + 1 }
+    self.n = self.n - 1
+    self.rehashAll()
+    return true
+  }
+  fun size(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
+  fun clear(self): Int {
+    self.n = 0
+    var b = 0
+    while (b < self.bcap) { __rawStore(self.buckets, b * 8, 0) b = b + 1 }
+    return 0
+  }
+  fun elemAt(self, i: Int): T {
+    if (i < 0 || i >= self.n) { panicOOB("HashSet.elemAt", i, self.n) }
+    return __packedGet::<T>(self.elems, i)
+  }
+}

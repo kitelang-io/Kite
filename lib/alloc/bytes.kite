@@ -1,11 +1,11 @@
 // lib/alloc/bytes.kite — concrete, non-generic packed arrays over the Phase-2 sized-memory intrinsics
 // (kite::alloc::bytes). These are the interim before the monomorphization keystone (Phase 6): fixed-width
 // element arrays whose storage is PACKED by the element's byte stride — U8Array strides 1, U16Array 2,
-// U32Array 4 — instead of List's one-word-per-element. Six concrete types: unsigned (U8/U16/U32) zero-extend
+// U32Array 4 — instead of IntBuf's one-word-per-element. Six concrete types: unsigned (U8/U16/U32) zero-extend
 // on load, signed (I8/I16/I32) sign-extend on load; a width store truncates to the element width.
 //
 // Each array is a class {n: element count, cap: capacity in elements, data: heap byte-buffer}. Like the
-// language-primitive List, these OWN a heap allocation and are @arc(manual) (leak-managed): the element
+// language-primitive IntBuf, these OWN a heap allocation and are @arc(manual) (leak-managed): the element
 // type is a plain fixed-width scalar with no ARC, and real value-semantics/CoW arrives with the target
 // collections tier (Phase 7). NOT auto-injected — opt in with `import kite::alloc::bytes`.
 //

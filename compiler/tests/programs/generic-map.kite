@@ -1,5 +1,5 @@
-fun map1<A, B>(xs: List, f: (A) -> B): List {
-  val out = list()
+fun map1<A, B>(xs: IntBuf, f: (A) -> B): IntBuf {
+  val out = intBuf()
   for (x in xs) { out.push(f(x)) }
   return out
 }

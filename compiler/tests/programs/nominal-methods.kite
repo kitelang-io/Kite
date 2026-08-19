@@ -1,8 +1,8 @@
-// S2 nominal-types: List/String/Map as nominal types with methods (type-scoped wrappers over builtins).
-// Exercises list() constructor sugar, xs.push/xs.len/xs.get/xs.set, xs[i] indexing,
+// S2 nominal-types: IntBuf/String/RawMap as nominal types with methods (type-scoped wrappers over builtins).
+// Exercises intBuf() constructor sugar, xs.push/xs.len/xs.get/xs.set, xs[i] indexing,
 // s.charAt/s.len/s.substr on String, {..} map literal + m[k] indexing + m.size().
 fun main(): Int {
-  val xs = list()
+  val xs = intBuf()
   xs.push(3)
   xs.push(5)
   var acc = xs.len() // 2

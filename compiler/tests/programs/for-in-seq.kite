@@ -1,0 +1,17 @@
+// Phase 8: `for x in xs` binds to the seq.len/seq.get roles by convention (§3c), so iteration extends past
+// the bootstrap IntBuf. A String iterates its bytes (String_charAt/String_len); a target-tier Vec iterates
+// its elements (Vec$Int_get/_len); an IntBuf keeps the default roles. Exit code = 233 = (65+66+67) over the
+// string "ABC" + (10+20+5) over the Vec.
+import "lib/alloc/vec.kite"
+
+fun main(): Int {
+  var sum = 0
+  val s = "ABC"
+  for (c in s) { sum = sum + c }
+  var v = Vec::<Int>(0, 0, RawBuf(0))
+  v.push(10)
+  v.push(20)
+  v.push(5)
+  for (x in v) { sum = sum + x }
+  return sum
+}

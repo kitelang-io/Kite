@@ -1,9 +1,9 @@
-class Res(val id: Int, val log: List) {
+class Res(val id: Int, val log: IntBuf) {
   deinit { self.log.set(0, self.log.get(0) + 1) }
 }
 
 fun main(): Int {
-  val log = list()
+  val log = intBuf()
   log.push(0)
   var r = Res(1, log)
   r = Res(2, log)

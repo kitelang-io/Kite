@@ -1,0 +1,20 @@
+import "lib/alloc/treeset.kite"
+fun main(): Int {
+  var acc = 0
+  val s = TreeSet::<Int>(0 - 1, 0, 0, 0, 0, 0, 0)
+  s.add(50) s.add(20) s.add(80) s.add(20) s.add(10)
+  if (s.size() == 4) { acc = acc + 1 }         // dup ignored
+  if (s.contains(80)) { acc = acc + 1 }
+  when (s.min()) { Some(x) -> { if (x == 10) { acc = acc + 1 } }; None -> 0 }
+  when (s.max()) { Some(x) -> { if (x == 80) { acc = acc + 1 } }; None -> 0 }
+  when (s.ceil(25)) { Some(x) -> { if (x == 50) { acc = acc + 1 } }; None -> 0 }
+  when (s.floor(25)) { Some(x) -> { if (x == 20) { acc = acc + 1 } }; None -> 0 }
+  var sum = 0
+  var cur = s.min()
+  var go = 1
+  while (go == 1) { when (cur) { Some(x) -> { sum = sum + x cur = s.higher(x) }; None -> { go = 0 } } }
+  if (sum == 160) { acc = acc + 1 }            // 10+20+50+80
+  if (s.remove(20)) { acc = acc + 1 }
+  if (s.size() == 3) { acc = acc + 1 }
+  return acc
+}

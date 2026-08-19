@@ -1,17 +1,17 @@
-// kite::alloc::collections::map — the language-primitive Map: an insertion-ordered key->value map that
+// kite::alloc::collections::map — the language-primitive RawMap: an insertion-ordered key->value map that
 // backs the {..} literal and the m[k] / m[k]=v index sugar. Storage is two parallel word-lists
 // {keys@0, vals@8}: keys[i] pairs with vals[i]. String-keyed methods (get/set/has/size/keys) are the
 // m.get/set/... surface AND back m["k"]/m["k"]=v; an Int-keyed path (getI/setI) backs m[intKey].
 // Following Kotlin, a type's convention methods (the desugar landing points) live WITH the type; the
-// {..} constructor is the top-level map() factory (like List's list()). Auto-included via
+// {..} constructor is the top-level rawMap() factory (like IntBuf's intBuf()). Auto-included via
 // compiler/prelude.conf; names are global (unmangled).
 //
-// @arc(manual): Map, like List, is EXEMPT from automatic ARC — keys/vals are type-erased word Lists whose
+// @arc(manual): RawMap, like IntBuf, is EXEMPT from automatic ARC — keys/vals are type-erased word Lists whose
 // elements can't be retained, and the compiler nests containers, so a naive deep-release would double-free.
-// So Map stays leak-managed; the class only gives it a visible layout + methods. isRelField (codegen)
-// already excludes both Map and its List fields from deep-release.
+// So RawMap stays leak-managed; the class only gives it a visible layout + methods. isRelField (codegen)
+// already excludes both RawMap and its IntBuf fields from deep-release.
 @arc(manual)
-class Map(var keys: List, var vals: List) {
+class RawMap(var keys: IntBuf, var vals: IntBuf) {
   fun size(self): Int { return self.keys.len() }
 
   // @lang("map.getS"): m["k"] load (String key) resolves here (emitted Map_get); also the m.get("k") surface.
@@ -25,7 +25,7 @@ class Map(var keys: List, var vals: List) {
   fun set(self, k: String, v: Int): Int { var i = 0 while (i < self.keys.len()) { if (self.keys.get(i) == k) { self.vals.set(i, v) return 0 } i = i + 1 } self.keys.push(k) self.vals.push(v) return 0 }
 
   // the keys, in insertion order — for iteration (`for (k in m.keys())`).
-  fun keys(self): List { return self.keys }
+  fun keys(self): IntBuf { return self.keys }
 
   // Int-keyed path (m[intKey]): `==` compare instead of strEq.
   // @lang("map.getI"): m[intKey] load.
@@ -37,6 +37,6 @@ class Map(var keys: List, var vals: List) {
   fun setI(self, k: Int, v: Int): Int { var i = 0 while (i < self.keys.len()) { if (self.keys.get(i) == k) { self.vals.set(i, v) return 0 } i = i + 1 } self.keys.push(k) self.vals.push(v) return 0 }
 }
 
-// @lang("map.new"): the {..} literal constructor. A fresh empty Map over two empty word-lists.
+// @lang("map.new"): the {..} literal constructor. A fresh empty RawMap over two empty word-lists.
 @lang("map.new")
-fun map(): Map { return Map(list(), list()) }
+fun rawMap(): RawMap { return RawMap(intBuf(), intBuf()) }

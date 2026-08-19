@@ -14,7 +14,7 @@ fun Box_wide_set(bx: Box, v: Int): Int { bx.w = v return 0 } // setter target: b
 fun main(): Int {
   var acc = 0
   // --- list getter: xs.length (no parens) -> List_length(xs) ---
-  val xs = list()
+  val xs = intBuf()
   xs.push(10)
   xs.push(20)
   xs.push(30)

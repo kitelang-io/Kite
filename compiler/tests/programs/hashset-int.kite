@@ -1,0 +1,19 @@
+import "lib/alloc/hashset.kite"
+fun main(): Int {
+  var acc = 0
+  val s = HashSet::<Int>(0, 0, 0, 0, 0)
+  if (s.add(10)) { acc = acc + 1 }
+  if (s.add(20)) { acc = acc + 1 }
+  if (s.add(10) == false) { acc = acc + 1 }   // dup rejected
+  if (s.size() == 2) { acc = acc + 1 }
+  if (s.contains(20)) { acc = acc + 1 }
+  if (s.contains(99) == false) { acc = acc + 1 }
+  if (s.elemAt(0) == 10) { acc = acc + 1 }     // insertion order
+  if (s.remove(10)) { acc = acc + 1 }
+  if (s.size() == 1) { acc = acc + 1 }
+  if (s.contains(10) == false) { acc = acc + 1 }
+  var i = 0
+  while (i < 40) { s.add(100 + i) i = i + 1 }
+  if (s.contains(120)) { acc = acc + 1 }
+  return acc
+}

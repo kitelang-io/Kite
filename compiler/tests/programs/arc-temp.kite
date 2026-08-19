@@ -2,19 +2,19 @@
 // temp passed to a CONSUMING/storing function is transferred and must NOT be released (no double-free).
 // Res logs each deinit into log[0]. Two borrow temps => 2 deinits. The stored temp stays alive (log[0]
 // unchanged, no double-free). Returns afterBorrow*10 + afterStore = 2*10 + 2 = 22.
-class Res(val id: Int, val log: List) {
+class Res(val id: Int, val log: IntBuf) {
   deinit { self.log.set(0, self.log.get(0) + 1) }
 }
 
 fun useIt(r: Res): Int { return r.id }
 
 fun main(): Int {
-  val log = list()
+  val log = intBuf()
   log.push(0)
   useIt(Res(1, log))
   useIt(Res(2, log))
   val afterBorrow = log.get(0)
-  val keep = list()
+  val keep = intBuf()
   keep.push(Res(3, log))
   val afterStore = log.get(0)
   return afterBorrow * 10 + afterStore

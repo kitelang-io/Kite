@@ -19,12 +19,12 @@ fun d(f: (Int) -> Int?) : Int
     return
       int 0
 
-fun e(x: kite::collections::Map<K, V>?) : Int
+fun e(x: kite::collections::RawMap<K, V>?) : Int
   block
     return
       int 0
 
-fun g(x: List<Int?>) : Int
+fun g(x: IntBuf<Int?>) : Int
   block
     return
       int 0

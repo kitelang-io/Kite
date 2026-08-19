@@ -1,4 +1,4 @@
-fun demo(xs: List<Int>) : Int
+fun demo(xs: IntBuf<Int>) : Int
   block
     val evens
       call

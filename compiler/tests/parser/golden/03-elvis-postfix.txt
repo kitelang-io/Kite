@@ -28,7 +28,7 @@ fun m() : Int
           ident f
     val g
       call
-        type-app ::<List<Int>, String>
+        type-app ::<IntBuf<Int>, String>
           ident collect
         args
           ident xs

@@ -36,7 +36,7 @@ fun < T: Ord > maxOf(a: T, b: T): T {
   return if (a.cmp(b) == Ordering::Greater) a else b
 }
 
-fun < I > collectInts(it: inout I): List<Int>where I: Iterator {
+fun < I > collectInts(it: inout I): IntBuf<Int>where I: Iterator {
   var out = makeList()
   while (true) {
     val x = it.next() ?: break

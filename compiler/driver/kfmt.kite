@@ -10,7 +10,7 @@
 // Style applied (v1, NO line wrapping — existing line breaks are preserved):
 //   * indentation = 2 spaces per brace/paren/bracket nesting level (the repo's dominant indent);
 //   * one space around binary operators; a space after `,` `;` `:`; no padding just inside `(`/`[`;
-//   * field/path/range/attribute/generic tokens glued (a.b, a::b, 0..<n, @attr, List<Int>);
+//   * field/path/range/attribute/generic tokens glued (a.b, a::b, 0..<n, @attr, IntBuf<Int>);
 //   * a blank line between top-level declarations AND between members of a class/struct/enum body
 //     (never right after `{` or before `}`); a doc-comment/attribute run attaches to the decl below it
 //     (the blank goes above the run); consecutive blanks collapsed to one;
@@ -42,7 +42,7 @@ struct ZfScope(var typeBody: Int, var lines: Int)
 
 // push/overwrite the scope at `idx`; depth grows one at a time so idx is either == len (append) or < len
 // (reuse a popped slot). No real pop is needed — a closed level is just overwritten on the next open.
-fun zfScopeSet(scopes: List, idx: Int, sc: ZfScope): Int {
+fun zfScopeSet(scopes: IntBuf, idx: Int, sc: ZfScope): Int {
   if (idx < scopes.len()) { scopes.set(idx, sc) } else { scopes.push(sc) }
   return 0
 }
@@ -60,7 +60,7 @@ fun zfRstrip(s: String): String {
 
 // kind of the token kfront's lexer just pushed onto a throwaway list (99 = it pushed nothing, e.g. an
 // unrecognized single char that lexOp advanced over without emitting — emitted verbatim by the caller).
-fun zfLastKind(toks: List): Int {
+fun zfLastKind(toks: IntBuf): Int {
   if (toks.len() == 0) { return 99 }
   val t: Tok = toks.get(toks.len() - 1)
   return t.kind
@@ -68,7 +68,7 @@ fun zfLastKind(toks: List): Int {
 
 // one // line comment (from `//` to end of line, trailing whitespace stripped). Boundary decided by
 // kfront's shared scanLineComment — the SAME function the compiler's skipTrivia uses to discard it.
-fun zfLexLine(l: Lx, pieces: List, nl: Int): Int {
+fun zfLexLine(l: Lx, pieces: IntBuf, nl: Int): Int {
   val s = l.pos
   scanLineComment(l)
   pieces.push(ZfPiece(200, zfRstrip(l.src.substr(s, l.pos - s)), nl))
@@ -77,7 +77,7 @@ fun zfLexLine(l: Lx, pieces: List, nl: Int): Int {
 
 // one /* nested block comment */, preserved verbatim (internal newlines and all). Boundary decided by
 // kfront's shared scanBlockComment.
-fun zfLexBlock(l: Lx, pieces: List, nl: Int): Int {
+fun zfLexBlock(l: Lx, pieces: IntBuf, nl: Int): Int {
   val s = l.pos
   scanBlockComment(l)
   pieces.push(ZfPiece(201, l.src.substr(s, l.pos - s), nl))
@@ -89,19 +89,19 @@ fun zfLexBlock(l: Lx, pieces: List, nl: Int): Int {
 // compiler would (into a throwaway list we read the kind from), and kw() classifies an identifier run;
 // the formatter then slices the verbatim source span [s, l.pos). `;` is trivia to the compiler, so the
 // formatter recognizes it directly as its own piece (kind 90).
-fun zfLexToken(l: Lx, pieces: List, nl: Int): Int {
+fun zfLexToken(l: Lx, pieces: IntBuf, nl: Int): Int {
   val s = l.pos
   val c = cur(l)
   var kind = 0
-  if (isDigit(c)) { val sc = list(); readNum(l, sc); kind = zfLastKind(sc) }
+  if (isDigit(c)) { val sc = intBuf(); readNum(l, sc); kind = zfLastKind(sc) }
   else { if (isAlpha(c)) {
       while (isAlnum(cur(l))) { adv(l) }
       kind = kw(l.src.substr(s, l.pos - s))
     }
-    else { if (c == 34) { val sc = list(); lexStr(l, sc); kind = zfLastKind(sc) }
-      else { if (c == 39) { val sc = list(); lexChar(l, sc); kind = 9 }
+    else { if (c == 34) { val sc = intBuf(); lexStr(l, sc); kind = zfLastKind(sc) }
+      else { if (c == 39) { val sc = intBuf(); lexChar(l, sc); kind = 9 }
         else { if (c == 59) { adv(l); kind = 90 } // ; -> a real token to the formatter
-          else { val sc = list(); lexOp(l, sc); kind = zfLastKind(sc) } } } } }
+          else { val sc = intBuf(); lexOp(l, sc); kind = zfLastKind(sc) } } } } }
   pieces.push(ZfPiece(kind, l.src.substr(s, l.pos - s), nl))
   return 0
 }
@@ -109,8 +109,8 @@ fun zfLexToken(l: Lx, pieces: List, nl: Int): Int {
 // lex the whole source into pieces, tracking newline counts (comments included). Uses kfront's Lx
 // cursor; whitespace / newlines / `;` and comment openers are handled here (the formatter keeps the
 // trivia the compiler throws away), and every real token is delegated to kfront's lexer via zfLexToken.
-fun zfLex(src: String): List {
-  val pieces = list()
+fun zfLex(src: String): IntBuf {
+  val pieces = intBuf()
   val l = Lx(src, src.len(), 0, 1)
   var pendingNl = 0
   var go = 1
@@ -140,9 +140,9 @@ fun zfValueEnding(k: Int): Bool {
 }
 
 // mark prefix-unary `-`/`+`/`!` (glue to their operand). `!` is always prefix here.
-fun zfMarkUnary(pieces: List): List {
+fun zfMarkUnary(pieces: IntBuf): IntBuf {
   val m = pieces.len()
-  val res = list()
+  val res = intBuf()
   var prevSig = 0
   var i = 0
   while (i < m) {
@@ -164,15 +164,15 @@ fun zfInGeneric(k: Int): Bool {
   k == 20 || k == 21 || k == 60 || k == 74 || k == 75
 }
 
-fun zfPieceKind(pieces: List, i: Int): Int { val p: ZfPiece = pieces.get(i); return p.kind }
+fun zfPieceKind(pieces: IntBuf, i: Int): Int { val p: ZfPiece = pieces.get(i); return p.kind }
 
 // Disambiguate `<` `>` as generic brackets (glued, no spaces) vs comparison operators (spaced).
 // A `<` opens a generic when the previous significant token is an identifier (or a `>` that already
 // closed a generic) AND a forward scan over generic-legal tokens on the same line reaches a matching
 // `>` at depth 0. Otherwise both `<` and `>` stay comparisons.
-fun zfMarkAngles(pieces: List): List {
+fun zfMarkAngles(pieces: IntBuf): IntBuf {
   val m = pieces.len()
-  val res = list()
+  val res = intBuf()
   var t = 0
   while (t < m) { res.push(0); t = t + 1 }
   var i = 0
@@ -287,10 +287,10 @@ fun zfIsDeclStart(k: Int): Bool {
 }
 
 // balanced O(n log n) join of the chunk list (avoids O(n^2) left-fold concat).
-fun zfJoin(cs: List): String {
+fun zfJoin(cs: IntBuf): String {
   var work = cs
   while (work.len() > 1) {
-    val nxt = list()
+    val nxt = intBuf()
     var i = 0
     while (i + 1 < work.len()) {
       val a: String = work.get(i)
@@ -313,8 +313,8 @@ fun zfFormat(src: String): String {
   if (m == 0) { return "" }
   val angle = zfMarkAngles(pieces)
   val unary = zfMarkUnary(pieces)
-  val out = list()
-  val scopes = list() // ZfScope stack, indexed by (depth - 1)
+  val out = intBuf()
+  val scopes = intBuf() // ZfScope stack, indexed by (depth - 1)
   var depth = 0
   var pendingType = 0 // a class/struct/enum header is open, awaiting its body `{`
   var pendingTypeDepth = 0 // the depth the header keyword appeared at

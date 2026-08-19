@@ -1,0 +1,35 @@
+// kite::core::hashable — Hash impls for the scalar tower, the key contract the hashed collections need
+// (kite::core::cmp declares the `Hash` trait; String carries its own FNV-1a impl in kite::core::string).
+//
+// A monomorphized `HashMap<K,V>` / `HashSet<K>` hashes a key via `k.hash()`, which the lowerer resolves to
+// the concrete `<K>_hash` once K is substituted — String -> String_hash (content), Int -> Int_hash (this
+// file), etc. These bodies use only bit-mix arithmetic (no `==`/`<`/`>`), so they never recurse through the
+// operator desugar the way an `Eq`/`Ord` impl written with `==`/`<` would. Equality and ordering are left
+// to the operators directly (`==` routes to String_eq for String keys and stays a machine compare for
+// scalars; likewise `<`), so scalars need NO Eq/Ord impl here — only Hash.
+//
+// Opt-in: pulled in by the hashed collections, not the prelude, so the compiler's own build is untouched.
+
+// splitmix64-style avalanche over a 64-bit word; multiplies wrap on the register. Constants fit in 32 bits
+// (positive) to stay clear of any literal-range edge. A hashed bucket masks the low bits (`h & (cap-1)`),
+// which is non-negative for a power-of-two cap regardless of the mix sign.
+fun hashMix(x: Int): Int {
+  var h = x
+  h = h ^ (h >> 33)
+  h = h * 0x9E3779B1
+  h = h ^ (h >> 29)
+  h = h * 0x85EBCA77
+  h = h ^ (h >> 32)
+  return h
+}
+
+impl Hash for Int { fun hash(self): Int { return hashMix(self) } }
+impl Hash for U8 { fun hash(self): Int { return hashMix(self) } }
+impl Hash for U16 { fun hash(self): Int { return hashMix(self) } }
+impl Hash for U32 { fun hash(self): Int { return hashMix(self) } }
+impl Hash for U64 { fun hash(self): Int { return hashMix(self) } }
+impl Hash for I8 { fun hash(self): Int { return hashMix(self) } }
+impl Hash for I16 { fun hash(self): Int { return hashMix(self) } }
+impl Hash for I32 { fun hash(self): Int { return hashMix(self) } }
+impl Hash for Char { fun hash(self): Int { return hashMix(self) } }
+impl Hash for Bool { fun hash(self): Int { return hashMix(self) } }

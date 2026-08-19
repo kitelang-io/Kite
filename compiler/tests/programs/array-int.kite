@@ -1,0 +1,14 @@
+import "lib/alloc/array.kite"
+fun main(): Int {
+  var acc = 0
+  val a = Array::<Int>(5, RawBuf(__rawAlloc(5 * sizeOf::<Int>())))
+  a.fill(7)
+  if (a.len() == 5) { acc = acc + 1 }
+  if (a.get(3) == 7) { acc = acc + 1 }
+  a.set(2, 42)
+  if (a.get(2) == 42) { acc = acc + 1 }
+  if (a.getOr(99, 0) == 0) { acc = acc + 1 }
+  if (a.contains(42)) { acc = acc + 1 }
+  when (a.indexOf(42)) { Some(i) -> { if (i == 2) { acc = acc + 1 } }; None -> 0 }
+  return acc
+}

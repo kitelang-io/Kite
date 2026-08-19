@@ -1,0 +1,31 @@
+// Phase 8: the `?` postfix operator. `e?` unwraps the happy variant of a Result/Option and early-returns
+// the sad one from the enclosing function — Result -> when(e){Ok(v)->v; Err(x)->return Err(x)}, Option ->
+// when(e){Some(v)->v; None->return None}. The static tag of `e` selects the pair. Exit code 117 iff every
+// path (Ok unwrap, Err propagate, Some unwrap, None propagate) behaved.
+import "lib/core/option.kite"
+
+fun parseDigit(c: Int): Result {
+  if (c >= 48 && c <= 57) { return Ok(c - 48) }
+  return Err("not a digit")
+}
+
+// two `?` in sequence: the first Err short-circuits before the second runs.
+fun sum2(a: Int, b: Int): Result {
+  val x = parseDigit(a)?
+  val y = parseDigit(b)?
+  return Ok(x + y)
+}
+
+fun bump(o: Option): Option {
+  val v = o?
+  return Some(v + 100)
+}
+
+fun main(): Int {
+  val okv = when (sum2(53, 55)) { Ok(v) -> v; Err(e) -> 0 - 1 }        // '5','7' -> 12
+  val badv = when (sum2(53, 99)) { Ok(v) -> v; Err(e) -> 0 - 9 }       // 2nd not a digit -> Err -> -9
+  val some = when (bump(Some(5))) { Some(v) -> v; None -> 0 - 1 }      // 105
+  val none = when (bump(None)) { Some(v) -> v; None -> 0 - 2 }         // None propagated -> -2
+  if (okv == 12 && badv == (0 - 9) && some == 105 && none == (0 - 2)) { return 117 }
+  return 1
+}

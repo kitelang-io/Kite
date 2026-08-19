@@ -1,0 +1,23 @@
+import "lib/alloc/deque.kite"
+fun main(): Int {
+  var acc = 0
+  val d = Deque::<Int>(0, 0, 0, RawBuf(0))
+  d.pushBack(1) d.pushBack(2) d.pushFront(0)     // 0,1,2
+  if (d.len() == 3) { acc = acc + 1 }
+  if (d.get(0) == 0) { acc = acc + 1 }
+  if (d.get(2) == 2) { acc = acc + 1 }
+  when (d.popFront()) { Some(x) -> { if (x == 0) { acc = acc + 1 } }; None -> 0 }
+  when (d.popBack()) { Some(x) -> { if (x == 2) { acc = acc + 1 } }; None -> 0 }
+  if (d.len() == 1) { acc = acc + 1 }
+  when (d.first()) { Some(x) -> { if (x == 1) { acc = acc + 1 } }; None -> 0 }
+  // exercise growth + wraparound
+  var i = 0
+  while (i < 30) { d.pushBack(100 + i) i = i + 1 }
+  if (d.get(0) == 1) { acc = acc + 1 }
+  when (d.last()) { Some(x) -> { if (x == 129) { acc = acc + 1 } }; None -> 0 }
+  if (d.len() == 31) { acc = acc + 1 }
+  var k = 0
+  while (k < 20) { d.popFront() k = k + 1 }      // wrap head around
+  if (d.len() == 11) { acc = acc + 1 }
+  return acc
+}

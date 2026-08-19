@@ -16,7 +16,7 @@ fun main(): Int {
   if (sizeOf::<Char>() == 4) { acc = acc + 1 }      // 6
 
   // Vec<U8>: stride 1, wraps at 256, zero-extended load.
-  val b = Vec::<U8>(0, 4, __rawAlloc(4 * sizeOf::<U8>()))
+  val b = Vec::<U8>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<U8>())))
   b.push(200)
   b.push(300)                                        // 300 & 0xff = 44
   b.push(255)
@@ -25,7 +25,7 @@ fun main(): Int {
   if (b.get(2) == 255) { acc = acc + 1 }             // 9
 
   // Vec<U16>: stride 2, wraps at 65536, packed neighbours stay independent.
-  val h = Vec::<U16>(0, 4, __rawAlloc(4 * sizeOf::<U16>()))
+  val h = Vec::<U16>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<U16>())))
   h.push(0xFFFF)                                      // 65535
   h.push(0x0001)                                     // 1
   h.push(70000)                                      // 70000 & 0xffff = 4464
@@ -36,31 +36,31 @@ fun main(): Int {
   if (h.get(0) == 65535) { acc = acc + 1 }           // 13  (unchanged after neighbour set)
 
   // Vec<U32>: stride 4, holds full 32-bit values, zero-extended.
-  val w = Vec::<U32>(0, 4, __rawAlloc(4 * sizeOf::<U32>()))
+  val w = Vec::<U32>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<U32>())))
   w.push(0xDEADBEEF)                                  // 3735928559
   w.push(0xFFFFFFFF)                                 // 4294967295
   if (w.get(0) == 3735928559) { acc = acc + 1 }      // 14
   if (w.get(1) == 4294967295) { acc = acc + 1 }      // 15
 
   // Vec<I8>: stride 1, sign-extended load.
-  val sb = Vec::<I8>(0, 4, __rawAlloc(4 * sizeOf::<I8>()))
+  val sb = Vec::<I8>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<I8>())))
   sb.push(0xFF)                                       // -1
   sb.push(0x80)                                       // -128
   if (sb.get(0) == 0 - 1) { acc = acc + 1 }          // 16
   if (sb.get(1) == 0 - 128) { acc = acc + 1 }        // 17
 
   // Vec<I16>: stride 2, sign-extended load.
-  val sh = Vec::<I16>(0, 4, __rawAlloc(4 * sizeOf::<I16>()))
+  val sh = Vec::<I16>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<I16>())))
   sh.push(0x8000)                                     // -32768
   if (sh.get(0) == 0 - 32768) { acc = acc + 1 }      // 18
 
   // Vec<I32>: stride 4, sign-extended load.
-  val sw = Vec::<I32>(0, 4, __rawAlloc(4 * sizeOf::<I32>()))
+  val sw = Vec::<I32>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<I32>())))
   sw.push(0xFFFFFFFF)                                 // -1
   if (sw.get(0) == 0 - 1) { acc = acc + 1 }          // 19
 
   // Vec<Int>: stride 8, full word, exercises growth (push past cap 4).
-  val v = Vec::<Int>(0, 4, __rawAlloc(4 * sizeOf::<Int>()))
+  val v = Vec::<Int>(0, 4, RawBuf(__rawAlloc(4 * sizeOf::<Int>())))
   v.push(10)
   v.push(20)
   v.push(30)

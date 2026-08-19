@@ -1,29 +1,110 @@
-// lib/alloc/vec.kite — the monomorphized growable array (kite::alloc::vec), the Phase-6 keystone artifact.
+// lib/alloc/vec.kite — the monomorphized, CoW value-semantics growable array (kite::alloc::vec), the
+// Phase-7 target-tier Vec<T>. `@mono` marks it a TEMPLATE: the compiler emits nothing for the generic
+// form; each concrete construction `Vec::<U16>(..)` instantiates a specialized `Vec$U16` whose storage is
+// PACKED by sizeOf<T>() stride and whose element ops are the width/sign-correct sized load/store chosen at
+// instantiation — zero-cost, exactly the code a programmer would hand-write per type. `Vec<Point>` (a
+// reference element) stores one pointer word per element (sizeOf<T>() = 8).
 //
-// ONE generic template replaces the six hand-written concrete arrays of kite::alloc::bytes. `@mono` marks
-// it a TEMPLATE: the compiler emits nothing for the generic form. For each concrete construction
-// `Vec::<U16>(..)` it instantiates a specialized `Vec$U16` whose storage is PACKED by sizeOf<T>() stride
-// and whose element ops are the width/sign-correct sized load/store chosen at instantiation — zero-cost,
-// exactly the code a programmer would hand-write per type. `Vec<Point>` (a reference element) stores one
-// pointer word per element (sizeOf<T>() = 8); true inline value storage of composite elements arrives with
-// the collections target tier (Phase 7). Like List, an instantiation OWNS a heap buffer and is @arc(manual)
-// (leak-managed) — real CoW value semantics is Phase 7.
+// `@value` gives it VALUE SEMANTICS via CoW-over-ARC (STDLIB-REDESIGN §124): the handle {n, cap, buf} is
+// copied on bind (its `copy` method deep-retains the shared RawBuf), and a mutator calls `ensureUnique`
+// first — cloning the buffer when __refcount(buf) > 1 — so mutating a copy copy-on-writes and never
+// corrupts the original. `val b = a; b.set(0, 9)` leaves `a` untouched. The RawBuf is a distinct ARC
+// object whose refcount is the uniqueness signal.
 //
-// Storage: {n: element count, cap: capacity in elements, data: raw byte-buffer}. Element i lives at byte
-// offset i*sizeOf<T>(); __packedGet/__packedSet compute the address and issue the width-specific op.
+// Access is bounds-checked: `get(i)`/`set(i,_)` panic on an out-of-range index (the raw ops read arbitrary
+// heap); where empty is a valid state the accessor returns `Option` (`pop`/`first`/`last`/`indexOf`).
+// `getOr(i, d)` is the non-panicking read. Construct empty with `Vec::<T>(0, 0, RawBuf(0))`.
+//
+// Storage: {n: element count, cap: capacity in elements, buf: RawBuf holding the packed byte-buffer}.
+//
+// QUOTED include (not `import kite::core::panic`): a namespace import inside a monomorphized template would
+// flip the whole program onto the module pipeline, which does not run the @mono instantiation pass — so the
+// target-tier collections are consumed via quoted `import "lib/..."` includes (cwd-relative, deduped).
+import "lib/core/panic.kite"
+import "lib/alloc/rawbuf.kite"
+
 @mono
-@arc(manual)
-class Vec<T>(var n: Int, var cap: Int, var data: Int) {
+@value
+class Vec<T>(var n: Int, var cap: Int, var buf: RawBuf) {
+  // CoW: clone the buffer away from other owners before an in-place write. A no-op when uniquely owned
+  // (the common path), so mutation stays zero-overhead beyond a single refcount read.
+  fun ensureUnique(self): Int {
+    if (__refcount(self.buf) > 1) {
+      val stride = sizeOf::<T>()
+      val nd = if (self.cap == 0) { 0 } else { __rawAlloc(self.cap * stride) }
+      val used = self.n * stride
+      var i = 0
+      while (i < used) { __rawStoreByte(nd, i, __rawLoadByte(self.buf.data, i)) i = i + 1 }
+      val old = self.buf
+      self.buf = RawBuf(nd)
+      rawBufDrop(old)
+    }
+    return 0
+  }
+  // value COPY on bind: share the buffer (+1) so a later write on either side copy-on-writes.
+  fun copy(self): Vec<T> {
+    __retain(self.buf)
+    return Vec::<T>(self.n, self.cap, self.buf)
+  }
   fun push(self, x: consuming T): Int {
+    self.ensureUnique()
     if (self.n == self.cap) {
       if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
-      self.data = __rawRealloc(self.data, self.cap * sizeOf::<T>())
+      self.buf.data = __rawRealloc(self.buf.data, self.cap * sizeOf::<T>())
     }
-    __packedSet::<T>(self.data, self.n, x)
+    __packedSet::<T>(self.buf.data, self.n, x)
     self.n = self.n + 1
     return 0
   }
-  fun get(self, i: Int): T { return __packedGet::<T>(self.data, i) }
-  fun set(self, i: Int, x: consuming T): Int { __packedSet::<T>(self.data, i, x) return 0 }
+  fun get(self, i: Int): T {
+    if (i < 0 || i >= self.n) { panicOOB("Vec.get", i, self.n) }
+    return __packedGet::<T>(self.buf.data, i)
+  }
+  fun getOr(self, i: Int, dflt: T): T {
+    if (i < 0 || i >= self.n) { return dflt }
+    return __packedGet::<T>(self.buf.data, i)
+  }
+  fun set(self, i: Int, x: consuming T): Int {
+    if (i < 0 || i >= self.n) { panicOOB("Vec.set", i, self.n) }
+    self.ensureUnique()
+    __packedSet::<T>(self.buf.data, i, x)
+    return 0
+  }
   fun len(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
+  fun capacity(self): Int { return self.cap }
+  fun clear(self): Int { self.n = 0 return 0 }
+  fun reserve(self, want: Int): Int {
+    if (want > self.cap) {
+      self.ensureUnique()
+      var c = self.cap
+      if (c == 0) { c = 4 }
+      while (c < want) { c = c * 2 }
+      self.buf.data = __rawRealloc(self.buf.data, c * sizeOf::<T>())
+      self.cap = c
+    }
+    return 0
+  }
+  fun pop(self): Option {
+    if (self.n == 0) { return None }
+    self.n = self.n - 1
+    return Some(__packedGet::<T>(self.buf.data, self.n))
+  }
+  fun first(self): Option {
+    if (self.n == 0) { return None }
+    return Some(__packedGet::<T>(self.buf.data, 0))
+  }
+  fun last(self): Option {
+    if (self.n == 0) { return None }
+    return Some(__packedGet::<T>(self.buf.data, self.n - 1))
+  }
+  fun indexOf(self, x: T): Option {
+    var i = 0
+    while (i < self.n) {
+      if (__packedGet::<T>(self.buf.data, i) == x) { return Some(i) }
+      i = i + 1
+    }
+    return None
+  }
+  fun contains(self, x: T): Bool { return isSome(self.indexOf(x)) }
 }

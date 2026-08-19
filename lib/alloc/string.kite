@@ -26,7 +26,7 @@ fun String_repeat(s: String, n: Int): String {
 }
 
 // joinList — concatenate the string elements of `xs`, separated by `sep`, onto one StrBuilder.
-fun joinList(xs: List, sep: String): String {
+fun joinList(xs: IntBuf, sep: String): String {
   val b = strNew()
   var i = 0
   while (i < xs.len()) { if (i > 0) { b.pushStr(sep) } b.pushStr(xs.get(i)) i = i + 1 }

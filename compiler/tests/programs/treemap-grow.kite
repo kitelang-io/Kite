@@ -1,0 +1,32 @@
+// Regression: TreeMap must not lose entries once it grows past its initial 8-node arena.
+// Inserting 40 distinct keys triggers cap doublings at node indices 8,16,32 (cap 8->16->32->64).
+// A stale-base-pointer store hazard used to orphan the node whose insert forced the realloc, so
+// size() over-counted while get/has missed the orphans. Assert every key is findable AND the
+// in-order walk (min+higher) visits exactly size() keys. Exit 3 on full success.
+import "lib/alloc/treemap.kite"
+fun main(): Int {
+  var acc = 0
+  val t = TreeMap::<Int, Int>(0 - 1, 0, 0, 0, 0, 0, 0, 0)
+  // Ascending insert => node indices assigned 0..39 in order => realloc fires at 8,16,32.
+  var i = 1
+  while (i <= 40) { t.set(i, i * 10) i = i + 1 }
+  // Every key findable with the right value.
+  var found = 0
+  i = 1
+  while (i <= 40) {
+    when (t.get(i)) { Some(v) -> { if (v == i * 10) { found = found + 1 } }; None -> 0 }
+    i = i + 1
+  }
+  if (t.size() == 40) { acc = acc + 1 }
+  if (found == 40) { acc = acc + 1 }
+  // In-order walk must visit exactly 40 keys summing to 1+..+40 = 820.
+  var walked = 0
+  var sum = 0
+  var cur = t.min()
+  var go = 1
+  while (go == 1) {
+    when (cur) { Some(k) -> { walked = walked + 1 sum = sum + k cur = t.higher(k) }; None -> { go = 0 } }
+  }
+  if (walked == 40) { if (sum == 820) { acc = acc + 1 } }
+  return acc
+}

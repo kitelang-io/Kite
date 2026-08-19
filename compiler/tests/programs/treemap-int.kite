@@ -1,0 +1,27 @@
+import "lib/alloc/treemap.kite"
+fun main(): Int {
+  var acc = 0
+  val t = TreeMap::<Int, Int>(0 - 1, 0, 0, 0, 0, 0, 0, 0)
+  t.set(50, 500) t.set(20, 200) t.set(80, 800) t.set(20, 222) t.set(10, 100) t.set(30, 300)
+  if (t.size() == 5) { acc = acc + 1 }
+  when (t.get(20)) { Some(v) -> { if (v == 222) { acc = acc + 1 } }; None -> 0 }
+  when (t.get(99)) { Some(v) -> 0; None -> { acc = acc + 1 } }
+  when (t.min()) { Some(k) -> { if (k == 10) { acc = acc + 1 } }; None -> 0 }
+  when (t.max()) { Some(k) -> { if (k == 80) { acc = acc + 1 } }; None -> 0 }
+  when (t.floor(25)) { Some(k) -> { if (k == 20) { acc = acc + 1 } }; None -> 0 }
+  when (t.ceil(25)) { Some(k) -> { if (k == 30) { acc = acc + 1 } }; None -> 0 }
+  when (t.higher(20)) { Some(k) -> { if (k == 30) { acc = acc + 1 } }; None -> 0 }
+  when (t.lower(20)) { Some(k) -> { if (k == 10) { acc = acc + 1 } }; None -> 0 }
+  // sorted iteration via min + higher: 10,20,30,50,80 -> sum 190
+  var sum = 0
+  var cur = t.min()
+  var go = 1
+  while (go == 1) {
+    when (cur) { Some(k) -> { sum = sum + k cur = t.higher(k) }; None -> { go = 0 } }
+  }
+  if (sum == 190) { acc = acc + 1 }
+  when (t.remove(20)) { Some(v) -> { if (v == 222) { acc = acc + 1 } }; None -> 0 }
+  if (t.size() == 4) { acc = acc + 1 }
+  when (t.get(20)) { Some(v) -> 0; None -> { acc = acc + 1 } }
+  return acc
+}

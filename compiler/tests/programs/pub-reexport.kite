@@ -1,5 +1,5 @@
 // pub-import re-export chain: `import kite::core` gives gcdI (core pub-imports core::math), optGetOr/Some
-// (core pub-imports core::option). `rangeList` and the `.sum()` List method come from the prelude
+// (core pub-imports core::option). `rangeList` and the `.sum()` IntBuf method come from the prelude
 // (kite::alloc::collections::list); `import kite::alloc` still pulls in the collections aggregator.
 import kite::core
 import kite::alloc

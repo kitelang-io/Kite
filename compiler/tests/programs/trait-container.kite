@@ -9,7 +9,7 @@ impl Shape for Circle { fun area(self): Int = self.r * self.r * 3 }
 impl Shape for Square { fun area(self): Int = self.s * self.s }
 
 fun main(): Int {
-  val shapes = list()
+  val shapes = intBuf()
   shapes.push(Circle(2))
   shapes.push(Square(3))
   shapes.push(Circle(1))
