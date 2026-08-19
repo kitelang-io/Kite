@@ -15,7 +15,7 @@
 import "compiler/frontend/kfront.kite"
 import "compiler/driver/kfmt.kite"
 
-fun main(argc: Int, argv: Int): Int {
+fun main(argc: Int, argv: USize): Int {
   var file = ""
   var write = 0
   var check = 0

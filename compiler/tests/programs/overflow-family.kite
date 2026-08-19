@@ -1,4 +1,4 @@
-// Phase 3 regression: the wrapping/checked/saturating overflow families (kite::core::overflow), as
+// Phase 3/D regression: the wrapping/checked/saturating overflow families (kite::core::overflow), as
 // extension methods on the width-typed receiver (a.wrappingAdd(b) / a.checkedAdd(b) / a.saturatingAdd(b)).
 import "lib/core/overflow.kite"
 import kite::core::option
@@ -14,11 +14,11 @@ fun main(): Int {
   if ((20 as U8).wrappingMul(20 as U8) == 144) { acc = acc + 1 }        // 3
 
   // checked: in-range gives Some, overflow gives None.
-  if (isSome((100 as U8).checkedAdd(100 as U8))) { acc = acc + 1 }      // 4  (200 fits)
-  if (isNone((200 as U8).checkedAdd(100 as U8))) { acc = acc + 1 }      // 5  (300 overflows)
-  if (optGetOr((100 as U8).checkedAdd(100 as U8), 0) == 200) { acc = acc + 1 } // 6
-  if (isNone((5 as U8).checkedSub(10 as U8))) { acc = acc + 1 }         // 7  (underflow)
-  if (isNone((20 as U8).checkedMul(20 as U8))) { acc = acc + 1 }        // 8  (400 overflows)
+  if ((100 as U8).checkedAdd(100 as U8).isSome()) { acc = acc + 1 }      // 4  (200 fits)
+  if ((200 as U8).checkedAdd(100 as U8).isNone()) { acc = acc + 1 }      // 5  (300 overflows)
+  if ((100 as U8).checkedAdd(100 as U8).getOr(0) == 200) { acc = acc + 1 } // 6
+  if ((5 as U8).checkedSub(10 as U8).isNone()) { acc = acc + 1 }         // 7  (underflow)
+  if ((20 as U8).checkedMul(20 as U8).isNone()) { acc = acc + 1 }        // 8  (400 overflows)
 
   // saturating: clamp at 255 / 0 instead of wrapping.
   if ((250 as U8).saturatingAdd(10 as U8) == 255) { acc = acc + 1 }     // 9
@@ -26,14 +26,14 @@ fun main(): Int {
 
   // U16 / U32 widths.
   if ((65535 as U16).wrappingAdd(2 as U16) == 1) { acc = acc + 1 }      // 11
-  if (isNone((65535 as U16).checkedAdd(1 as U16))) { acc = acc + 1 }    // 12
+  if ((65535 as U16).checkedAdd(1 as U16).isNone()) { acc = acc + 1 }    // 12
   if ((65535 as U16).saturatingAdd(100 as U16) == 65535) { acc = acc + 1 } // 13
-  if (isNone((4294967295 as U32).checkedAdd(1 as U32))) { acc = acc + 1 }  // 14
+  if ((4294967295 as U32).checkedAdd(1 as U32).isNone()) { acc = acc + 1 }  // 14
 
   // U64 full-word: native wrap + unsigned-overflow detection.
   val big: U64 = 1u64 << 63
-  if (isNone(big.checkedAdd(big))) { acc = acc + 1 }                    // 15  (2^63+2^63 wraps to 0)
-  if (isSome(big.checkedAdd(1u64))) { acc = acc + 1 }                  // 16  (no wrap)
+  if (big.checkedAdd(big).isNone()) { acc = acc + 1 }                    // 15  (2^63+2^63 wraps to 0)
+  if (big.checkedAdd(1u64).isSome()) { acc = acc + 1 }                  // 16  (no wrap)
 
   return acc                                                            // 16
 }

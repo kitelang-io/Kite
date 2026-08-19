@@ -1,0 +1,38 @@
+// Phase A regression (RUNTIME, not just `check`): a method declared on a primitive's PRIMARY name must be
+// callable through its width ALIAS, and vice versa. The checker's canonPrim already makes Byte/I8 (and
+// UByte/U8, Int/I32, ...) freely interchangeable, so all four calls below type-check. The bug this guards:
+// UFCS mangling keyed on the RAW receiver-type name, so `a: I8; a.twice()` mangled `I8_twice` while the
+// decl `fun Byte.twice` emitted `Byte_twice`; the miss slipped past the checker AND codegen, which then
+// emitted an owner-less bare `twice` external that died at dyld LOAD (exit 134) — so a green `check` masked
+// a binary that never ran a single instruction. This program only returns its accumulator if it actually
+// RAN, so it fails hard (wrong exit / 134) if the alias<->primary owner canonicalization regresses.
+
+// method on the PRIMARY (Byte), exercised through the alias I8 below.
+fun Byte.twice(): Int { return (self as Int) * 2 }
+
+// method on the ALIAS (I8), exercised through the primary Byte below.
+fun I8.plus3(): Int { return (self as Int) + 3 }
+
+// unsigned side: method on the PRIMARY (UByte), called through the alias U8.
+fun UByte.dbl(): Int { return (self as Int) * 2 }
+
+// unsigned side: method on the ALIAS (U8), called through the primary UByte.
+fun U8.inc(): Int { return (self as Int) + 1 }
+
+fun main(): Int {
+  var acc = 0
+
+  val a: I8 = 5                              // alias-typed value ...
+  if (a.twice() == 10) { acc = acc + 1 }     // ... calling a method declared on primary Byte     -> 1
+
+  val b: Byte = 4                            // primary-typed value ...
+  if (b.plus3() == 7) { acc = acc + 1 }      // ... calling a method declared on alias I8         -> 2
+
+  val c: U8 = 6                              // unsigned alias-typed value ...
+  if (c.dbl() == 12) { acc = acc + 1 }       // ... calling a method declared on primary UByte    -> 3
+
+  val d: UByte = 9                           // unsigned primary-typed value ...
+  if (d.inc() == 10) { acc = acc + 1 }       // ... calling a method declared on alias U8         -> 4
+
+  return acc                                  // 4
+}

@@ -19,7 +19,7 @@
 // @arc(manual): IntBuf is exempt from automatic ARC — its elements are type-erased words push can't
 // retain, and the compiler nests lists-in-lists, so a naive deep-release would UAF. Leak-managed.
 @arc(manual)
-class IntBuf(var n: Int, var cap: Int, var data: Int) {
+class IntBuf(var n: Int, var cap: Int, var data: USize) {
   // @lang("list.push"): the [..] literal desugar appends elements via this method (emitted List_push).
   // @lang("map.putList"): the {..} map desugar also appends into a parallel word-list via this method.
   @lang("list.push")

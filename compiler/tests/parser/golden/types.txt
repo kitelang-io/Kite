@@ -6,7 +6,7 @@ struct Rect
   var scale : Int
 
 class File
-  val fd : Int32
+  val fd : I32
   deinit
     block
       result
@@ -22,7 +22,7 @@ enum Expr
 
 enum IoError
   NotFound
-  Subprocess(val code : Int32)
+  Subprocess(val code : I32)
   Other(val msg : String)
 
 fun area(r: Rect) : Int

@@ -2,7 +2,7 @@
 // Reads the source path from argv (macOS passes argc in x0, argv in x1 to _main), so the harness can
 // point it at any file and run copies in parallel — no shared /tmp.
 
-fun main(argc: Int, argv: Int): Int {
+fun main(argc: Int, argv: USize): Int {
   if (argc < 2) { println("usage: kparse <file.kite>"); return 1 }
   val src = readFile(__argv(argv, 1))
   val p = P(lex(src), 0)

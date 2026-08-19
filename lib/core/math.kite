@@ -7,14 +7,14 @@
 // module-mangled free function is reached via its mangled name under a namespace import, and method dispatch
 // resolves against the flat/global registry — so intra-module method sugar would not bind (same convention
 // the String methods in kite::core::string follow: internal callers use String_len(self), not self.len()).
-fun Int_abs(x: Int): Int { if (x < 0) { return 0 - x } return x }
+fun Int.abs(): Int { if (self < 0) { return 0 - self } return self }
 
-fun Int_max(a: Int, b: Int): Int { if (a > b) { return a } return b }
+fun Int.max(other: Int): Int { if (self > other) { return self } return other }
 
-fun Int_min(a: Int, b: Int): Int { if (a < b) { return a } return b }
+fun Int.min(other: Int): Int { if (self < other) { return self } return other }
 
-fun Int_clamp(x: Int, lo: Int, hi: Int): Int { return Int_max(lo, Int_min(x, hi)) }
+fun Int.clamp(lo: Int, hi: Int): Int { return Int_max(lo, Int_min(self, hi)) }
 
-fun Int_pow(base: Int, exp: Int): Int { var r = 1 var i = 0 while (i < exp) { r = r * base i = i + 1 } return r }
+fun Int.pow(exp: Int): Int { var r = 1 var i = 0 while (i < exp) { r = r * self i = i + 1 } return r }
 
-fun Int_gcd(a: Int, b: Int): Int { var x = Int_abs(a) var y = Int_abs(b) while (y != 0) { val t = y y = x % y x = t } return x }
+fun Int.gcd(other: Int): Int { var x = Int_abs(self) var y = Int_abs(other) while (y != 0) { val t = y y = x % y x = t } return x }

@@ -3,8 +3,8 @@ enum Option { Some(v); None }
 
 enum Result { Ok(v); Err(e) }
 
-fun isSome(o: Option): Bool { return when (o) { Some(v) -> true; None -> false } }
+fun Option.isSome(): Bool { return when (self) { Some(v) -> true; None -> false } }
 
-fun isNone(o: Option): Bool { return when (o) { Some(v) -> false; None -> true } }
+fun Option.isNone(): Bool { return when (self) { Some(v) -> false; None -> true } }
 
-fun optGetOr(o: Option, dflt: Int): Int { return when (o) { Some(v) -> v; None -> dflt } }
+fun Option.getOr(dflt: Int): Int { return when (self) { Some(v) -> v; None -> dflt } }

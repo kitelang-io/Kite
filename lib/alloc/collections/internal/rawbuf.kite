@@ -11,7 +11,7 @@
 // `data` is the raw byte buffer (0 when the collection has never allocated); a fresh RawBuf(_) starts at
 // refcount 1 (the header the allocator installs), i.e. uniquely owned by the constructing handle.
 @arc(manual)
-class RawBuf(var data: Int) {
+class RawBuf(var data: USize) {
 }
 
 // drop one co-ownership of a buffer: at the LAST owner free the byte buffer and the object; otherwise

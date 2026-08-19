@@ -9,7 +9,7 @@
 // then lower) so forward references resolve. Constructs outside kenc's codegen (lambdas, floats,
 // map literals, traits/impl, nullable ops) are still reported via lowFail.
 
-struct Lo(val ctr: IntBuf, val locN: IntBuf, val locT: IntBuf, val fN: IntBuf, val fR: IntBuf, val sN: IntBuf, val sFN: IntBuf, val sFT: IntBuf, val lifted: IntBuf, val gctr: IntBuf, val classN: IntBuf, val arcOwned: IntBuf, val traitN: IntBuf, val constN: IntBuf, val constV: IntBuf, val cfuncs: IntBuf, val traitMethN: IntBuf, val traitMethT: IntBuf, val pmN: IntBuf, val pmM: IntBuf, val variantN: IntBuf, val variantTys: IntBuf, val variantOwn: IntBuf, val roleK: IntBuf, val roleV: IntBuf, val arcE: IntBuf, val valueE: IntBuf, val prim: PReg)
+struct Lo(val ctr: IntBuf, val locN: IntBuf, val locT: IntBuf, val fN: IntBuf, val fR: IntBuf, val sN: IntBuf, val sFN: IntBuf, val sFT: IntBuf, val lifted: IntBuf, val gctr: IntBuf, val classN: IntBuf, val arcOwned: IntBuf, val traitN: IntBuf, val constN: IntBuf, val constV: IntBuf, val cfuncs: IntBuf, val traitMethN: IntBuf, val traitMethT: IntBuf, val pmN: IntBuf, val pmM: IntBuf, val variantN: IntBuf, val variantTys: IntBuf, val variantOwn: IntBuf, val roleK: IntBuf, val roleV: IntBuf, val arcE: IntBuf, val valueE: IntBuf, val prim: PReg, val fpN: IntBuf, val fpT: IntBuf)
 
 struct PFun(val owner: String, val fd: FFunc) // owner "" = free function; else the struct type
 
@@ -49,6 +49,14 @@ fun tyTag(s: String): String {
   while (i < s.len()) { val c = s.charAt(i); if (c == 60 || c == 63 || c == 32) { stop = i; i = s.len() } else { i = i + 1 } }
   return lastSeg(s.substr(0, stop))
 }
+
+// COARSE runtime tag of a declared type string. Like tyTag, but collapses the float family {Double,Float}
+// to the single "Float" coarse tag — Double and Float are distinct nominal classes yet share ONE erased
+// 64-bit runtime representation and one coarse tag (matching FEFloat/FECast/toFloat). Use this ONLY where a
+// declared type becomes a *tag* consumed by tagOf (method dispatch + float print-routing), NEVER where the
+// exact type name is needed (method mangling, sizeOfTy width). Without it a `val d: Double = 3.5` bound its
+// tag as "Double", so println(d) missed the Float print-path and printed raw bits.
+fun tyTagR(s: String): String { val t = tyTag(s); if (t == "Double") { return "Float" }; return t }
 
 // a param type carries an ownership-mode prefix ("consuming "=transfer, "inout "=borrow-mutable, none=borrow).
 // paramMode returns the mode keyword; stripMode returns the bare type (so tyTag sees the real type, not the mode).
@@ -110,7 +118,7 @@ fun funRetTag(lo: Lo, nm: String): String {
   val b = builtinRetTag(nm)
   if (b != "") { return b }
   var i = 0
-  while (i < lo.fN.len()) { if (lo.fN.get(i) == nm) { return tyTag(lo.fR.get(i)) }; i = i + 1 }
+  while (i < lo.fN.len()) { if (lo.fN.get(i) == nm) { return tyTagR(lo.fR.get(i)) }; i = i + 1 }
   if (memListL(lo.sN, nm)) { return nm } // struct constructor
   val vo = variantOwnerIn(lo.variantN, lo.variantOwn, nm)
   if (vo != "") { return vo } // enum variant constructor -> its owning enum type
@@ -132,7 +140,7 @@ fun fieldTag(lo: Lo, a: FExpr, f: String): String {
       val fns: IntBuf = lo.sFN.get(i)
       val fts: IntBuf = lo.sFT.get(i)
       var j = 0
-      while (j < fns.len()) { if (fns.get(j) == f) { return tyTag(fts.get(j)) }; j = j + 1 }
+      while (j < fns.len()) { if (fns.get(j) == f) { return tyTagR(fts.get(j)) }; j = j + 1 }
       return "?"
     }
     i = i + 1
@@ -159,6 +167,15 @@ fun isFieldOf(lo: Lo, recvTag: String, f: String): Bool {
 fun tagBin(lo: Lo, op: String, a: FExpr, b: FExpr): String {
   if (op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" || op == "&&" || op == "||") { return "Bool" }
   if (op == ".." || op == "..<") { return "Range" }
+  // overloaded arithmetic operator: the result tag is the operator method's RETURN type, so a subsequent
+  // method dispatch on the result (`(a + b).m()`) resolves against that type instead of falling to a bare
+  // undefined symbol. Guarded on a concretely-defined `<T>_<op>` (opMangledFor) whose return tag is known;
+  // primitive Int/Float and String `+` (no method, or String_add returning "String") are unchanged, so
+  // self-host IR emission stays byte-identical.
+  if (isOverloadableOp(op)) {
+    val om = opMangledFor(lo, op, a, b)
+    if (om != "") { val rt = funRetTag(lo, om); if (rt != "?") { return rt } }
+  }
   val fl = tagOf(lo, a) == "Float" || tagOf(lo, b) == "Float"
   if (op == "+") { if (fl) { return "Float" } if (tagOf(lo, a) == "String" || tagOf(lo, b) == "String") { return "String" } return "Int" }
   if (fl) { return "Float" }
@@ -270,10 +287,51 @@ fun cmpMangledFor(lo: Lo, l: FExpr, r: FExpr): String {
   return ""
 }
 
+// operand of a String `+` (concatenation): a String operand passes through unchanged; a GENUINE integer
+// scalar (Int/sized-int/Bool/Char) is rendered to its string form via str.show (Int_toStr) so that
+// `"s" + 5` yields "s5" instead of dereferencing the raw Int 5 as a char* (SIGSEGV). Float/Double are
+// excluded (Int_toStr cannot render them) and fall through untouched.
+//
+// A concat operand is auto-stringified only when it is a GENUINE numeric value, not a heap word pulled
+// from erased storage. Kite conflates `Int` with erased pointers: a word read from an IntBuf (via `.get()`,
+// index, or a field/call returning an erased element) is TAGGED `Int` but may actually be a `String*` — the
+// compiler's own `traitMethT.get(i) + "_show"` idiom depends on that word flowing through concat UNCHANGED
+// (String_add treats it as the pointer it is). Converting such a word with Int_toStr would bake its decimal
+// address into the output. So we restrict conversion to expression shapes that CANNOT be an erased word:
+// literals (Int/Char/Bool), arithmetic (a genuine Int result), and plain identifiers/`this` (a named local of
+// declared scalar type). Calls, indexing, field access, and static access are excluded — those are the exact
+// shapes that produce erased words. This keeps self-compilation byte-identical (its 5 concat sites are all
+// `.get()` calls, now left untouched) while `"s" + n` (n an Int variable) still renders as "s5".
+fun concatConvertible(e: FExpr): Bool {
+  return when (e) {
+    FEInt(t) -> true
+    FEChar(t) -> true
+    FEBool(b) -> true
+    FEIdent(nm) -> true
+    FEThis -> true
+    FEBin(op, a, b) -> isArithOrCmp(op)
+    FEUnary(op, x) -> true
+    else -> false
+  }
+}
+
+fun concatPiece(lo: Lo, e: FExpr): Expr {
+  val t = tagOf(lo, e)
+  if (deriveIsScalar(t) && t != "Float" && t != "Double" && concatConvertible(e)) {
+    val a = list(); a.push(lowerExpr(lo, e))
+    return ECall(roleSym(lo, "str.show"), a)
+  }
+  return lowerExpr(lo, e)
+}
+
 fun lowerBin(lo: Lo, op: String, l: FExpr, r: FExpr): Expr {
   if (isOverloadableOp(op)) {
     val om = opMangledFor(lo, op, l, r)
     if (om != "") {
+      if (op == "+" && om == roleSym(lo, "str.concat")) {
+        val ca = list(); ca.push(concatPiece(lo, l)); ca.push(concatPiece(lo, r))
+        return ECall(om, ca)
+      }
       val ca = list(); ca.push(lowerExpr(lo, l)); ca.push(lowerExpr(lo, r))
       return ECall(om, ca)
     }
@@ -321,6 +379,32 @@ fun isBuiltinNominal(lo: Lo, t: String): Bool { return isArcExemptIn(lo.arcE, t)
 // type is a known struct/class; otherwise the bare callee name (free fn / builtin).
 fun funDefined(lo: Lo, nm: String): Bool { return memListL(lo.fN, nm) }
 
+// PRIMITIVE method resolution across the alias<->primary boundary. The checker's canonPrim makes a width
+// alias (I8) and its primary (Byte) freely interchangeable, so a value typed as one may legitimately call
+// a method declared on the OTHER (`fun Byte.twice` called on an I8, or `impl Hash for U8` called on a
+// UByte). But UFCS mangling keys on the RAW receiver-type name, so `x: I8; x.twice()` mangled `I8_twice`
+// while the decl emitted `Byte_twice` — the miss slips past both checker and codegen, and codegen then
+// emits an owner-less bare `twice` external that dies at dyld load (exit 134, "check ok" masking a crash).
+// Route BOTH the call-site owner and the decl owner through the SAME lib-sourced @alias canonicalization
+// (lo.prim, the checker's table): try the receiver tag as written, then its canonical PRIMARY, then every
+// sibling alias of that primary. Returns the defined mangled name, or "" if none is defined.
+fun primMethodCallee(lo: Lo, rt: String, m: String): String {
+  val direct = mangleMethod(rt, m)
+  if (funDefined(lo, direct)) { return direct }
+  val prim = canonPrim(lo.prim, rt)
+  val pm = mangleMethod(prim, m)
+  if (funDefined(lo, pm)) { return pm }
+  var i = 0
+  while (i < lo.prim.aliasFrom.len()) {
+    if (lo.prim.aliasTo.get(i) == prim) {
+      val am = mangleMethod(lo.prim.aliasFrom.get(i), m)
+      if (funDefined(lo, am)) { return am }
+    }
+    i = i + 1
+  }
+  return ""
+}
+
 // resolve `recv.m` to a real method `<Type>_m` when one is defined; otherwise the bare `m`
 // (UFCS: `recv.m(a)` calls free function `m(recv, a)`, e.g. `acc.mean()` -> `mean(acc)`).
 fun methodCallee(lo: Lo, recv: FExpr, m: String): String {
@@ -337,7 +421,9 @@ fun methodCallee(lo: Lo, recv: FExpr, m: String): String {
   // the monomorphized HashMap<Int,_>). Prefer the static impl over the erased dynamic fallback below, which
   // would read a type-id header off a non-pointer word and crash. rt="?" (unknown) never has `?_m` defined,
   // so a truly erased receiver still falls through. The compiler's own sources call no methods on primitives,
-  // so this branch never fires for the self-host build (fixpoint untouched).
+  // so this branch never fires for the self-host build (fixpoint untouched). For a primitive receiver the
+  // owner may be spelled as the alias or the primary on either side, so canonicalize before mangling.
+  if (isPrimReg(lo.prim, rt)) { val pmc = primMethodCallee(lo, rt, m); if (pmc != "") { return pmc } }
   if (funDefined(lo, mangled)) { return mangled }
   // erased / unknown-typed receiver (e.g. an element pulled from a IntBuf<Shape>): if `m` is a trait method,
   // still dynamic-dispatch on the object's type-id header. Concrete + free-fn cases were handled above.
@@ -486,6 +572,52 @@ fun splitLamNames(s: String): IntBuf {
   return out
 }
 
+// per-param annotated type from a lambda header string ("x: Int, y" -> ["Int", ""]); parallel to
+// splitLamNames, which extracts the NAMES. "" for a param that carries no `: Ty` annotation. Used so an
+// explicit `{ x: Int -> }` types the lambda param even without an expected-type from the call context.
+fun splitLamTypes(s: String): IntBuf {
+  val out = list()
+  if (s == "") { return out }
+  val n = s.len(); var i = 0; var start = 0
+  while (i <= n) {
+    if (i == n || s.charAt(i) == 44) {
+      var e = start; while (e < i && s.charAt(e) == 32) { e = e + 1 }
+      var col = e; while (col < i && s.charAt(col) != 58) { col = col + 1 }
+      if (col < i) { var t = col + 1; while (t < i && s.charAt(t) == 32) { t = t + 1 }; out.push(s.substr(t, i - t)) }
+      else { out.push("") }
+      start = i + 1
+    }
+    i = i + 1
+  }
+  return out
+}
+
+fun trimSp(s: String): String {
+  val n = s.len(); var a = 0; while (a < n && s.charAt(a) == 32) { a = a + 1 }
+  var b = n; while (b > a && s.charAt(b - 1) == 32) { b = b - 1 }
+  return s.substr(a, b - a)
+}
+
+// domain tags of a function type "(T1, T2) -> R" -> [tyTag(T1), tyTag(T2)]; empty when `ty` is not a
+// function type (no "->"). This drives EXPECTED-TYPE lambda-param typing: a lambda passed where the callee
+// declares a `(Int) -> Bool` param gets its param bound to Int, so `x.isEven()` inside resolves to Int_isEven.
+fun lamDomainTags(ty: String): IntBuf {
+  val out = list()
+  val n = ty.len()
+  var ar = -1; var i = 0
+  while (i + 1 < n) { if (ty.charAt(i) == 45 && ty.charAt(i + 1) == 62) { ar = i; i = n + 1 } else { i = i + 1 } }
+  if (ar < 0) { return out }
+  var dom = trimSp(ty.substr(0, ar))
+  val dn = dom.len()
+  if (dn >= 2 && dom.charAt(0) == 40 && dom.charAt(dn - 1) == 41) { dom = dom.substr(1, dn - 2) }
+  val m = dom.len(); var s = 0; var j = 0
+  while (j <= m) {
+    if (j == m || dom.charAt(j) == 44) { val seg = trimSp(dom.substr(s, j - s)); if (seg != "") { out.push(tyTag(seg)) }; s = j + 1 }
+    j = j + 1
+  }
+  return out
+}
+
 fun patVarsInto(pat: FPat, out: IntBuf): Int {
   when (pat) {
     FPBind(s) -> out.push(s)
@@ -582,10 +714,20 @@ fun fvExpr(lo: Lo, bound: IntBuf, e: FExpr, out: IntBuf): Int {
 
 // { params -> body }  ->  lift a top-level __lamN(env, params) that reads captures from env;
 // the site evaluates to a closure __closNew("__lamN", cap0, cap1, ...).
-fun lowerLambda(lo: Lo, params: String, body: FExpr): Expr {
+// tag for lambda param i: an explicit annotation (`{ x: Int -> }`) wins, else the expected domain tag from
+// the call context (expTags), else "?" (unknown, as before). This is what makes method-sugar on a lambda
+// param resolve — the param now has a concrete tag in the lifted body's local env.
+fun lamParamTag(ptypes: IntBuf, expTags: IntBuf, i: Int): String {
+  if (i < ptypes.len()) { val a: String = ptypes.get(i); if (a != "") { return tyTag(a) } }
+  if (i < expTags.len()) { return expTags.get(i) }
+  return "?"
+}
+
+fun lowerLambda(lo: Lo, params: String, body: FExpr, expTags: IntBuf): Expr {
   val id: Int = lo.gctr.get(0); lo.gctr.set(0, id + 1)
   val name = "__lam" + id.toStr()
   val pnames = splitLamNames(params)
+  val ptypes = splitLamTypes(params)
   val bound = list()
   var pi = 0; while (pi < pnames.len()) { bound.push(pnames.get(pi)); pi = pi + 1 }
   val caps = list()
@@ -595,9 +737,9 @@ fun lowerLambda(lo: Lo, params: String, body: FExpr): Expr {
   val ltys = list(); ltys.push("?")
   var qi = 0; while (qi < pnames.len()) { lnames.push(pnames.get(qi)); ltys.push("?"); qi = qi + 1 }
   val lctr = list(); lctr.push(0)
-  val llo = Lo(lctr, list(), list(), lo.fN, lo.fR, lo.sN, lo.sFN, lo.sFT, lo.lifted, lo.gctr, lo.classN, list(), lo.traitN, lo.constN, lo.constV, lo.cfuncs, lo.traitMethN, lo.traitMethT, lo.pmN, lo.pmM, lo.variantN, lo.variantTys, lo.variantOwn, lo.roleK, lo.roleV, lo.arcE, lo.valueE, lo.prim)
+  val llo = Lo(lctr, list(), list(), lo.fN, lo.fR, lo.sN, lo.sFN, lo.sFT, lo.lifted, lo.gctr, lo.classN, list(), lo.traitN, lo.constN, lo.constV, lo.cfuncs, lo.traitMethN, lo.traitMethT, lo.pmN, lo.pmM, lo.variantN, lo.variantTys, lo.variantOwn, lo.roleK, lo.roleV, lo.arcE, lo.valueE, lo.prim, lo.fpN, lo.fpT)
   bindLoc(llo, "env", "?")
-  var ri = 0; while (ri < pnames.len()) { bindLoc(llo, pnames.get(ri), "?"); ri = ri + 1 }
+  var ri = 0; while (ri < pnames.len()) { bindLoc(llo, pnames.get(ri), lamParamTag(ptypes, expTags, ri)); ri = ri + 1 }
   val lstmts = list()
   var ci = 0
   while (ci < caps.len()) {
@@ -613,6 +755,36 @@ fun lowerLambda(lo: Lo, params: String, body: FExpr): Expr {
   val cargs = list(); cargs.push(EStr(name))
   var di = 0; while (di < caps.len()) { cargs.push(EIdent(caps.get(di))); di = di + 1 }
   return ECall("__closNew", cargs)
+}
+
+// a bare NAMED-FUNCTION reference in value position (e.g. `dbl` in `xs.map(dbl)`) is a first-class
+// function value. The closure ABI passes the closure block itself as arg0 (env) then the real args, and
+// blr's [env+0]; a top-level `fun dbl(x)` has NO env param, so we cannot point the closure straight at it.
+// Synthesize a thin THUNK `__frefN(env, __a0..__a{k-1}) { dbl(__a0, ..) }` that drops env and forwards to
+// the named function, then hand back `__closNew("__frefN")` (no captures). k = the callback's arity, taken
+// from the expected function-type param slot. This lets `xs.map(dbl).sum()` work exactly like a lambda.
+fun funRefClosure(lo: Lo, nm: String, arity: Int): Expr {
+  val id: Int = lo.gctr.get(0); lo.gctr.set(0, id + 1)
+  val fname = "__fref" + id.toStr()
+  val lnames = list(); lnames.push("env")
+  val ltys = list(); ltys.push("?")
+  val callArgs = list()
+  var i = 0
+  while (i < arity) { val pn = "__a" + i.toStr(); lnames.push(pn); ltys.push("?"); callArgs.push(EIdent(pn)); i = i + 1 }
+  lo.lifted.push(Func(fname, lnames, ltys, EBlock(list(), ECall(nm, callArgs))))
+  val cargs = list(); cargs.push(EStr(fname))
+  return ECall("__closNew", cargs)
+}
+
+// argument in call-position `pidx` of `callee` that is a bare identifier: when it names a top-level FUNCTION
+// (not a local closure value, not a const) AND the callee declares this slot as a function type, lower it to
+// a named-function-reference closure (funRefClosure). Otherwise it is an ordinary value ident.
+fun lowerArgIdent(lo: Lo, callee: String, pidx: Int, nm: String): Expr {
+  if (memListL(lo.locN, nm) == false && funDefined(lo, nm)) {
+    val dom = lamDomainFor(lo, callee, pidx)
+    if (dom.len() > 0) { return funRefClosure(lo, nm, dom.len()) }
+  }
+  return lowerExpr(lo, FEIdent(nm))
 }
 
 fun closCall(lo: Lo, envE: Expr, args: IntBuf): Expr { return ECall("__closCall", consFront(envE, lowerArgs(lo, args))) }
@@ -636,6 +808,44 @@ fun lowerArgs(lo: Lo, args: IntBuf): IntBuf {
 }
 
 fun argExprAt(args: IntBuf, i: Int): FExpr { val a: FArg = args.get(i); return a.expr }
+
+// declared type of parameter `i` of function `fname` (mangled), from the whole-program param-type table
+// (fpN/fpT, built in finishLower over every pfun). "" when unknown (name absent / index past the arity),
+// in which case a lambda arg falls back to "?" params — the pre-fix behavior.
+fun funParamTypeAt(lo: Lo, fname: String, i: Int): String {
+  var k = 0
+  while (k < lo.fpN.len()) {
+    if (lo.fpN.get(k) == fname) { val tys: IntBuf = lo.fpT.get(k); if (i < tys.len()) { return tys.get(i) }; return "" }
+    k = k + 1
+  }
+  return ""
+}
+
+// expected-type domain tags for a lambda arg at call-position `paramIdx` of `callee`: parse the callee's
+// declared param type as a function type and return its domain tags (empty when not a function type).
+fun lamDomainFor(lo: Lo, callee: String, paramIdx: Int): IntBuf { return lamDomainTags(funParamTypeAt(lo, callee, paramIdx)) }
+
+// argument lowering that types LAMBDA args from the callee's declared parameter types. `offset` is the gap
+// between the arg list and the callee's param list: 1 for a method/UFCS call (the receiver is param 0 and is
+// lowered separately), 0 for a plain/static call. Every NON-lambda arg lowers exactly as lowerArgs does
+// (same lowerExpr + @value CoW copy), so this is byte-identical except where a lambda param gains a tag.
+fun lowerArgsFor(lo: Lo, callee: String, offset: Int, args: IntBuf): IntBuf {
+  val out = list()
+  var i = 0
+  while (i < args.len()) {
+    val a: FArg = args.get(i)
+    var e = when (a.expr) {
+      FELambda(params, body) -> lowerLambda(lo, params, body, lamDomainFor(lo, callee, i + offset))
+      FEIdent(nm) -> lowerArgIdent(lo, callee, i + offset, nm)
+      else -> lowerExpr(lo, a.expr)
+    }
+    val t = tagOf(lo, a.expr)
+    if (isValueTag(lo, t)) { if (isCopyLvalue(a.expr)) { val ca = list(); ca.push(e); e = ECall(mangleMethod(t, "copy"), ca) } }
+    out.push(e)
+    i = i + 1
+  }
+  return out
+}
 
 // true iff the call has exactly one Float argument. NOTE: `&&` is NOT short-circuit here (bitwise), so
 // this MUST guard the length internally before touching args[0] — else a zero-arg call reads out of bounds.
@@ -998,7 +1208,7 @@ fun lowerPlainCall(lo: Lo, nm: String, args: IntBuf): Expr {
   var need = 0
   var i = 0
   while (i < args.len()) { if (argNeedsRelease(lo, nm, i, argExprAt(args, i))) { need = 1 }; i = i + 1 }
-  if (need == 0) { return ECall(nm, lowerArgs(lo, args)) }
+  if (need == 0) { return ECall(nm, lowerArgsFor(lo, nm, 0, args)) }
   val stmts = list()
   val callArgs = list()
   val rels = list()
@@ -1093,10 +1303,10 @@ fun lowerCall(lo: Lo, callee: FExpr, args: IntBuf): Expr {
       else { if ((nm == "println" || nm == "print") && oneFloatArg(lo, args)) { ECall(nm + "F", lowerArgs(lo, args)) }
         else { if (memListL(lo.locN, nm)) { closCall(lo, EIdent(nm), args) } else { lowerPlainCall(lo, nm, args) } } }
     }
-    FEField(recv, m) -> if (isQualVariant(lo, recv, m)) { ECall(m, lowerArgs(lo, args)) } else { ECall(methodCallee(lo, recv, m), consFront(lowerExpr(lo, recv), lowerArgs(lo, args))) }
+    FEField(recv, m) -> if (isQualVariant(lo, recv, m)) { ECall(m, lowerArgs(lo, args)) } else { val cal = methodCallee(lo, recv, m); ECall(cal, consFront(lowerExpr(lo, recv), lowerArgsFor(lo, cal, 1, args))) }
     // `Type::method(args)` binds to the owner-mangled static method `Type_method` when one is defined
     // (e.g. a derived `Point::default()` -> `Point_default()`); otherwise the bare name is called.
-    FEStatic(b, m) -> ECall(staticCallee(lo, b, m), lowerArgs(lo, args))
+    FEStatic(b, m) -> { val sc = staticCallee(lo, b, m); ECall(sc, lowerArgsFor(lo, sc, 0, args)) }
     // Phase 6 monomorphization intrinsics carry their element type as a turbofish arg; fold them here with
     // T fully concrete (the monomorphizer has already substituted it). A monomorphized-type constructor
     // turbofish (`Vec::<U16>(..)`) is never seen here — the mono rewrite turned it into a plain call to
@@ -1256,7 +1466,7 @@ fun lowerExpr(lo: Lo, e: FExpr): Expr {
     FEStatic(x, nm) -> EIdent(nm)
     FECall(callee, args) -> lowerCall(lo, callee, args)
     FEIndex(a, ix) -> lowerIndex(lo, a, ix)
-    FELambda(params, body) -> lowerLambda(lo, params, body)
+    FELambda(params, body) -> lowerLambda(lo, params, body, list())
     FEList(es) -> lowerList(lo, es)
     FEMap(ents) -> lowerMap(lo, ents)
     FEBlock(stmts, res) -> EBlock(lowerStmts(lo, stmts), lowerExpr(lo, res))
@@ -1424,8 +1634,31 @@ fun seqLenName(lo: Lo, tag: String): String {
   return roleSym(lo, "list.len")
 }
 
+// PROVENANCE-SAFE element tag of a for-in iterable: only when the element type is STATICALLY KNOWN do we
+// give the loop var a concrete tag (so `x.isEven()` dispatches to `Int_isEven`, not the bare undefined
+// `isEven`). This fires ONLY for a LIST LITERAL whose elements all share one known coarse tag — e.g.
+// `[2,4,6]` (all Int) — where the compiler provably knows the element type. It deliberately does NOT tag
+// the var when iterating an arbitrary/variable IntBuf: IntBuf is a type-erased Int raw buffer and the
+// compiler iterates many `for v in <IntBuf-of-objects>` loops, so blanket-tagging would misroute dispatch
+// and break self-host. Unknown provenance -> "?" (the pre-fix behavior).
+fun forElemTag(lo: Lo, it: FExpr): String {
+  return when (it) {
+    FEList(es) -> litListElemTag(lo, es)
+    else -> "?"
+  }
+}
+
+fun litListElemTag(lo: Lo, es: IntBuf): String {
+  if (es.len() == 0) { return "?" }
+  val t0 = tagOf(lo, es.get(0))
+  if (t0 == "?") { return "?" }
+  var i = 1
+  while (i < es.len()) { if (tagOf(lo, es.get(i)) != t0) { return "?" }; i = i + 1 }
+  return t0
+}
+
 fun lowerForEach(lo: Lo, out: IntBuf, v: String, it: FExpr, body: FExpr): Int {
-  bindLoc(lo, v, "?")
+  bindLoc(lo, v, forElemTag(lo, it))
   val seqTag = tagOf(lo, it)
   val getC = seqGetName(lo, seqTag)
   val lenC = seqLenName(lo, seqTag)
@@ -1476,7 +1709,7 @@ fun lowerAssign(lo: Lo, lhs: FExpr, rhs: FExpr): Stmt {
 }
 
 fun lowerLet(lo: Lo, nm: String, ty: String, init: FExpr): Stmt {
-  val tag = if (ty == "") { tagOf(lo, init) } else { tyTag(ty) }
+  val tag = if (ty == "") { tagOf(lo, init) } else { tyTagR(ty) }
   var initE = lowerExpr(lo, init)
   // @value CoW: binding an existing value-type lvalue takes a value COPY (its `copy` method deep-retains
   // the shared RawBuf so a later mutation copy-on-writes) — a fresh temporary already owns its buffer.
@@ -1865,11 +2098,10 @@ fun genDispatchers(traitDecls: IntBuf, implTrait: IntBuf, implType: IntBuf, stru
 // `t` is a leaf scalar whose eq/cmp/hash/clone/debug lower inline (no per-field method call).
 fun deriveIsScalar(t: String): Bool {
   val b = tyTag(t)
-  return b == "Int" || b == "Long" || b == "ISize" || b == "USize" || b == "Byte" ||
+  return b == "Int" || b == "Long" || b == "Short" || b == "Byte" || b == "ISize" || b == "USize" ||
+  b == "UByte" || b == "UShort" || b == "UInt" || b == "ULong" ||
   b == "I8" || b == "I16" || b == "I32" || b == "I64" ||
   b == "U8" || b == "U16" || b == "U32" || b == "U64" ||
-  b == "Int8" || b == "Int16" || b == "Int32" || b == "Int64" ||
-  b == "UInt8" || b == "UInt16" || b == "UInt32" || b == "UInt64" ||
   b == "Bool" || b == "Char" || b == "Float" || b == "Double"
 }
 
@@ -2400,15 +2632,15 @@ fun recordDerive(annos: IntBuf, tyName: String, deriveT: IntBuf, deriveTr: IntBu
   return 0
 }
 
-fun lowerFuncFull(pf: PFun, fN: IntBuf, fR: IntBuf, sN: IntBuf, sFN: IntBuf, sFT: IntBuf, lifted: IntBuf, gctr: IntBuf, classN: IntBuf, traitN: IntBuf, constN: IntBuf, constV: IntBuf, cfuncs: IntBuf, traitMethN: IntBuf, traitMethT: IntBuf, pmN: IntBuf, pmM: IntBuf, variantN: IntBuf, variantTys: IntBuf, variantOwn: IntBuf, roleK: IntBuf, roleV: IntBuf, arcE: IntBuf, valueE: IntBuf, prim: PReg): Func {
+fun lowerFuncFull(pf: PFun, fN: IntBuf, fR: IntBuf, sN: IntBuf, sFN: IntBuf, sFT: IntBuf, lifted: IntBuf, gctr: IntBuf, classN: IntBuf, traitN: IntBuf, constN: IntBuf, constV: IntBuf, cfuncs: IntBuf, traitMethN: IntBuf, traitMethT: IntBuf, pmN: IntBuf, pmM: IntBuf, variantN: IntBuf, variantTys: IntBuf, variantOwn: IntBuf, roleK: IntBuf, roleV: IntBuf, arcE: IntBuf, valueE: IntBuf, prim: PReg, fpN: IntBuf, fpT: IntBuf): Func {
   val fd = pf.fd
   val ctr = list(); ctr.push(0)
-  val lo = Lo(ctr, list(), list(), fN, fR, sN, sFN, sFT, lifted, gctr, classN, list(), traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys, variantOwn, roleK, roleV, arcE, valueE, prim)
+  val lo = Lo(ctr, list(), list(), fN, fR, sN, sFN, sFT, lifted, gctr, classN, list(), traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys, variantOwn, roleK, roleV, arcE, valueE, prim, fpN, fpT)
   val names = list()
   val tys = list()
   if (pf.owner != "" && fd.recv != "") { names.push("this"); tys.push(pf.owner); bindLoc(lo, "this", pf.owner) }
   var i = 0
-  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); val bt = stripMode(pp.ty); names.push(pp.name); tys.push(bt); bindLoc(lo, pp.name, tyTag(bt)); i = i + 1 }
+  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); val bt = stripMode(pp.ty); names.push(pp.name); tys.push(bt); bindLoc(lo, pp.name, tyTagR(bt)); i = i + 1 }
   val bodyE = lowerExpr(lo, fd.body)
   return Func(mangleMethod(pf.owner, fd.name), names, tys, arcInjectBody(lo, bodyE, lo.arcOwned))
 }
@@ -2528,6 +2760,28 @@ fun recordValue(annos: IntBuf, name: String, valueE: IntBuf): Int {
   return 0
 }
 
+// @prim: is this decl a PRIMITIVE-scalar declaration (its @prim marker names Kite's machine
+// classification, e.g. `@prim("sint",64) class Int`)? A @prim struct/class is NOT a heap type: it is
+// DIVERTED away from structN/classN below so it never boxes, mallocs, or auto-ARCs — it exists purely to
+// carry the scalar's name into the checker's primitive registry, identical to the older `@prim fun Int()`.
+fun hasPrim(annos: IntBuf): Bool {
+  var i = 0
+  while (i < annos.len()) { val a: Anno = annos.get(i); if (a.name == "prim") { return true }; i = i + 1 }
+  return false
+}
+
+// A @prim struct/class is registered EXACTLY as the older `@prim fun Int()` was: a signature-only PFun
+// that carries the @prim annotation into `pfuns` (so finishLower's `recordPrim` scan builds the SAME
+// primitive registry that drives sizeOf<T>()/packed strides) and a name entry in fN — but is kept OUT of
+// structN/classN, so it never heap-allocates, mallocs, or auto-ARCs. Its body methods (if any) still
+// register under the normal owner-mangled convention.
+fun collectPrim(td: FTDecl, pfuns: IntBuf, fN: IntBuf, fR: IntBuf): Int {
+  val sig = FFunc(td.annos, td.name, "", "", list(), "", "", FENoRes)
+  pfuns.push(PFun("", sig)); fN.push(td.name); fR.push("")
+  collectMethodSigs(td, pfuns, fN, fR)
+  return 0
+}
+
 // Collect ONE top-level declaration at the cursor into the sig/type tables, returning 1 if it consumed
 // a known decl or 0 if the token isn't a decl-start (caller stops). Shared by parseLower's main loop AND
 // injectHelpers, so the prelude can carry ANY declaration (class/struct/enum/trait/impl/const), not just
@@ -2536,8 +2790,8 @@ fun recordValue(annos: IntBuf, name: String, valueE: IntBuf): Int {
 fun collectDecl(p: P, annos: IntBuf, pfuns: IntBuf, fN: IntBuf, fR: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBuf, classN: IntBuf, traitN: IntBuf, traitDecls: IntBuf, implTrait: IntBuf, implType: IntBuf, constN: IntBuf, constExprs: IntBuf, variantN: IntBuf, variantTag: IntBuf, variantTys: IntBuf, variantOwn: IntBuf, roleK: IntBuf, roleV: IntBuf, arcE: IntBuf, valueE: IntBuf, deriveT: IntBuf, deriveTr: IntBuf, monoN: IntBuf, monoP: IntBuf): Int {
   val k = pk(p)
   if (k == 10) { val fd = parseFunc(p, annos); pfuns.push(PFun("", fd)); fN.push(fd.name); fR.push(fd.ret); recordLang(fd.annos, fd.name, roleK, roleV); return 1 }
-  if (k == 54) { val td0 = parseTypeDecl(p, annos, 0); collectStruct(td0, structN, structF, structFT); collectMethodSigs(td0, pfuns, fN, fR); recordLangMethods(td0.methods, td0.name, 1, roleK, roleV); recordArc(annos, td0.name, arcE); recordValue(annos, td0.name, valueE); recordDerive(annos, td0.name, deriveT, deriveTr); recordMono(annos, td0.name, td0.gen, monoN, monoP); return 1 }
-  if (k == 65) { val td1 = parseTypeDecl(p, annos, 1); collectStruct(td1, structN, structF, structFT); classN.push(td1.name); collectMethodSigs(td1, pfuns, fN, fR); collectDeinit(td1, pfuns, fN, fR); recordLangMethods(td1.methods, td1.name, 1, roleK, roleV); recordArc(annos, td1.name, arcE); recordValue(annos, td1.name, valueE); recordDerive(annos, td1.name, deriveT, deriveTr); recordMono(annos, td1.name, td1.gen, monoN, monoP); return 1 }
+  if (k == 54) { val td0 = parseTypeDecl(p, annos, 0); if (hasPrim(annos)) { collectPrim(td0, pfuns, fN, fR); recordLangMethods(td0.methods, td0.name, 1, roleK, roleV); return 1 } collectStruct(td0, structN, structF, structFT); collectMethodSigs(td0, pfuns, fN, fR); recordLangMethods(td0.methods, td0.name, 1, roleK, roleV); recordArc(annos, td0.name, arcE); recordValue(annos, td0.name, valueE); recordDerive(annos, td0.name, deriveT, deriveTr); recordMono(annos, td0.name, td0.gen, monoN, monoP); return 1 }
+  if (k == 65) { val td1 = parseTypeDecl(p, annos, 1); if (hasPrim(annos)) { collectPrim(td1, pfuns, fN, fR); recordLangMethods(td1.methods, td1.name, 1, roleK, roleV); return 1 } collectStruct(td1, structN, structF, structFT); classN.push(td1.name); collectMethodSigs(td1, pfuns, fN, fR); collectDeinit(td1, pfuns, fN, fR); recordLangMethods(td1.methods, td1.name, 1, roleK, roleV); recordArc(annos, td1.name, arcE); recordValue(annos, td1.name, valueE); recordDerive(annos, td1.name, deriveT, deriveTr); recordMono(annos, td1.name, td1.gen, monoN, monoP); return 1 }
   if (k == 55) { val ed = parseEnum(p, annos); collectEnum(ed, variantN, variantTag, variantTys, variantOwn); recordDerive(ed.annos, ed.name, deriveT, deriveTr); return 1 }
   if (k == 66) { val tr = parseTrait(p, annos); traitN.push(tr.name); traitDecls.push(tr); recordLangMethods(tr.methods, "", 0, roleK, roleV); return 1 }
   if (k == 67) { val im = parseImpl(p, annos); collectImplMethods(im, pfuns, fN, fR); if (im.traitName != "") { implTrait.push(im.traitName); implType.push(im.forTy) }; recordLangMethods(im.methods, im.forTy, 1, roleK, roleV); recordArc(annos, im.forTy, arcE); return 1 }
@@ -3117,18 +3371,36 @@ fun finishLower(pfuns: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBu
     }
     pmi = pmi + 1
   }
+  // whole-program param-type table: mangled function name -> its declared param types (an IntBuf of type
+  // strings, so a `(Int, Int) -> Int` type's own commas don't get split). Covers EVERY pfun (free fns AND
+  // methods, unlike pmN which is free-fns only), so a method's callback param type drives lambda-arg typing.
+  val fpN = list(); val fpT = list()
+  var fpi = 0
+  while (fpi < pfuns.len()) {
+    val fpf: PFun = pfuns.get(fpi)
+    fpN.push(mangleMethod(fpf.owner, fpf.fd.name))
+    val ftys = list()
+    // a real method's receiver (`self`) lives in fd.recv, NOT fd.params — but the call site prepends the
+    // receiver as arg0 (consFront) and the UFCS free-fn form carries its receiver as param0. Prepend a
+    // receiver slot here for methods-with-self so BOTH forms align at a uniform offset of 1 on that path.
+    if (fpf.owner != "" && fpf.fd.recv != "") { ftys.push(fpf.owner) }
+    var fqi = 0
+    while (fqi < fpf.fd.params.len()) { val fpp: FParam = fpf.fd.params.get(fqi); ftys.push(fpp.ty); fqi = fqi + 1 }
+    fpT.push(ftys)
+    fpi = fpi + 1
+  }
   // primitive registry: source the numeric classification (sizeOf<T>() strides, packed sized loads) from
   // the lib @prim markers — the SAME table the checker builds. The prelude markers (lib/core/num.kite) are
   // in `pfuns` (injectHelpers pushed them), each FFunc carrying its @prim annotation, so one scan builds it.
-  val prim = PReg(list(), list(), list())
+  val prim = PReg(list(), list(), list(), list(), list())
   var pri = 0
-  while (pri < pfuns.len()) { val ppf: PFun = pfuns.get(pri); recordPrim(ppf.fd.annos, ppf.fd.name, prim); pri = pri + 1 }
+  while (pri < pfuns.len()) { val ppf: PFun = pfuns.get(pri); recordPrim(ppf.fd.annos, ppf.fd.name, prim); recordAlias(ppf.fd.annos, ppf.fd.name, prim); pri = pri + 1 }
   // phase 2: lower every function now that all signatures are known; lambdas lift into `lifted`
   val funcs = list()
   val lifted = list()
   val gctr = list(); gctr.push(0)
   var i = 0
-  while (i < pfuns.len()) { val pf: PFun = pfuns.get(i); if (memListL(monoN, pf.owner)) { i = i + 1 } else { funcs.push(lowerFuncFull(pf, fN, fR, structN, structF, structFT, lifted, gctr, classN, traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys, variantOwn, roleK, roleV, arcE, valueE, prim)); i = i + 1 } }
+  while (i < pfuns.len()) { val pf: PFun = pfuns.get(i); if (memListL(monoN, pf.owner)) { i = i + 1 } else { funcs.push(lowerFuncFull(pf, fN, fR, structN, structF, structFT, lifted, gctr, classN, traitN, constN, constV, cfuncs, traitMethN, traitMethT, pmN, pmM, variantN, variantTys, variantOwn, roleK, roleV, arcE, valueE, prim, fpN, fpT)); i = i + 1 } }
   var j = 0
   while (j < lifted.len()) { funcs.push(lifted.get(j)); j = j + 1 }
   var d = 0
@@ -3781,7 +4053,7 @@ fun printUsage(): Int {
 
 // REAL CLI. macOS passes argc in x0 and argv (char**) in x1 to _main, so main receives them directly;
 // __argv(argv, i) reads argv[i] as a String. Output defaults to the CURRENT DIRECTORY (no /tmp).
-fun main(argc: Int, argv: Int): Int {
+fun main(argc: Int, argv: USize): Int {
   var input = ""
   var output = ""
   var mode = 0

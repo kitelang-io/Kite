@@ -1,4 +1,4 @@
-// pub-import re-export chain: `import kite::core` gives Int_gcd (core pub-imports core::math), optGetOr/Some
+// pub-import re-export chain: `import kite::core` gives Int_gcd (core pub-imports core::math), Option_getOr/Some
 // (core pub-imports core::option). Int_gcd is a namespace free function, reached across the module boundary
 // by its (aliased) name — method sugar `n.gcd(m)` resolves against the flat registry and cannot see a
 // module-mangled free function, so the re-export chain is exercised with a direct call. `rangeList` and the
@@ -8,5 +8,5 @@ import kite::core
 import kite::alloc
 
 fun main(): Int {
-  return Int_gcd(100, 60) + rangeList(5).sum() + optGetOr(Some(7), 0)
+  return Int_gcd(100, 60) + rangeList(5).sum() + Some(7).getOr(0)
 }

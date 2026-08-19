@@ -1,0 +1,23 @@
+// REGRESSION FIXTURE — this program is DELIBERATELY MALFORMED: `fun Int..dbl()` has a SECOND dot where the
+// extension-function method name should be.
+//
+// The extension-function decl syntax `fun Type.method(args): R { ... }` desugars in parseFunc onto the
+// free-function convention (`fun <Type>_<method>(this: <Type>, ...)`) that method dispatch already uses.
+// The first attempt's parser branch did NO validation: after eating the `.` it blindly took `ptext(p)` as
+// the method name. On `fun Int..dbl()` the "method name" became "." (a second dot token), and the later
+// `eat(p) // '('` then consumed `dbl` instead of the real `(`, DESYNCING the parser. The real `main` was
+// swallowed and never emitted, yet `check` reported "ok" and no diagnostic fired — a SILENT miscompile.
+//
+// Fixed by requiring the token after the dot to be a plain identifier (kind 1). A violation — a second `.`,
+// a `(`, a number, etc. — now routes through the shared hard-abort diagnostic path (stderr Diagnostic +
+// __abort → exit 134, NO binary), exactly like every other robustness case. A well-formed `fun Int.dbl()`
+// still parses and compiles.
+//
+// gate.sh compiles this with `--no-check` and asserts a non-zero exit, no output binary, and a stderr
+// diagnostic mentioning the extension-function method name.
+fun Int..dbl(): Int { return this + this }
+
+fun main(): Int {
+  val x: Int = 21
+  return x.dbl()
+}

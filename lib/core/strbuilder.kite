@@ -9,7 +9,7 @@
 // `+`-heavy loops and string interpolation build onto ONE StrBuilder and `finish()` once. finish() SEALS the
 // builder: it NUL-terminates the scratch buffer and TRANSFERS its ownership to the returned String (no extra
 // copy, no leak — the buffer IS the result), leaving data=0 so the builder's deinit frees nothing.
-class StrBuilder(var n: Int, var cap: Int, var data: Int) {
+class StrBuilder(var n: Int, var cap: Int, var data: USize) {
   // append one raw byte (grow by doubling when full).
   fun pushByte(self, b: Int): Int {
     if (self.n == self.cap) { self.cap = self.cap * 2 self.data = __rawRealloc(self.data, self.cap) }

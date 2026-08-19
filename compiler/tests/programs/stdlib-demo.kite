@@ -8,8 +8,8 @@ fun main(): Int {
   val evens = doubled.filter({ n -> n % 4 == 0 })
   val sum = evens.fold(0, { a, x -> a + x })
   val found = xs.find({ n -> n > 3 })
-  val fv = optGetOr(found, 0)
+  val fv = found.getOr(0)
   val none = xs.find({ n -> n > 100 })
-  val nv = optGetOr(none, 99)
+  val nv = none.getOr(99)
   return sum * 10 + fv + nv
 }

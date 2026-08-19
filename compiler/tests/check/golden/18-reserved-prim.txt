@@ -1,4 +1,5 @@
 error: I128 is reserved and not yet implemented
 error: U128 is reserved and not yet implemented
 error: I128 is reserved and not yet implemented
-3 error(s)
+error: return type I128 is not compatible with U128
+4 error(s)

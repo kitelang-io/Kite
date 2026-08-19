@@ -4,7 +4,7 @@ import kite::io
 struct Rect(pub val width: Int, pub val height: Int, var scale: Int)
 
 // reference type (ARC) with a deinit for RAII cleanup
-class File(val fd: Int32) {
+class File(val fd: I32) {
   deinit {
     sysClose(fd)
   }
@@ -19,7 +19,7 @@ enum Expr {
 
 enum IoError {
   NotFound
-  Subprocess(code: Int32)
+  Subprocess(code: I32)
   Other(msg: String)
 }
 

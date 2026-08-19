@@ -16,14 +16,22 @@ fun probeAlloc(): Int {
 
 fun main(): Int {
   var prev = 0
-  var stable = 1
+  var reuse = 0
+  var total = 0
   var i = 0
   while (i < 4000) {
     val p = probeAlloc()
-    if (i > 2) { if (p != prev) { stable = 0 } }
+    if (i > 2) { total = total + 1; if (p == prev) { reuse = reuse + 1 } }
     prev = p
     i = i + 1
   }
-  // 0 = every String's data buffer was freed (leak ended); 1 = the pointer climbed (still leaking).
-  return if (stable == 1) { 0 } else { 1 }
+  // FREED: the LIFO free list hands the just-freed same-size block straight back, so the captured pointer
+  //   is IDENTICAL to the previous iteration nearly every time -> reuse ~= total.
+  // LEAKING: nothing is freed, so each same-size alloc climbs to a fresh higher address and the pointer is
+  //   NEVER equal to the previous one -> reuse ~= 0.
+  // Require only a strong MAJORITY of reuses rather than a perfect run: the OS allocator occasionally hands
+  // back a different block (a fresh page / another arena) even when freeing correctly (~1/7 of runs saw one
+  // such blip), which made an exact-stability check flaky WITHOUT changing the invariant proven. A real leak
+  // still fails hard (reuse stays ~0), so this de-flakes without weakening the leak-end assertion.
+  return if (reuse * 2 > total) { 0 } else { 1 }
 }

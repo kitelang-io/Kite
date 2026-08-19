@@ -1,0 +1,13 @@
+// Regression: `String + <Int>` must auto-stringify the numeric operand (Kotlin-like), NOT dereference the
+// raw Int as a char* (which segfaulted, rc139). `"s" + n` yields "s5". Exit code = total length of the
+// three concatenations, proving each produced a real String instead of crashing.
+fun main(): Int {
+  val n = 5
+  val a = "s" + n
+  // "s5" -> len 2
+  val b = "val=" + 42
+  // "val=42" -> len 6
+  val c = "x" + n + "y"
+  // "x5y" -> len 3
+  return a.len() + b.len() + c.len()
+}
