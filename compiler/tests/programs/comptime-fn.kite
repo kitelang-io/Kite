@@ -11,7 +11,7 @@ fun fact(n: Int): Int {
   return r
 }
 
-const FIB10 = fib(10)
+const val FIB10 = fib(10)
 
 fun main(): Int {
   val a = comptime(fib(7))

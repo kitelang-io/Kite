@@ -1,0 +1,13 @@
+// Phase M3 regression: an undefined `Type::member` STATIC must not silently emit a bare `member` symbol
+// (a dangling reference -> dyld crash / garbage). The M3 checker rejects it before lowering; this fixture
+// proves the LOWERER is also hardened, so even a `--no-check` build cannot produce a corrupt binary.
+// Before M3, staticCallee fell back to the bare name `nope`, and lowering emitted a call to an undefined
+// symbol. Now staticCallee has no bare fallback: a no-such-static hard-aborts (exit 134, no binary) with a
+// "no such associated member" diagnostic on stderr. `Widget::nope()` is a genuine no-such-static (Widget is
+// a defined struct with no `nope`); the gate compiles with `--no-check` and asserts abort + no binary.
+struct Widget(val id: Int)
+
+fun main(): Int {
+  val w = Widget::nope()
+  return 0
+}

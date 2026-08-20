@@ -31,24 +31,78 @@
 // primitive — byte-for-byte the old `@prim fun Int()`, only the declaration syntax now reads as a type.
 @prim("sint", 8) class Byte
 @prim("sint", 16) class Short
-@prim("sint", 32) class Int
-@prim("sint", 64) class Long
-@prim("sint", 64) class ISize
-@prim("sint", 8) @alias("Byte") class I8
-@prim("sint", 16) @alias("Short") class I16
-@prim("sint", 32) @alias("Int") class I32
-@prim("sint", 64) @alias("Long") class I64
+// Int is a 32-bit signed integer (Phase BC narrowed it from the 64-bit word). The pointer-width machine
+// word is now Long/ISize/USize, NOT Int — addresses/sizes/buffer pointers carry those types.
+@prim("sint", 32) class Int {
+  const val BITS: Int = 32
+  const val MAX: Int = 2147483647
+  const val MIN: Int = 0 - 2147483648
+}
+// signed 64-bit standalone (Long == I64); the pointer-width signed word is ISize (same width). The 64-bit
+// bounds are written with the `L`/`isize` suffix so the literal carries the wide type (a bare literal
+// infers Int, which no longer holds a 64-bit value).
+@prim("sint", 64) class Long {
+  const val BITS: Int = 64
+  const val MAX: Long = 9223372036854775807L
+  const val MIN: Long = 0L - 9223372036854775807L - 1L
+}
+@prim("sint", 64) class ISize {
+  const val BITS: Int = 64
+  const val MAX: ISize = 9223372036854775807isize
+  const val MIN: ISize = 0isize - 9223372036854775807isize - 1isize
+}
+@prim("sint", 8) @alias("Byte") class I8 {
+  const val BITS: Int = 8
+  const val MAX: Int = 127
+  const val MIN: Int = 0 - 128
+}
+@prim("sint", 16) @alias("Short") class I16 {
+  const val BITS: Int = 16
+  const val MAX: Int = 32767
+  const val MIN: Int = 0 - 32768
+}
+@prim("sint", 32) @alias("Int") class I32 {
+  const val BITS: Int = 32
+  const val MAX: Int = 2147483647
+  const val MIN: Int = 0 - 2147483648
+}
+@prim("sint", 64) @alias("Long") class I64 {
+  const val BITS: Int = 64
+  const val MAX: Int = 9223372036854775807
+  const val MIN: Int = 0 - 9223372036854775807 - 1
+}
 
 // ---- unsigned integer tower (primaries + explicit-width aliases) ----
 @prim("uint", 8) class UByte
 @prim("uint", 16) class UShort
 @prim("uint", 32) class UInt
 @prim("uint", 64) class ULong
-@prim("uint", 64) class USize
-@prim("uint", 8) @alias("UByte") class U8
-@prim("uint", 16) @alias("UShort") class U16
-@prim("uint", 32) @alias("UInt") class U32
-@prim("uint", 64) @alias("ULong") class U64
+// USize is the unsigned pointer-width word (addresses/sizes); MIN is 0, MAX (2^64-1) exceeds the signed
+// word so it is deferred with I128/U128 exactly like U64::MAX.
+@prim("uint", 64) class USize {
+  const val BITS: Int = 64
+  const val MIN: USize = 0usize
+}
+@prim("uint", 8) @alias("UByte") class U8 {
+  const val BITS: Int = 8
+  const val MAX: Int = 255
+  const val MIN: Int = 0
+}
+@prim("uint", 16) @alias("UShort") class U16 {
+  const val BITS: Int = 16
+  const val MAX: Int = 65535
+  const val MIN: Int = 0
+}
+@prim("uint", 32) @alias("UInt") class U32 {
+  const val BITS: Int = 32
+  const val MAX: Int = 4294967295
+  const val MIN: Int = 0
+}
+// U64_MAX exceeds the i64 word, so it is deferred with I128/U128
+@prim("uint", 64) @alias("ULong") class U64 {
+  const val BITS: Int = 64
+  const val MIN: Int = 0
+}
 
 // ---- floating point ----
 @prim("float", 32) class Float
@@ -71,85 +125,9 @@
 // ======================================================================================
 // Associated constants — each numeric type's SURFACE, library-defined (STDLIB-REDESIGN §2a).
 //
-// These are Kite's stand-in for Rust's `i64::MAX` / `u8::MAX` / `i32::BITS`: the bounds and width of
-// each scalar, written in the library rather than baked into the compiler. Spelled as free functions
-// under the `<Type>_<CONST>` convention — exactly how an associated constant mangles — so `Int_MAX()`
-// reads as `Int::MAX`. Bare integer arithmetic (registers are 64-bit words), so word-width MIN is
-// computed as `0 - MAX - 1` rather than written as an out-of-range literal.
-
-// Int is a 32-bit signed integer (Phase BC narrowed it from the 64-bit word). The pointer-width machine
-// word is now Long/ISize/USize, NOT Int — addresses/sizes/buffer pointers carry those types.
-fun Int_BITS(): Int { return 32 }
-
-fun Int_MAX(): Int { return 2147483647 }
-
-fun Int_MIN(): Int { return 0 - 2147483648 }
-
-// signed 64-bit standalone (Long == I64); the pointer-width signed word is ISize (same width). The 64-bit
-// bounds are written with the `L`/`isize` suffix so the literal carries the wide type (a bare literal
-// infers Int, which no longer holds a 64-bit value).
-fun Long_BITS(): Int { return 64 }
-
-fun Long_MAX(): Long { return 9223372036854775807L }
-
-fun Long_MIN(): Long { return 0L - 9223372036854775807L - 1L }
-
-fun ISize_BITS(): Int { return 64 }
-
-fun ISize_MAX(): ISize { return 9223372036854775807isize }
-
-fun ISize_MIN(): ISize { return 0isize - 9223372036854775807isize - 1isize }
-
-// USize is the unsigned pointer-width word (addresses/sizes); MIN is 0, MAX (2^64-1) exceeds the signed
-// word so it is deferred with I128/U128 exactly like U64_MAX.
-fun USize_BITS(): Int { return 64 }
-
-fun USize_MIN(): USize { return 0usize }
-
-// signed fixed widths
-fun I8_BITS(): Int { return 8 }
-
-fun I8_MAX(): Int { return 127 }
-
-fun I8_MIN(): Int { return 0 - 128 }
-
-fun I16_BITS(): Int { return 16 }
-
-fun I16_MAX(): Int { return 32767 }
-
-fun I16_MIN(): Int { return 0 - 32768 }
-
-fun I32_BITS(): Int { return 32 }
-
-fun I32_MAX(): Int { return 2147483647 }
-
-fun I32_MIN(): Int { return 0 - 2147483648 }
-
-fun I64_BITS(): Int { return 64 }
-
-fun I64_MAX(): Int { return 9223372036854775807 }
-
-fun I64_MIN(): Int { return 0 - 9223372036854775807 - 1 }
-
-// unsigned fixed widths (MIN is 0; U64_MAX exceeds the i64 word, so it is deferred with I128/U128)
-fun U8_BITS(): Int { return 8 }
-
-fun U8_MAX(): Int { return 255 }
-
-fun U8_MIN(): Int { return 0 }
-
-fun U16_BITS(): Int { return 16 }
-
-fun U16_MAX(): Int { return 65535 }
-
-fun U16_MIN(): Int { return 0 }
-
-fun U32_BITS(): Int { return 32 }
-
-fun U32_MAX(): Int { return 4294967295 }
-
-fun U32_MIN(): Int { return 0 }
-
-fun U64_BITS(): Int { return 64 }
-
-fun U64_MIN(): Int { return 0 }
+// These are Kite's stand-in for Rust's `i64::MAX` / `u8::MAX` / `i32::BITS`: the bounds and width of each
+// scalar, written in the library rather than baked into the compiler. They are `const val` members of each
+// numeric type's body (Phase M6 — the ONE associated-constant syntax), read as `Int::MAX` / `U8::MAX` /
+// `I32::BITS` via the `::` static-member path. Bare integer arithmetic (registers are 64-bit words), so
+// word-width MIN is computed as `0 - MAX - 1` rather than written as an out-of-range literal. The `<Type>_<CONST>`
+// mangle these lower to is no longer a valid surface identifier.

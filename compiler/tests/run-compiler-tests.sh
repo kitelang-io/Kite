@@ -81,7 +81,9 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/ns-method-sugar.kite:18
        compiler/tests/programs/alias-method-dispatch.kite:4
        compiler/tests/programs/string-escapes.kite:255 compiler/tests/programs/char-utf8.kite:127
-       compiler/tests/programs/string-int-concat.kite:11 compiler/tests/programs/named-fn-ref.kite:34)
+       compiler/tests/programs/string-int-concat.kite:11 compiler/tests/programs/named-fn-ref.kite:34
+       compiler/tests/programs/assoc-const-value.kite:11
+       compiler/tests/programs/const-val.kite:198 compiler/tests/programs/overload.kite:90 compiler/tests/programs/secondary-ctor.kite:29)
 for t in $TESTS; do
   if check "${t%:*}" "${t##*:}"; then pass=$((pass+1)); else fail=$((fail+1)); fi
 done

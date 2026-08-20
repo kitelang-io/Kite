@@ -1,0 +1,2 @@
+error: type Widget has no member paint
+1 error(s)

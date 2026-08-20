@@ -4,38 +4,37 @@
 // kite::core::strbuilder; the ALLOCATING string transforms (substr/repeat/join) live in kite::alloc::string.
 //
 // The built-in String is a primitive (a NUL-terminated C-string, one Int word). Following Kotlin, its
-// convention methods live WITH the type: the byte-loop bodies are the METHODS/OPERATORS here — `s.charAt(i)`
-// -> String_charAt, `s.len()`/`s.length` -> String_len/String_length, `a + b` -> `impl Add for String`
-// (String_add), `a == b`/`a != b` -> `impl Eq for String` (String_eq), `a < b` -> `impl Ord for String`
-// (String_cmp), and `n.toStr()` -> Int_toStr. Method dispatch on the String builtin-nominal mangles
-// `s.m(..)` to `String_m(s, ..)`; the desugar roles str.get/str.concat/str.show land on these too. Auto-
-// included via compiler/prelude.conf (after kite::core::ops/cmp, which declare Add/Eq/Ord/Hash); names are
-// global (unmangled).
+// convention methods live WITH the type as EXTENSION METHODS: the byte-loop bodies are the methods/operators
+// here — `s.charAt(i)`, `s.len()`/`s.length`, `s.byteAt(i)`, `a + b` -> `impl Add for String`, `a == b` ->
+// `impl Eq for String`, `a < b` -> `impl Ord for String`, and `n.toStr()`. The mangled `String_<m>` /
+// `Int_toStr` names these desugar to are NO LONGER valid surface identifiers (Phase M6): callers — inside
+// this file and out — spell the method form (`s.len()`, `n.toStr()`). The desugar roles str.get/concat/show
+// still land on them (the @lang marker records the desugared symbol). Auto-included via compiler/prelude.conf.
 
-// Pure-Kite string ops on the NUL-terminated byte representation. String_charAt is just a byte load;
-// String_len scans to the terminating 0. @lang("str.get") makes String_charAt the landing point for `s[i]`.
+// Pure-Kite string ops on the NUL-terminated byte representation. `charAt` is just a byte load; `len` scans
+// to the terminating 0. @lang("str.get") makes charAt the landing point for `s[i]`.
 @lang("str.get")
-fun String_charAt(s: String, i: Int): Int { return __rawLoadByte(s, i) }
+fun String.charAt(i: Int): Int { return __rawLoadByte(self, i) }
 
-fun String_len(s: String): Int { var i = 0 var go = 1 while (go == 1) { if (__rawLoadByte(s, i) == 0) { go = 0 } else { i = i + 1 } } return i }
+fun String.len(): Int { var i = 0 var go = 1 while (go == 1) { if (__rawLoadByte(self, i) == 0) { go = 0 } else { i = i + 1 } } return i }
 
 // `length` is the getter alias of `len`: a nullary method, so `s.length` (no parens) resolves here
 // via klower's getter routing.
-fun String_length(s: String): Int { return String_len(s) }
+fun String.length(): Int { return self.len() }
 
-// String_byteAt / s.byteAt(i): the core-tier byte accessor (§2c — the T0 self-host iteration primitive,
-// distinct from a future T1 `chars()` that decodes UTF-8). Same load as charAt, named per the design.
-fun String_byteAt(s: String, i: Int): Int { return __rawLoadByte(s, i) }
+// `s.byteAt(i)`: the core-tier byte accessor (§2c — the T0 self-host iteration primitive, distinct from a
+// future T1 `chars()` that decodes UTF-8). Same load as charAt, named per the design.
+fun String.byteAt(i: Int): Int { return __rawLoadByte(self, i) }
 
-// Int_toStr / n.toStr(): base-10, handles 0 and negatives, into a fresh NUL-terminated buffer. `%` avoided
+// `n.toStr()`: base-10, handles 0 and negatives, into a fresh NUL-terminated buffer. `%` avoided
 // via d = mm - (mm/10)*10. (ASCII '0'=48, '-'=45.) @lang("str.show") makes it the landing point for `$expr`
 // string interpolation on a non-String value (the "interpolation calls show" path).
 @lang("str.show")
-fun Int_toStr(n: Int): String {
-  if (n == 0) { val z = __rawAlloc(2) __rawStoreByte(z, 0, 48) __rawStoreByte(z, 1, 0) return z }
+fun Int.toStr(): String {
+  if (self == 0) { val z = __rawAlloc(2) __rawStoreByte(z, 0, 48) __rawStoreByte(z, 1, 0) return z }
   var neg = 0
-  var m = n
-  if (n < 0) { neg = 1 m = 0 - n }
+  var m = self
+  if (self < 0) { neg = 1 m = 0 - self }
   var digits = 0
   var t = m
   while (t > 0) { digits = digits + 1 t = t / 10 }
@@ -49,9 +48,8 @@ fun Int_toStr(n: Int): String {
   return r
 }
 
-// `n.toStr()` — the UFCS entry for the Int-typed method (Int is not a nominal type, so `n.toStr()`
-// resolves as the free call `toStr(n)`). Delegates to the canonical Int_toStr body above.
-fun toStr(n: Int): String { return Int_toStr(n) }
+// `toStr(n)` — the free-function spelling, delegating to the canonical `Int.toStr` method above.
+fun toStr(n: Int): String { return n.toStr() }
 
 // String overloads `+` as concatenation via the Add operator trait (see kite::core::ops): klower's
 // lowerBin desugars `a + b` where a (or b) is a String to String_add(a, b). @lang("str.concat") also makes
@@ -65,8 +63,8 @@ fun toStr(n: Int): String { return Int_toStr(n) }
 impl Add for String {
   @lang("str.concat")
   fun add(self, rhs: String): String {
-    val la = String_len(self)
-    val lb = String_len(rhs)
+    val la = self.len()
+    val lb = rhs.len()
     val r = __rawAlloc(la + lb + 1)
     var i = 0
     while (i < la) { __rawStoreByte(r, i, __rawLoadByte(self, i)) i = i + 1 }

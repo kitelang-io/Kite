@@ -1,0 +1,3 @@
+struct Widget(val id: Int)
+
+fun probe(w: Widget): Int { return Widget.nope() }

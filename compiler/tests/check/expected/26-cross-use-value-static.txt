@@ -1,0 +1,2 @@
+error: line 1: member foo of a value must be accessed with `.` not `::`
+1 semantic error(s)

@@ -1,0 +1,2 @@
+error: type IntBuf has no member enlarge
+1 error(s)

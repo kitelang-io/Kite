@@ -68,6 +68,11 @@ fun emitDiags(ds: IntBuf): Int {
   return 0
 }
 
+// A hard PARSER error: emit a stderr diagnostic through the single sink and abort (exit 134, NO binary),
+// exactly like the extension-fn malformed-decl guards. Used for surface forms the grammar rejects outright
+// (e.g. bare `const` without `val`).
+fun parseFail(msg: String): Int { emitDiag(diagError(msg)); __abort(); return 0 }
+
 // ============================ Lexer ========================================
 // line: 1-based source line of the current lex position, bumped by adv() whenever it steps over a '\n'.
 struct Lx(val src: String, val n: Int, var pos: Int, var line: Int)
@@ -271,6 +276,7 @@ fun kw(w: String): Int {
   if (w == "consuming") { return 72 }
   if (w == "const") { return 80 }
   if (w == "use") { return 81 }
+  if (w == "constructor") { return 86 }
   if (w == "until") { return 84 }
   if (w == "as") { return 85 }
   return 1
@@ -467,7 +473,7 @@ struct FTDecl(val annos: IntBuf, val kind: Int, val name: String, val gen: Strin
 
 struct FVariant(val name: String, val payKind: Int, val tys: IntBuf, val flds: IntBuf) // payKind 0 none / 1 positional / 2 named
 
-struct FEDecl(val annos: IntBuf, val name: String, val gen: String, val variants: IntBuf)
+struct FEDecl(val annos: IntBuf, val name: String, val gen: String, val variants: IntBuf, val consts: IntBuf) // consts = synthesized nullary assoc-const FFuncs (const val in an enum body)
 
 struct FAssoc(val name: String, val text: String)
 
@@ -1260,15 +1266,74 @@ fun parseUse(p: P): FUse {
   return FUse(m, nm)
 }
 
-// const NAME [: Ty] = <constant expression>
+// const val NAME [: Ty] = <constant expression> — the ONE constant syntax (M5). Bare `const` is rejected.
 struct FConstDecl(val name: String, val expr: FExpr)
 
 fun parseConst(p: P): FConstDecl {
   eat(p) // 'const'
+  if (pk(p) != 11) { parseFail("`const` must be written `const val NAME = <expr>` — bare `const` is not allowed (use `const val`)") }
+  eat(p) // 'val'
   val name = ptext(p); eat(p)
   if (pk(p) == 25) { eat(p); parseTy(p) } // optional ': Ty' (ignored — consts are integers)
   eat(p) // '='
   return FConstDecl(name, parseExpr(p))
+}
+
+// in a class/struct/enum body: `const val NAME [:Ty] = <expr>` is an ASSOCIATED CONSTANT, synthesized as a
+// nullary associated function `<Owner>_NAME(): Ty = <expr>` (recv "" => static). `Owner::NAME` then resolves
+// through the ordinary static-member path (staticCallee -> mangle -> nullary auto-call) and const-folds via
+// ceEval. Ty defaults to Int (associated int consts first). Returns the synthesized FFunc for the owner.
+fun parseConstMember(p: P): FFunc {
+  eat(p) // 'const'
+  if (pk(p) != 11) { parseFail("associated constants must be `const val NAME = <expr>` — bare `const` is not allowed") }
+  eat(p) // 'val'
+  val name = ptext(p); eat(p)
+  var ty = "Int"
+  if (pk(p) == 25) { eat(p); ty = parseTy(p) }
+  eat(p) // '='
+  val e = parseExpr(p)
+  val a = list(); a.push(Anno("constval", list())) // marker: this assoc fn is a `const val` (kind "const" for dot/:: rule)
+  return FFunc(a, name, "", "", list(), ty, "", e)
+}
+
+// is this FFunc a synthesized associated `const val` (carries the `@constval` marker anno)? Used by the
+// member-table populators to classify it as kind "const" (bound with `::`, dot-access is a cross-use error).
+fun isConstValFn(annos: IntBuf): Bool {
+  var i = 0
+  while (i < annos.len()) { val a: Anno = annos.get(i); if (a.name == "constval") { return true }; i = i + 1 }
+  return false
+}
+
+// SECONDARY CONSTRUCTOR (M5): `constructor(params) : this(delegated-args) [ { body } ]`. Delegates to the
+// primary field-list constructor `Owner(delegated-args)`. Synthesized as a STATIC assoc factory named
+// `__ctor_<arity>` (mangles to `<Owner>___ctor_<arity>`, recv "" => static) returning Owner; selected at an
+// `Owner(args)` call by arity. An optional body runs after delegation with the constructed value bound to
+// `this`. `fields` is the primary field list (reserved for delegation type-checking).
+fun parseSecondaryCtor(p: P, owner: String, fields: IntBuf): FFunc {
+  eat(p) // 'constructor'
+  if (pk(p) != 20) { parseFail("secondary constructor: expected `(` after `constructor`") }
+  eat(p) // '('
+  val params = list()
+  if (pk(p) != 21) { var more = 1
+    while (more == 1) { params.push(parseParam(p)); if (pk(p) == 24) { eat(p) } else { more = 0 } } }
+  eat(p) // ')'
+  if (pk(p) != 25) { parseFail("secondary constructor must delegate to the primary: `constructor(..) : this(..)`") }
+  eat(p) // ':'
+  if (pk(p) != 8) { parseFail("secondary constructor delegation must be `: this(..)`") }
+  eat(p) // 'this'
+  if (pk(p) != 20) { parseFail("secondary constructor: expected `(` after `this`") }
+  eat(p) // '('
+  val dargs = parseArgs(p) // consumes through ')'
+  val cons = FECall(FEIdent(owner), dargs)
+  val nm = "__ctor_" + params.len().toStr()
+  if (pk(p) == 22) {
+    val blk = parseBlock(p) // FEBlock(stmts, res) — the optional post-delegation body
+    val stmts = list()
+    stmts.push(FSLet(0, "this", owner, cons))
+    stmts.push(FSExprS(blk))
+    return FFunc(list(), nm, "", "", params, owner, "", FEBlock(stmts, FEThis))
+  }
+  return FFunc(list(), nm, "", "", params, owner, "", cons)
 }
 
 fun parseTypeDecl(p: P, annos: IntBuf, kind: Int): FTDecl {
@@ -1296,7 +1361,9 @@ fun parseTypeDecl(p: P, annos: IntBuf, kind: Int): FTDecl {
     while (pk(p) != 23 && pk(p) != 0) {
       val manns = parseAnnos(p)
       if (pk(p) == 68) { eat(p); dtor = parseBlock(p) } // deinit { ... }
-      else { methods.push(parseFunc(p, manns)) }
+      else { if (pk(p) == 80) { methods.push(parseConstMember(p)) } // const val NAME = <expr>  (associated constant)
+      else { if (pk(p) == 86) { methods.push(parseSecondaryCtor(p, name, fields)) } // constructor(..) : this(..)
+      else { methods.push(parseFunc(p, manns)) } } }
     }
     eat(p) } // '}'
   return FTDecl(annos, kind, name, gen, fields, whr, dtor, methods)
@@ -1333,9 +1400,13 @@ fun parseEnum(p: P, annos: IntBuf): FEDecl {
   val gen = parseGenerics(p)
   eat(p) // '{'
   val variants = list()
-  while (pk(p) != 23 && pk(p) != 0) { variants.push(parseVariant(p)) }
+  val consts = list()
+  while (pk(p) != 23 && pk(p) != 0) {
+    if (pk(p) == 80) { consts.push(parseConstMember(p)) } // const val NAME = <expr> (associated constant)
+    else { variants.push(parseVariant(p)) }
+  }
   eat(p) // '}'
-  return FEDecl(annos, name, gen, variants)
+  return FEDecl(annos, name, gen, variants, consts)
 }
 
 fun parseTrait(p: P, annos: IntBuf): FTraitDecl {

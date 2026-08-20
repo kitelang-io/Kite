@@ -1,0 +1,18 @@
+// M5 (A) — const val unification + associated constants. Top-level `const val`, plus in-class and in-enum
+// `const val` associated constants resolved with `::` (dot-access is a separate cross-use error). Exit 198.
+const val MAX = 100
+const val SHIFT = 1 << 4
+
+class Circle(val r: Int) {
+  const val PI3 = 3
+  fun area(self): Int { return Circle::PI3 * self.r * self.r }
+}
+
+enum Dir { N; E; S; W
+  const val COUNT = 4 }
+
+fun main(): Int {
+  val c = Circle(5)
+  // 100 + 16 + 3 + 4 + (3*5*5)=75  = 198
+  return MAX + SHIFT + Circle::PI3 + Dir::COUNT + c.area()
+}

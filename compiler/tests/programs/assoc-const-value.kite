@@ -1,0 +1,14 @@
+// Phase M3 item 2 regression: a non-call `Int::MAX` VALUE must lower to a CALL of the nullary assoc-const
+// function (`Int_MAX()`), yielding the constant 2147483647 — NOT a bare `EIdent(Int_MAX)`, which is the
+// function's ADDRESS (the Int::MAX-as-value miscompile). member-table-whitelist.kite ASSIGNS Int::MAX but
+// never READS it, so the miscompile is invisible there; this fixture reads it in two value positions (a
+// direct `==` and inside `%`) and returns a checked accumulator so a wrong lowering flips the exit code.
+import kite::core
+
+fun main(): Int {
+  val mx = Int::MAX
+  var acc = 0
+  if (mx == 2147483647) { acc = acc + 10 } // non-call `Int::MAX` bound to a local, then read
+  acc = acc + (Int::MAX % 7)               // non-call `Int::MAX` used directly in arithmetic; 2147483647 % 7 = 1
+  return acc                               // 11
+}

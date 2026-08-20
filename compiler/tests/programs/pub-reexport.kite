@@ -1,12 +1,12 @@
-// pub-import re-export chain: `import kite::core` gives Int_gcd (core pub-imports core::math), Option_getOr/Some
-// (core pub-imports core::option). Int_gcd is a namespace free function, reached across the module boundary
-// by its (aliased) name — method sugar `n.gcd(m)` resolves against the flat registry and cannot see a
-// module-mangled free function, so the re-export chain is exercised with a direct call. `rangeList` and the
-// `.sum()` IntBuf method come from the prelude (kite::alloc::collections::internal::intbuf); `import kite::alloc` still
-// pulls in the collections aggregator.
+// pub-import re-export chain: `import kite::core` gives `Int.gcd` (core pub-imports core::math),
+// Option::getOr/Some (core pub-imports core::option). `Int.gcd` is an extension method whose desugared free
+// function is module-mangled under the namespace import; Phase M6's module-aware method resolver (resolveFun)
+// binds `n.gcd(m)` across the module boundary to that mangled symbol — the surface `Int_gcd` name is no
+// longer valid. `rangeList` and the `.sum()` IntBuf method come from the prelude
+// (kite::alloc::collections::internal::intbuf); `import kite::alloc` still pulls in the collections aggregator.
 import kite::core
 import kite::alloc
 
 fun main(): Int {
-  return Int_gcd(100, 60) + rangeList(5).sum() + Some(7).getOr(0)
+  return 100.gcd(60) + rangeList(5).sum() + Some(7).getOr(0)
 }

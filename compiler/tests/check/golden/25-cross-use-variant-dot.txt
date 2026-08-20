@@ -1,0 +1,2 @@
+error: member Red of type Color must be accessed with `::` not `.`
+1 error(s)

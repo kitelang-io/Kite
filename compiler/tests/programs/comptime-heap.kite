@@ -1,4 +1,4 @@
-const HLEN = "hello".len()
+const val HLEN = "hello".len()
 
 fun main(): Int {
   val a = comptime("hi".len() + "world".len())

@@ -1,0 +1,12 @@
+// Phase M3 item 3 regression (--no-check LOWERER backstop): an undefined INSTANCE method `x.nope()` must
+// not silently emit a bare `nope` external symbol even when the type-check pass is skipped. The M3 checker
+// rejects it before lowering, but a `--no-check` build would otherwise reach codegen with methodCallee's
+// UFCS fallback returning the bare selector `nope` (undefined -> dyld crash / garbage). requireResolved-
+// MethodCallee hard-aborts in the lowerer when the resolved callee is a bare selector that is neither a
+// defined free function nor an intrinsic. The gate compiles with `--no-check` and asserts abort + no binary.
+struct Widget(val id: Int)
+
+fun main(): Int {
+  val w = Widget(1)
+  return w.nope()
+}

@@ -3,7 +3,7 @@
 // pointer compare and returned a WRONG answer with no diagnostic. Exercises the tag-then-payload eq, the
 // variant-order-then-payload cmp (Ord), tag+payload hash, structural clone, per-variant debug, first-variant
 // default, a nullary variant used as a value (`Unit`), and a nested derived-struct payload. Also covers the
-// qualified `Enum.Variant(x)` constructor path (previously mislowered as a UFCS method call that dropped the
+// qualified `Enum::Variant(x)` constructor path (previously mislowered as a UFCS method call that dropped the
 // payload). Returns the count of passed assertions.
 @derive(Eq, Debug) struct PtD(val x: Int, val y: Int)
 
@@ -23,8 +23,8 @@ fun main(): Int {
   if (Circle(5) != Rect(5, 5)) { acc = acc + 1 } // different variant -> unequal
   if (Circle(5) != Circle(6)) { acc = acc + 1 } // same variant, different payload -> unequal
   // qualified constructor form must construct correctly (payload not dropped)
-  if (Shape.Circle(5) == Shape.Circle(5)) { acc = acc + 1 }
-  if (Shape.Circle(5) != Shape.Circle(6)) { acc = acc + 1 }
+  if (Shape::Circle(5) == Shape::Circle(5)) { acc = acc + 1 }
+  if (Shape::Circle(5) != Shape::Circle(6)) { acc = acc + 1 }
   if (Rect(2, 3) == Rect(2, 3)) { acc = acc + 1 } // multi-payload eq
   if (Rect(2, 3) != Rect(2, 4)) { acc = acc + 1 } // multi-payload, second differs
   if (Unit == Unit) { acc = acc + 1 } // nullary variant equal

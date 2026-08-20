@@ -24,10 +24,10 @@ fun main(): Int {
   if (v.byteAt(0) != 111) { ok = 0 }
   if (eqStr(v.toStr(), "oob") != 1) { ok = 0 }
 
-  // (4) Int_toStr boxes; interpolation ($x) routes through the show/concat roles.
-  if (eqStr(Int_toStr(42), "42") != 1) { ok = 0 }
-  if (eqStr(Int_toStr(0), "0") != 1) { ok = 0 }
-  if (eqStr(Int_toStr(0 - 5), "-5") != 1) { ok = 0 }
+  // (4) `n.toStr()` boxes; interpolation ($x) routes through the show/concat roles.
+  if (eqStr((42).toStr(), "42") != 1) { ok = 0 }
+  if (eqStr((0).toStr(), "0") != 1) { ok = 0 }
+  if (eqStr((0 - 5).toStr(), "-5") != 1) { ok = 0 }
   val x = 7
   if (eqStr("x=$x!", "x=7!") != 1) { ok = 0 }
 

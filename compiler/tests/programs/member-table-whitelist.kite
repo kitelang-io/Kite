@@ -1,0 +1,41 @@
+// Phase M2 regression fixture — one exercise per WHITELISTED selector kind. Running `kitec shadow` over
+// this COMPLETE program must log ZERO would-be no-member diagnostics (SHADOW-TOTAL 0): every dot / `::`
+// selector below resolves against the checker's member table, so no legitimate construct false-positives.
+// Each labelled line is a distinct whitelist construct the resolver's rShadowField / rShadowStatic must
+// accept. main() also returns a checked accumulator (53) so the fixture doubles as a runnable program.
+import kite::core
+
+struct Point(var x: Int, var y: Int) // struct fields x, y
+
+fun Point_area(p: Point): Int { return p.x * p.y } // getter target for `p.area`
+
+fun Point_scale_set(p: Point, v: Int): Int { p.x = v return 0 } // setter target for `p.scale = v`
+
+fun dist(p: Point): Int { return p.x + p.y } // free fn, reached by the UFCS `p.dist()` fallback
+
+impl Point {
+  fun sum(self): Int { return self.x + self.y } // instance method: `p.sum()`
+}
+
+fun Point.dbl(): Int { return self.x * 2 } // extension fn: desugars to Point_dbl(this: Point), `p.dbl()`
+
+enum Color { Red; Green; Blue }
+
+fun main(): Int {
+  var acc = 0
+  val p = Point(3, 4)
+  acc = acc + p.x // (1) struct field
+  acc = acc + p.y // (1) struct field           acc = 7
+  acc = acc + p.area // (2) getter property (p.x*p.y = 12)   acc = 19
+  p.scale = 5 // (3) setter property -> Point_scale_set(p,5) sets x
+  acc = acc + p.x // + 5                          acc = 24
+  acc = acc + p.sum() // (4) instance method (5+4)          acc = 33
+  acc = acc + p.dist() // (5) UFCS free-fn fallback (5+4)   acc = 42
+  acc = acc + p.dbl() // (6) extension fn (5*2)             acc = 52
+  val c1 = Color::Red // (7) enum variant via colon-colon   -> rShadowStatic(Color, "Red")
+  val c2 = Color::Green // (8) enum variant via colon-colon -> rShadowStatic(Color, "Green")
+  val c3 = Blue() // (9) enum variant via bare-call        -> plain name resolution (no selector)
+  val mx = Int::MAX // (11) primitive static via `::`       -> rShadowStatic(Int, "MAX") = Int_MAX assoc const
+  acc = acc + Int_MAX() % 7 // (10) assoc-const-as-fn, bare mangle (2147483647 % 7 = 1)  acc = 53
+  return acc
+}

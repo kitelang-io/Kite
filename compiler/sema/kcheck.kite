@@ -7,7 +7,7 @@
 //   errors    -> "error: <msg>" per diag, then "<N> semantic error(s)"
 
 // ---- top-level declaration wrapper (so we can iterate the program twice) ----
-enum Decl { DFun(FFunc); DType(Int, FTDecl); DEnum(FEDecl); DTrait(FTraitDecl); DImpl(FImplDecl); DImport(String) }
+enum Decl { DFun(FFunc); DType(Int, FTDecl); DEnum(FEDecl); DTrait(FTraitDecl); DImpl(FImplDecl); DImport(String); DConst(String) }
 
 // Parse the whole program, returning the decl list AND (index-aligned, via the `lines` out-param) the
 // 1-based source line where each decl begins — captured from the first token of the decl (its leading
@@ -21,6 +21,11 @@ fun parseProgramLn(toks: IntBuf, lines: IntBuf): IntBuf {
     else {
       val dl = pline(p)
       val annos = parseAnnos(p)
+      // A top-level decl may carry a `pub` visibility prefix (mirrors the full parsers: annos -> pub ->
+      // decl). Consume it so a `pub`-prefixed decl still parses; without this the loop hit the `else` and
+      // STOPPED at the first `pub import` of a concatenated namespace-module source — desyncing the whole
+      // check pass so the ROOT module's decls (appended last) were never parsed or member-checked.
+      if (pk(p) == 56) { eat(p) }
       val k = pk(p)
       val n0 = decls.len()
       if (k == 10) { decls.push(DFun(parseFunc(p, annos))) }
@@ -30,7 +35,13 @@ fun parseProgramLn(toks: IntBuf, lines: IntBuf): IntBuf {
             else { if (k == 66) { decls.push(DTrait(parseTrait(p, annos))) }
               else { if (k == 67) { decls.push(DImpl(parseImpl(p, annos))) }
                 else { if (k == 58) { decls.push(DImport(parseImport(p))) }
-                  else { go = 0 } } } } } } }
+                  // A top-level `const val NAME = ...` binds a resolvable global VALUE name — record it as
+                  // DConst so references resolve (without it, parsing the whole program now reaches the
+                  // referencing code and would false-flag `NAME` as unresolved). `use` carries no checker
+                  // Decl variant; parse+discard it so the loop stays token-synced rather than bailing.
+                  else { if (k == 80) { decls.push(DConst(parseConst(p).name)) }
+                    else { if (k == 81) { parseUse(p) }
+                      else { go = 0 } } } } } } } } }
       if (decls.len() > n0) { lines.push(dl) }
     }
   }
@@ -84,9 +95,61 @@ fun whenBindName(b: String): String {
 }
 
 // ================= RESOLVE PASS =================
-struct RCtx(val globals: IntBuf, var scopes: IntBuf, val diags: IntBuf, var curLine: Int)
+// mtab/shadow/shadowOn (Phase M2): the member table + a SEPARATE shadow-diagnostic sink, threaded through
+// the resolver so rExpr can resolve the SELECTOR of a dot/`::` access (M1 built the parallel table and a
+// prototype selector check in the type-check pass; M2 moves selector resolution into the RESOLVER — the
+// pass that owns name-resolution diagnostics and where M3 will flip these to fatal). shadowOn==0 (the
+// normal check/compile path) makes every rShadow* hook a NO-OP: the table is never consulted and the real
+// resolve diagnostics are byte-identical to before. shadowOn==1 (the `kitec shadow` harness) consults the
+// table at every selector site and logs would-be no-member diagnostics into `shadow`, NEVER into `diags`.
+// nsMerged==1 when checking a MERGED namespace-module source (concatModuleSrcs): there, the base of a `::`
+// may be a namespace-import MODULE alias (`a::helper`) that is not a recorded global — so a bare-identifier
+// `::` base is NOT value-resolved (it would false-flag as unresolved). nsMerged==0 (the flat / no-import
+// path) keeps the original behavior: a `::` base IS resolved, so an undefined type qualifier still errors.
+struct RCtx(val globals: IntBuf, var scopes: IntBuf, val diags: IntBuf, var curLine: Int, val mtab: CMTab, val shadow: IntBuf, var shadowOn: Int, val nsMerged: Int)
 
 fun rErr(ctx: RCtx, msg: String): Int { ctx.diags.push(linePrefix(ctx.curLine) + msg); return 0 }
+
+// does ANY recorded member/free-fn/trait-method carry selector `sel`? The resolver, unlike the type-check
+// pass, has no receiver TYPE at a dot access (it binds names, not their types), so `a.sel` is resolved at
+// the NAME level: `sel` must exist SOMEWHERE as an instance field/getter/setter/instance-method, a UFCS
+// free function, or a trait method (all recorded flat in mt.sel). This is the widest whitelist the
+// resolver can vouch for without types; a selector that appears nowhere is a definite no-member.
+fun cmSelExists(mt: CMTab, sel: String): Bool {
+  var i = 0
+  while (i < mt.sel.len()) { if (mt.sel.get(i) == sel) { return true }; i = i + 1 }
+  return false
+}
+
+// SHADOW resolution of a DOT selector `a.sel` / `a?.sel` (Phase M2, resolver side). No receiver type here,
+// so this is the name-level check (cmSelExists) — a getter/setter mangle exposes the bare property name in
+// the table (M1 cmFreeFun), so property access resolves too. Purely additive: only under shadowOn, only
+// writes env.shadow, never a real diagnostic.
+fun rShadowField(ctx: RCtx, sel: String): Int {
+  if (ctx.shadowOn == 0) { return 0 }
+  if (cmSelExists(ctx.mtab, sel)) { return 0 }
+  ctx.shadow.push(linePrefix(ctx.curLine) + ("no member `" + (sel + "`")))
+  return 0
+}
+
+// SHADOW resolution of a `Base::sel` selector (Phase M2, resolver side). When Base is a bare identifier
+// naming a KNOWN nominal type, this is TYPE-DIRECTED: `sel` must be an associated member of that type — an
+// associated const/fn/static, an enum variant, a field, or (UFCS / by-name trait dispatch) a free fn or
+// trait method of the same name. A Base that is NOT a known type (a namespace-import MODULE alias, a
+// value, a type parameter) is skipped — the table records no module exports, so we never vouch against it.
+fun rShadowStatic(ctx: RCtx, base: FExpr, sel: String): Int {
+  if (ctx.shadowOn == 0) { return 0 }
+  val b = when (base) { FEIdent(n) -> n; else -> "" }
+  if (b == "") { return 0 }
+  if (isTypeParam(b)) { return 0 }
+  val tn = cmCanon(ctx.mtab, b)
+  if (cmIsType(ctx.mtab, tn) == false) { return 0 }
+  if (cmHasMember(ctx.mtab, tn, sel)) { return 0 }
+  if (cmHasFree(ctx.mtab, sel)) { return 0 }
+  if (cmHasTraitMethod(ctx.mtab, sel)) { return 0 }
+  ctx.shadow.push(linePrefix(ctx.curLine) + ("no member `" + (sel + ("` on type " + tn))))
+  return 0
+}
 
 fun rBound(ctx: RCtx, n: String): Bool {
   var i = 0
@@ -113,14 +176,25 @@ fun rPush(ctx: RCtx): IntBuf { // returns saved scopes for restore
 
 fun rPop(ctx: RCtx, saved: IntBuf): Int { ctx.scopes = saved; return 0 }
 
+// The base of a `::` is a QUALIFIER — a type / enum name, or (under a namespace import) a MODULE alias.
+// On the MERGED namespace-module path a bare-identifier base may be a module alias (`a` in `a::helper()`)
+// that is not a recorded global, so it is NOT value-resolved there (it would false-flag as unresolved).
+// On the flat / no-import path there are no module aliases, so the base IS resolved — an undefined type
+// qualifier (`Kind::Digit` with no `Kind`) still reports "unresolved name". Type/member validity is owned
+// by the member-table typecheck pass (inferStatic / requireMember); a non-identifier base still resolves.
+fun rStaticBase(ctx: RCtx, a: FExpr): Int {
+  if (ctx.nsMerged == 0) { return rExpr(ctx, a) }
+  return when (a) { FEIdent(n) -> 0; else -> rExpr(ctx, a) }
+}
+
 fun rExpr(ctx: RCtx, e: FExpr): Int {
   return when (e) {
     FEIdent(s) -> { if (rBound(ctx, s) == false) { rErr(ctx, "unresolved name: " + s) } 0 }
     FEUnary(op, a) -> rExpr(ctx, a)
     FENotNull(a) -> rExpr(ctx, a)
-    FEField(a, f) -> rExpr(ctx, a)
-    FESafeField(a, f) -> rExpr(ctx, a)
-    FEStatic(a, f) -> rExpr(ctx, a)
+    FEField(a, f) -> { rExpr(ctx, a); rShadowField(ctx, f) }
+    FESafeField(a, f) -> { rExpr(ctx, a); rShadowField(ctx, f) }
+    FEStatic(a, f) -> { rStaticBase(ctx, a); rShadowStatic(ctx, a, f) }
     FETypeApp(a, t) -> rExpr(ctx, a)
     FECast(a, ty) -> rExpr(ctx, a)
     FEQuestion(a) -> rExpr(ctx, a)
@@ -292,10 +366,11 @@ fun collectGlobals(decls: IntBuf, lines: IntBuf, globals: IntBuf, diags: IntBuf,
     val d: Decl = decls.get(i)
     val ln = lines.get(i)
     when (d) {
-      DFun(fd) -> defineG(seen, globals, diags, fd.name, ln, skipDup)
+      DFun(fd) -> defineGKey(seen, globals, diags, cmFunSigKey(fd), fd.name, ln, skipDup)
       DType(kind, td) -> defineG(seen, globals, diags, td.name, ln, skipDup)
       DEnum(ed) -> { defineG(seen, globals, diags, ed.name, ln, skipDup); addVariants(globals, ed.variants) }
       DTrait(tr) -> defineG(seen, globals, diags, tr.name, ln, skipDup)
+      DConst(nm) -> defineG(seen, globals, diags, nm, ln, skipDup)
       else -> 0
     }
     i = i + 1
@@ -307,6 +382,24 @@ fun defineG(seen: IntBuf, globals: IntBuf, diags: IntBuf, n: String, ln: Int, sk
   if (skipDup == 0) { if (memList(seen, n)) { diags.push(linePrefix(ln) + ("duplicate top-level definition: " + n)) } }
   seen.push(n); globals.push(n)
   return 0
+}
+
+// duplicate detection keyed on a SIGNATURE key (M5 overloading): two free functions with the same name but
+// DIFFERENT parameter signatures are allowed (an overload set); the SAME signature twice is the duplicate
+// error. `gName` (the bare name) is what enters the resolvable global scope.
+fun defineGKey(seen: IntBuf, globals: IntBuf, diags: IntBuf, dupKey: String, gName: String, ln: Int, skipDup: Int): Int {
+  if (skipDup == 0) { if (memList(seen, dupKey)) { diags.push(linePrefix(ln) + ("duplicate top-level definition: " + gName)) } }
+  seen.push(dupKey); globals.push(gName)
+  return 0
+}
+
+// a free function's SIGNATURE key: `<name>#<arity>#<t1>#<t2>...`, coarse base-name tags. Same-name /
+// different-signature functions produce distinct keys (overloading); an identical redeclaration collides.
+fun cmFunSigKey(fd: FFunc): String {
+  var s = fd.name + ("#" + fd.params.len().toStr())
+  var i = 0
+  while (i < fd.params.len()) { val p: FParam = fd.params.get(i); s = s + ("#" + cmBaseName(cmStripMode(p.ty))); i = i + 1 }
+  return s
 }
 
 fun addVariants(globals: IntBuf, variants: IntBuf): Int {
@@ -327,6 +420,7 @@ fun collectDeclNames(decls: IntBuf, out: IntBuf): Int {
       DType(kind, td) -> out.push(td.name)
       DEnum(ed) -> { out.push(ed.name); addVariants(out, ed.variants) }
       DTrait(tr) -> out.push(tr.name)
+      DConst(nm) -> out.push(nm)
       else -> 0
     }
     i = i + 1
@@ -379,10 +473,31 @@ fun resolveCheck(decls: IntBuf, lines: IntBuf, skipDup: Int, t1: Int): IntBuf {
   while (pj < pre.len()) { globals.push(pre.get(pj)); pj = pj + 1 }
   collectGlobals(decls, lines, globals, diags, skipDup)
   val scopes = list()
-  val ctx = RCtx(globals, scopes, diags, 0)
+  // shadowOn=0: the member table is empty and every rShadow* hook is inert — the real resolve diagnostics
+  // are byte-identical to before (M2 is SHADOW-only, no output regression on the check/compile path).
+  val ctx = RCtx(globals, scopes, diags, 0, cmNew(), list(), 0, skipDup)
   var i = 0
   while (i < decls.len()) { val d: Decl = decls.get(i); ctx.curLine = lines.get(i); rDecl(ctx, d); i = i + 1 }
   return diags
+}
+
+// SHADOW pass (Phase M2): run the RESOLVER traversal with the member table ON, collecting would-be
+// no-member diagnostics (selectors that fail resolution against the table) into a SEPARATE shadow list.
+// The real resolve diagnostics are computed by the same traversal but DISCARDED here — this entry exists
+// only to harvest the shadow log, never to gate a build. Invoked only by the `kitec shadow` harness.
+fun resolveShadow(decls: IntBuf, lines: IntBuf, t1: Int): IntBuf {
+  val shadow = list()
+  val globals = list()
+  val pre = preludeSigsT(t1)
+  var pj = 0
+  while (pj < pre.len()) { globals.push(pre.get(pj)); pj = pj + 1 }
+  collectGlobals(decls, lines, globals, list(), 1)
+  val scopes = list()
+  val mtab = buildCMTab(preludeDeclListT(t1), decls)
+  val ctx = RCtx(globals, scopes, list(), 0, mtab, shadow, 1, 1)
+  var i = 0
+  while (i < decls.len()) { val d: Decl = decls.get(i); ctx.curLine = lines.get(i); rDecl(ctx, d); i = i + 1 }
+  return shadow
 }
 
 // ================= TYPE CHECK PASS =================
@@ -467,6 +582,298 @@ fun buildPReg(decls: IntBuf): PReg {
     i = i + 1
   }
   return reg
+}
+
+// ================= MEMBER TABLE (Phase M1: checker-side, SHADOW-only) =================
+// The lowerer already builds a per-type MEMBER TABLE at its single collection point (klower.kite,
+// struct MTab on Lo, Phase M0). The checker is a SEPARATE pass over its own F-prefixed decl list, so it
+// carries its OWN parallel table here — same whitelist rules, rebuilt from the same prelude+user decls —
+// so kcheck stays a standalone library (kfront + kcheck) with no dependency on klower's tables.
+//
+// One entry per member with an explicit owning-type back-link. In M1 NOTHING fatal consults it: the
+// shadow-resolution pass (shadowMember) only READS it to decide whether a selector WOULD be a no-member
+// diagnostic, and logs the misses to a SEPARATE shadow list — the real diagnostics are untouched.
+//   types       : every nominal type name seen (struct/class/enum/trait/@prim), for prefix attribution.
+//   aliasFrom/To: @alias views (I8 -> Byte, Never -> Nothing): one canonical primary + alias views.
+//   owner       : owning type name of the member ("" = a true free/global function or top-level const).
+//   sel         : the SELECTOR — the surface name used after `.`/`::` (field/method/variant/const name).
+//   kind        : "field" | "method" | "assocfn" | "traitmethod" | "variant" | "freefn" | "const".
+struct CMTab(val types: IntBuf, val aliasFrom: IntBuf, val aliasTo: IntBuf, val owner: IntBuf, val sel: IntBuf, val kind: IntBuf)
+
+fun cmNew(): CMTab { return CMTab(list(), list(), list(), list(), list(), list()) }
+
+fun cmType(mt: CMTab, name: String): Int { if (memList(mt.types, name) == false) { mt.types.push(name) }; return 0 }
+
+// Members are recorded under the owner's CANONICAL name so a method declared on a width alias (fun
+// U8.inc) is found through the primary (a `UByte`-typed receiver), and vice versa — matching how the
+// compiler's own UFCS dispatch canonicalizes the receiver-type name (see alias-method-dispatch). A
+// struct/enum/trait owner is not in the alias table, so cmCanon is the identity for it. Called only in
+// pass 2 (members), by which point pass 1 has recorded the full @alias table.
+fun cmAdd(mt: CMTab, owner: String, sel: String, kind: String): Int {
+  mt.owner.push(cmCanon(mt, owner)); mt.sel.push(sel); mt.kind.push(kind)
+  return 0
+}
+
+fun cmIsType(mt: CMTab, n: String): Bool { return memList(mt.types, n) }
+
+// fold an alias to its PRIMARY (I8 -> Byte, ...); a name with no @alias row is returned unchanged.
+fun cmCanon(mt: CMTab, n: String): String {
+  var i = 0
+  while (i < mt.aliasFrom.len()) { if (mt.aliasFrom.get(i) == n) { return mt.aliasTo.get(i) }; i = i + 1 }
+  return n
+}
+
+// does type `owner` (already canonicalized) carry a member named `sel`? Scans fields/methods/assocfns/
+// variants/consts attributed to that owner.
+fun cmHasMember(mt: CMTab, owner: String, sel: String): Bool {
+  var i = 0
+  while (i < mt.owner.len()) { if (mt.owner.get(i) == owner) { if (mt.sel.get(i) == sel) { return true } }; i = i + 1 }
+  return false
+}
+
+// a plain free function (or top-level const) named `sel` — the UFCS `x.sel(..)` == `sel(x, ..)` fallback,
+// which resolves a dotted selector against any free function of the right name.
+fun cmHasFree(mt: CMTab, sel: String): Bool {
+  var i = 0
+  while (i < mt.owner.len()) { if (mt.owner.get(i) == "") { if (mt.sel.get(i) == sel) { return true } }; i = i + 1 }
+  return false
+}
+
+// `sel` is a method of SOME trait — trait dispatch is by-name (dynamic, type-id at the use site), so a
+// trait method resolves a dotted call on any type that impls it.
+fun cmHasTraitMethod(mt: CMTab, sel: String): Bool {
+  var i = 0
+  while (i < mt.kind.len()) { if (mt.kind.get(i) == "traitmethod") { if (mt.sel.get(i) == sel) { return true } }; i = i + 1 }
+  return false
+}
+
+// the KIND of member `sel` on `owner` (already canonicalized), "" if there is no such member. Used by the
+// dot/`::` cross-use rule: a member declared as a `const` (or a `variant`) binds with `::`, so reaching it
+// through `.` on the type is a cross-use error rather than a plain no-member.
+fun cmMemberKind(mt: CMTab, owner: String, sel: String): String {
+  var i = 0
+  while (i < mt.owner.len()) { if (mt.owner.get(i) == owner) { if (mt.sel.get(i) == sel) { return mt.kind.get(i) } }; i = i + 1 }
+  return ""
+}
+
+// is `name` a VARIANT of some enum? A bare variant used as a value (`Unit.debug()`, `Unit == Unit`) is an
+// ordinary value expression, NOT a `Type.member` static access — even when the variant name COLLIDES with a
+// primitive type name (`Unit` is both the primitive unit type AND a nullary variant). So a variant-name base
+// stays on the instance path, never the type-dot path.
+fun cmIsVariantName(mt: CMTab, name: String): Bool {
+  var i = 0
+  while (i < mt.kind.len()) { if (mt.kind.get(i) == "variant") { if (mt.sel.get(i) == name) { return true } }; i = i + 1 }
+  return false
+}
+
+// --- member-table population (checker side; mirrors klower's collectDecl whitelist) ---
+fun cmHasPrimAnno(annos: IntBuf): Bool {
+  var i = 0
+  while (i < annos.len()) { val a: Anno = annos.get(i); if (a.name == "prim") { return true }; i = i + 1 }
+  return false
+}
+
+fun cmStripMode(ty: String): String {
+  val n = ty.len()
+  if (n >= 10) { if (ty.substr(0, 10) == "consuming ") { return ty.substr(10, n - 10) } }
+  if (n >= 6) { if (ty.substr(0, 6) == "inout ") { return ty.substr(6, n - 6) } }
+  return ty
+}
+
+// base name of a (possibly generic) type string: "Option" from "Option", "IntBuf" from "IntBuf<Int>".
+fun cmBaseName(ty: String): String {
+  val n = ty.len()
+  var i = 0
+  while (i < n && ty.charAt(i) != 60 && ty.charAt(i) != 32) { i = i + 1 }
+  return ty.substr(0, i)
+}
+
+fun cmFirstUnderscore(s: String): Int {
+  var i = 0
+  while (i < s.len()) { if (s.charAt(i) == 95) { return i }; i = i + 1 }
+  return 0 - 1
+}
+
+// An associated CONSTANT's selector, by convention, is SCREAMING_CASE — only uppercase letters, digits and
+// underscore, with at least one letter (Int::MAX / Int::MIN / Int::BITS). A NULLARY `<Type>_<REST>` free fn
+// whose REST matches is the assoc-const mangle and is classified "const" (so `Int.MAX` via dot is the locked
+// cross-use error 'use `::`'); a lowercase-headed REST (a static factory like `List_of` / `Widget_make`) or
+// any REST on a fn WITH params stays "assocfn" (a static METHOD, valid via dot). This is the only signal that
+// separates a nullary assoc const from a nullary static method at the shared `<Type>_<REST>` surface mangle.
+fun cmIsConstSel(s: String): Bool {
+  val n = s.len()
+  if (n == 0) { return false }
+  var i = 0
+  var hasAlpha = 0
+  while (i < n) {
+    val c = s.charAt(i)
+    if (c >= 65 && c <= 90) { hasAlpha = 1 }
+    else { if ((c >= 48 && c <= 57) || c == 95) { 0 } else { return false } }
+    i = i + 1
+  }
+  return hasAlpha == 1
+}
+
+fun cmRecordAlias(mt: CMTab, annos: IntBuf, name: String): Int {
+  var i = 0
+  while (i < annos.len()) {
+    val a: Anno = annos.get(i)
+    if (a.name == "alias" && a.args.len() >= 1) { mt.aliasFrom.push(name); mt.aliasTo.push(primAnnoStr(a.args.get(0))) }
+    i = i + 1
+  }
+  return 0
+}
+
+fun cmFields(mt: CMTab, td: FTDecl): Int {
+  var i = 0
+  while (i < td.fields.len()) { val f: FFld = td.fields.get(i); cmAdd(mt, td.name, f.name, "field"); i = i + 1 }
+  return 0
+}
+
+// struct/class body or impl-block methods: recv non-empty => instance ("method"); recv empty => "assocfn".
+fun cmMethods(mt: CMTab, owner: String, methods: IntBuf): Int {
+  var i = 0
+  while (i < methods.len()) {
+    val m: FFunc = methods.get(i)
+    if (isConstValFn(m.annos)) { cmAdd(mt, owner, m.name, "const") }
+    else { if (m.recv == "") { cmAdd(mt, owner, m.name, "assocfn") } else { cmAdd(mt, owner, m.name, "method") } }
+    i = i + 1
+  }
+  return 0
+}
+
+fun cmTraitMethods(mt: CMTab, owner: String, methods: IntBuf): Int {
+  var i = 0
+  while (i < methods.len()) { val m: FFunc = methods.get(i); cmAdd(mt, owner, m.name, "traitmethod"); i = i + 1 }
+  return 0
+}
+
+fun cmVariants(mt: CMTab, ed: FEDecl): Int {
+  var i = 0
+  while (i < ed.variants.len()) { val v: FVariant = ed.variants.get(i); cmAdd(mt, ed.name, v.name, "variant"); i = i + 1 }
+  return 0
+}
+
+// The concrete method a `@derive(Tr)` SYNTHESIZES on its type — the checker mirror of klower's
+// deriveMethodFor (Eq/PartialEq->eq, Ord->cmp, PartialOrd->partialCmp, Hash->hash, Clone->clone,
+// Debug->debug, Default->default; Copy is a marker -> ""). Eq/Ord/PartialOrd/Hash also carry real trait
+// decls (cmp.kite), so their methods already land in the table as `traitmethod`; but Clone/Debug/Default
+// have NO trait decl in the prelude, so without this their derived `.clone()/.debug()/Type::default()`
+// would be a false no-member. Registering the synthesized member per @derive'd type closes that miss.
+fun cmDeriveMethod(tr: String): String {
+  if (tr == "Eq" || tr == "PartialEq") { return "eq" }
+  if (tr == "Ord") { return "cmp" }
+  if (tr == "PartialOrd") { return "partialCmp" }
+  if (tr == "Hash") { return "hash" }
+  if (tr == "Clone") { return "clone" }
+  if (tr == "Debug") { return "debug" }
+  if (tr == "Default") { return "default" }
+  return ""
+}
+
+// register the members SYNTHESIZED by a decl's `@derive(...)` annotations against its owning type. `default`
+// is an associated fn (`Type::default()`); the rest are instance methods (`v.clone()`/`v.debug()`).
+fun cmDerives(mt: CMTab, annos: IntBuf, tyName: String): Int {
+  var i = 0
+  while (i < annos.len()) {
+    val a: Anno = annos.get(i)
+    if (a.name == "derive") {
+      var j = 0
+      while (j < a.args.len()) {
+        val ax: FExpr = a.args.get(j)
+        val trn = when (ax) { FEIdent(n) -> n; else -> "" }
+        val m = cmDeriveMethod(trn)
+        if (m != "") { if (m == "default") { cmAdd(mt, tyName, m, "assocfn") } else { cmAdd(mt, tyName, m, "method") } }
+        j = j + 1
+      }
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+// classify a free `fun` at collect time (mirrors klower's mtFreeFun whitelist):
+//   - EXTENSION fn: first param named "this" — an instance method of its receiver type, selector recovered
+//     by dropping the KNOWN "<Recv>_" prefix (never a guessed split, ambiguous with a real free fn Foo_bar).
+//   - PLAIN free fn: recorded "freefn"; ADDITIONALLY when its name is "<KnownType>_<rest>" (the assoc-const
+//     / static / UFCS mangle, e.g. Int_MAX, String_len) an ASSOCIATED VIEW is attributed to that nominal.
+fun cmFreeFun(mt: CMTab, fd: FFunc): Int {
+  if (fd.params.len() > 0) {
+    val p0: FParam = fd.params.get(0)
+    if (p0.name == "this") {
+      val recv = cmBaseName(cmStripMode(p0.ty))
+      val sel = if (fd.name.len() > recv.len() + 1) { fd.name.substr(recv.len() + 1, fd.name.len() - recv.len() - 1) } else { fd.name }
+      cmAdd(mt, recv, sel, "method")
+      return 0
+    }
+  }
+  cmAdd(mt, "", fd.name, "freefn")
+  val us = cmFirstUnderscore(fd.name)
+  if (us > 0) {
+    val pre = fd.name.substr(0, us)
+    if (memList(mt.types, pre)) {
+      val rest = fd.name.substr(us + 1, fd.name.len() - us - 1)
+      // A nullary `<Type>_<SCREAMING>` is an associated CONSTANT (Int::MAX) — classify "const" so dot-access
+      // (`Int.MAX`) is the locked cross-use error. Everything else (has params, or a lowercase-headed rest
+      // like a `_make`/`_of` factory) is a static "assocfn", reachable via dot.
+      val amk = if (fd.params.len() == 0 && cmIsConstSel(rest)) { "const" } else { "assocfn" }
+      cmAdd(mt, pre, rest, amk)
+      // setter-property mangle `<Type>_<name>_set` also exposes the bare property name, so a setter-only
+      // property (`b.wide = 7` -> Box_wide_set) resolves `b.wide` — mirroring the checker's hasAccessorM.
+      val rn = rest.len()
+      if (rn > 4 && rest.substr(rn - 4, 4) == "_set") { cmAdd(mt, pre, rest.substr(0, rn - 4), "assocfn") }
+    }
+  }
+  return 0
+}
+
+// Pass 1: record every nominal TYPE name (+ its @alias view) so pass 2's "<KnownType>_<rest>" attribution
+// sees the full type set regardless of decl order (a free Int_MAX may precede/follow `class Int`).
+fun cmCollectTypes(mt: CMTab, decls: IntBuf): Int {
+  var i = 0
+  while (i < decls.len()) {
+    val d: Decl = decls.get(i)
+    when (d) {
+      DFun(fd) -> { if (cmHasPrimAnno(fd.annos)) { cmType(mt, fd.name); cmRecordAlias(mt, fd.annos, fd.name) } }
+      DType(kind, td) -> { cmType(mt, td.name); cmRecordAlias(mt, td.annos, td.name) }
+      DEnum(ed) -> cmType(mt, ed.name)
+      DTrait(tr) -> cmType(mt, tr.name)
+      else -> 0
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+// Pass 2: record the MEMBERS of every decl against the type set from pass 1.
+fun cmCollectMembers(mt: CMTab, decls: IntBuf): Int {
+  var i = 0
+  while (i < decls.len()) {
+    val d: Decl = decls.get(i)
+    when (d) {
+      DFun(fd) -> { if (cmHasPrimAnno(fd.annos) == false) { cmFreeFun(mt, fd) } }
+      // A @prim type carries no heap FIELDS/derives, but its body's `const val` associated constants +
+      // inherent methods ARE members (Phase M6: `Int::MAX` etc. now live in the `class Int` body). Collect
+      // them so `Int::MAX` resolves and `Int.MAX` (dot on a const) is the locked cross-use error, not a
+      // spurious "no member".
+      DType(kind, td) -> { cmMethods(mt, td.name, td.methods); if (cmHasPrimAnno(td.annos) == false) { cmFields(mt, td); cmDerives(mt, td.annos, td.name) } }
+      DEnum(ed) -> { cmVariants(mt, ed); cmMethods(mt, ed.name, ed.consts); cmDerives(mt, ed.annos, ed.name) }
+      DTrait(tr) -> cmTraitMethods(mt, tr.name, tr.methods)
+      DImpl(im) -> cmMethods(mt, im.forTy, im.methods)
+      else -> 0
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+// Build the checker's member table from the prelude decl list AND the user program's decls (both flow
+// through the identical whitelist, so a builtin nominal and a user type land in it identically).
+fun buildCMTab(pdecls: IntBuf, udecls: IntBuf): CMTab {
+  val mt = cmNew()
+  cmCollectTypes(mt, pdecls); cmCollectTypes(mt, udecls)
+  cmCollectMembers(mt, pdecls); cmCollectMembers(mt, udecls)
+  return mt
 }
 
 // canonicalize an alias to its PRIMARY name (I64 -> Long, I32 -> Int, U8 -> UByte, F64 -> Double,
@@ -748,7 +1155,17 @@ struct Look(val found: Int, val ty: Ty)
 
 struct LP(val name: String, val ty: String)
 
-struct TEnv(val funN: IntBuf, val funP: IntBuf, val funR: IntBuf, val funG: IntBuf, val structN: IntBuf, val structFN: IntBuf, val structFT: IntBuf, val enumN: IntBuf, var locals: IntBuf, var curRet: Ty, var hasRet: Int, val implN: IntBuf, val implT: IntBuf, val diags: IntBuf, var curLine: Int, val prim: PReg)
+// mtab/shadow/shadowOn (Phase M1): the member table + the shadow-diagnostic sink. shadowOn==0 (the
+// normal check/compile path) makes shadowMember a NO-OP — the member table is never consulted and the
+// checker's real diagnostics are byte-identical to before. shadowOn==1 (the `kitec shadow` harness path)
+// consults the table at every selector site and logs would-be no-member diagnostics into `shadow`,
+// NEVER into `diags` — so no existing fatal diagnostic changes and the compiler's behavior is unchanged.
+// memLevel (Phase M3): the FATAL undefined-member gate. 0 = off (member table inert, byte-identical to
+// the pre-M3 checker). >0 turns a would-be no-member selector — on a KNOWN type whose receiver-family is
+// enabled — into a REAL compile diagnostic (issued in the type-check pass, before lowering), which gates
+// the build. Widened one receiver-family at a time: 1 = own structs/enums, 2 = +builtin nominals,
+// 3 = +primitives. See memberFamilyEnabled / requireMember.
+struct TEnv(val funN: IntBuf, val funP: IntBuf, val funR: IntBuf, val funG: IntBuf, val structN: IntBuf, val structFN: IntBuf, val structFT: IntBuf, val enumN: IntBuf, var locals: IntBuf, var curRet: Ty, var hasRet: Int, val implN: IntBuf, val implT: IntBuf, val diags: IntBuf, var curLine: Int, val prim: PReg, val mtab: CMTab, val shadow: IntBuf, var shadowOn: Int, var memLevel: Int)
 
 // trait subtyping: a concrete type is assignable to a trait it impls. implN/implT are parallel
 // (type name -> trait name), collected from `impl Trait for Type`. subtypeOk is checked ALONGSIDE
@@ -973,14 +1390,133 @@ fun inferFieldNamed(env: TEnv, n: String, f: String, isSafe: Int): Ty {
   return TUnknown
 }
 
+// SHADOW member resolution (Phase M1): given a receiver type and a selector, decide whether the member
+// table WOULD resolve it; if not, log a shadow diagnostic. Purely additive — only runs under shadowOn,
+// only writes to env.shadow, never changes a return type or a real diagnostic. Conservative by design:
+//   - an unknown / function / type-parameter receiver is skipped (no definite type to resolve against);
+//   - a receiver whose head name is NOT a recorded nominal is skipped (we only vouch for known types);
+//   - resolution succeeds on a member of the type, a UFCS free function of the same name, OR a trait
+//     method of the same name (by-name dynamic dispatch). Anything else is a would-be no-member miss.
+fun shadowMember(env: TEnv, recvTy: Ty, sel: String): Int {
+  if (env.shadowOn == 0) { return 0 }
+  val h = headNameOf(recvTy)
+  if (h == "") { return 0 }
+  if (isTypeParam(h)) { return 0 }
+  val tn = cmCanon(env.mtab, h)
+  if (cmIsType(env.mtab, tn) == false) { return 0 }
+  if (cmHasMember(env.mtab, tn, sel)) { return 0 }
+  if (cmHasFree(env.mtab, sel)) { return 0 }
+  if (cmHasTraitMethod(env.mtab, sel)) { return 0 }
+  env.shadow.push(linePrefix(env.curLine) + ("no member `" + (sel + ("` on type " + tn))))
+  return 0
+}
+
+// receiver-FAMILY of a KNOWN nominal type name (Phase M3 widening gate):
+//   1 = an OWN struct/enum (declared in THIS unit — env.structN / env.enumN)
+//   3 = a PRIMITIVE (in the @prim registry, after alias-canonicalization: Int/Bool/U8/...)
+//   2 = a BUILTIN NOMINAL — any other type the table knows (IntBuf, RawMap, String, Option, Result, ...)
+// The families are widened one at a time so a stricter type-directed check can be turned on incrementally,
+// gating the compiler+stdlib build after each. Own types are family 1 because their members are fully
+// recorded here (fields + methods + variants), so a miss on them is the most reliable signal.
+fun memberFamily(env: TEnv, tn: String): Int {
+  if (memList(env.structN, tn)) { return 1 }
+  if (memList(env.enumN, tn)) { return 1 }
+  if (primKind(env.prim, canonPrim(env.prim, tn)) != 0) { return 3 }
+  return 2
+}
+
+// is the FATAL member check enabled for a miss on type `tn`? Only when tn's family is at or below the
+// current widening level (1 own-only, 2 +builtin, 3 +primitive).
+fun memberFamilyEnabled(env: TEnv, tn: String): Bool {
+  if (env.memLevel == 0) { return false }
+  return memberFamily(env, tn) <= env.memLevel
+}
+
+// FATAL member resolution (Phase M3): the flip of shadowMember. Given a receiver type and a selector at a
+// method-call or `Type::member` site, resolve it against the member table; a genuine no-member on a KNOWN
+// type whose family is enabled is a REAL compile error ("type X has no member Y"), issued before lowering
+// so the whole bare-undefined-symbol -> dyld-crash / garbage bug family cannot reach codegen. Conservative
+// exactly like shadowMember: an unknown / type-parameter / not-a-known-type receiver is skipped (we only
+// vouch for known types), and a member/UFCS-free-fn/trait-method of the same name resolves it. Field access
+// is NOT routed here — inferFieldNamed already owns the "no field" diagnostic for own structs — so this
+// never double-fires; it closes only the method-call and static-access gaps that were silently "ok".
+fun requireMember(env: TEnv, recvTy: Ty, sel: String): Int {
+  if (env.memLevel == 0) { return 0 }
+  val h = headNameOf(recvTy)
+  if (h == "") { return 0 }
+  if (isTypeParam(h)) { return 0 }
+  val tn = cmCanon(env.mtab, h)
+  if (cmIsType(env.mtab, tn) == false) { return 0 }
+  if (cmHasMember(env.mtab, tn, sel)) { return 0 }
+  if (cmHasFree(env.mtab, sel)) { return 0 }
+  if (cmHasTraitMethod(env.mtab, sel)) { return 0 }
+  if (memberFamilyEnabled(env, tn)) { tErr(env, "type " + (tn + (" has no member " + sel))) }
+  return 0
+}
+
+// is `base` a bare TYPE NAME here (not shadowed by a local of the same name)? A `Type.sel` / `Type.sel()`
+// whose base is a known nominal is a STATIC access via dot, resolved against the member table exactly like
+// the `::` path — NOT an instance field/method access. Guarding on "not a local" keeps a value named the
+// same as a type (a local shadow) on the ordinary instance path.
+fun isTypeBaseName(env: TEnv, base: String): Bool {
+  if (base == "") { return false }
+  if (tLocal(env, base).found == 1) { return false }
+  if (cmIsVariantName(env.mtab, base)) { return false }
+  return cmIsType(env.mtab, cmCanon(env.mtab, base))
+}
+
+// FATAL dot-access on a TYPE name (Phase M3 item 1 / Phase M4): `Type.sel` / `Type.sel()` where `Type` is
+// a known nominal. Routed here so the bug family is killed on the DOT surface too, not just `::`:
+//   - an undefined selector is a genuine no-member ("type X has no member Y"), issued BEFORE lowering so a
+//     silent-0 / dangling `_sel` external (dyld crash) can never reach codegen;
+//   - a member declared as a `const` OR an enum `variant` reached through `.` is the LOCKED cross-use error
+//     ("use `::`") — the dot/`::` RULE binds const constants and enum variants with `::` (Enum::Variant),
+//     methods+fields with `.`. Phase M4 flips variant-via-dot from the M3 permissive path to this error
+//     (call sites in lib/examples/tests are migrated to `::` first, so the compiler+stdlib never trip it).
+// Family-gated and permissive exactly like requireMember, so statics-via-dot (`List.of()`, a factory) that
+// the compiler+stdlib rely on still resolve and build.
+fun requireTypeMemberDot(env: TEnv, base: String, sel: String): Int {
+  if (env.memLevel == 0) { return 0 }
+  val tn = cmCanon(env.mtab, base)
+  if (cmIsType(env.mtab, tn) == false) { return 0 }
+  val mk = cmMemberKind(env.mtab, tn, sel)
+  if (mk == "const" || mk == "variant") {
+    if (memberFamilyEnabled(env, tn)) { tErr(env, "member " + (sel + (" of type " + (tn + " must be accessed with `::` not `.`")))) }
+    return 0
+  }
+  if (cmHasMember(env.mtab, tn, sel)) { return 0 }
+  if (cmHasFree(env.mtab, sel)) { return 0 }
+  if (cmHasTraitMethod(env.mtab, sel)) { return 0 }
+  if (memberFamilyEnabled(env, tn)) { tErr(env, "type " + (tn + (" has no member " + sel))) }
+  return 0
+}
+
 fun inferField(env: TEnv, a: FExpr, f: String, isSafe: Int): Ty {
+  // `Type.sel` (dot on a bare type name) is a STATIC access via dot — resolve the selector against the
+  // member table (kill the silent-0 / dangling-symbol on a no-member), not an instance field access.
+  val bn = when (a) { FEIdent(b) -> b; else -> "" }
+  if (isTypeBaseName(env, bn)) { requireTypeMemberDot(env, bn, f); return TUnknown }
   val ta = infer(env, a)
+  // NOTE: no requireMember here — inferFieldNamed already owns the "type X has no field Y" diagnostic for
+  // own structs (fields + property accessors), so routing field access through requireMember would
+  // double-fire. requireMember covers only the method-call (inferCall) and static (inferStatic) gaps.
   return when (ta) { TNamed(n, args) -> inferFieldNamed(env, n, f, isSafe); else -> TUnknown }
 }
 
-fun inferStatic(env: TEnv, a: FExpr): Ty {
+fun inferStatic(env: TEnv, a: FExpr, f: String): Ty {
   val base = when (a) { FEIdent(b) -> b; else -> "" }
-  if (base != "" && memList(env.enumN, base)) { return TNamed(base, list()) }
+  // Phase M4 cross-use: `::` binds const constants / enum variants / module paths / nested types — never a
+  // VALUE. A `local::sel` whose base is a bound local is the locked "use `.` on a value" error. Guarded on
+  // "is a local", so a type name (Color::Green), a module alias, or a type parameter stays on the normal
+  // `::` path (they are not locals). Only fires under the fatal member gate, exactly like requireMember.
+  if (env.memLevel != 0 && base != "" && tLocal(env, base).found == 1) {
+    tErr(env, "member " + (f + (" of a value must be accessed with `.` not `::`")))
+    return TUnknown
+  }
+  if (base != "") { requireMember(env, TNamed(base, list()), f) }
+  // `Enum::variant` VALUE has the enum type; an `Enum::CONST` associated constant (kind "const") does NOT —
+  // it has its own declared type, so it falls through to the permissive TUnknown (like a struct assoc const).
+  if (base != "" && memList(env.enumN, base)) { if (cmMemberKind(env.mtab, base, f) != "const") { return TNamed(base, list()) } }
   infer(env, a)
   return TUnknown
 }
@@ -1197,17 +1733,86 @@ fun inferArgList(env: TEnv, args: IntBuf): Int {
   return 0
 }
 
+// The callee of a `recv.m(..)` call. When `recv` is a bare TYPE NAME (`Type.m(..)`, a static call via dot)
+// resolve `m` against the member table as a static (requireTypeMemberDot) — an undefined `Type.m()` is a
+// no-member error before lowering. Otherwise it is an ordinary instance method call: infer the receiver's
+// type and route through requireMember (the value-receiver gap).
+fun inferMethodOrStaticDot(env: TEnv, recv: FExpr, m: String): Int {
+  val bn = when (recv) { FEIdent(b) -> b; else -> "" }
+  if (isTypeBaseName(env, bn)) { requireTypeMemberDot(env, bn, m); return 0 }
+  val tr = infer(env, recv)
+  requireMember(env, tr, m)
+  return 0
+}
+
 // A call whose callee is a field-expr is a METHOD CALL (`recv.m(args)`), not a field access. Check the
 // receiver and args, but do NOT run field-access checking on the callee (which would falsely report
 // "type X has no field m"). Method dispatch/return types aren't modeled → TUnknown.
+// a SECONDARY CONSTRUCTOR `<Owner>(args)` — an `Owner___ctor_<arity>` assoc factory is registered for the
+// argument count. Its member selector is `__ctor_<arity>` (from parseSecondaryCtor). "" base or no such
+// member => not a secondary-ctor call.
+fun hasSecondaryCtor(env: TEnv, nm: String, arity: Int): Bool {
+  if (nm == "") { return false }
+  return cmMemberKind(env.mtab, nm, "__ctor_" + arity.toStr()) != ""
+}
+
+// number of top-level function definitions named `nm` (an overload set when > 1).
+fun funOverloadCount(env: TEnv, nm: String): Int {
+  var c = 0
+  var i = 0
+  while (i < env.funN.len()) { if (env.funN.get(i) == nm) { c = c + 1 }; i = i + 1 }
+  return c
+}
+
+// do all argument types `ats` fit the parameter types `ps` (structural compat OR trait-subtype)?
+fun overloadParamsFit(env: TEnv, ps: IntBuf, ats: IntBuf): Bool {
+  if (ps.len() != ats.len()) { return false }
+  var i = 0
+  while (i < ps.len()) {
+    val pt: Ty = ps.get(i); val at: Ty = ats.get(i)
+    if (isTypeParamTy(pt) == false) { if (compat(env.prim, at, pt) == false) { if (subtypeOk(env, at, pt) == false) { return false } } }
+    i = i + 1
+  }
+  return true
+}
+
+// resolve an OVERLOADED free call `nm(args)` to the matching overload's RETURN type. Arg types are inferred
+// once; among the same-name overloads, arity-first then type-fit selects the unique match. A unique fit wins;
+// zero or multiple fits is accepted leniently (TUnknown) — the klower resolver is the final arbiter and emits
+// the 'ambiguous overload' hard error, so the checker never false-rejects a genuinely-overloaded call.
+fun resolveOverloadRet(env: TEnv, nm: String, args: IntBuf): Ty {
+  val ats = list()
+  var a = 0
+  while (a < args.len()) { val ar: FArg = args.get(a); ats.push(infer(env, ar.expr)); a = a + 1 }
+  var best = TUnknown
+  var nmatch = 0
+  var i = 0
+  while (i < env.funN.len()) {
+    if (env.funN.get(i) == nm) { val ps: IntBuf = env.funP.get(i); if (overloadParamsFit(env, ps, ats)) { nmatch = nmatch + 1; best = env.funR.get(i) } }
+    i = i + 1
+  }
+  if (nmatch == 1) { return best }
+  return TUnknown
+}
+
 fun inferCall(env: TEnv, f: FExpr, args: IntBuf): Ty {
   return when (f) {
-    FEField(recv, m) -> { infer(env, recv); inferArgList(env, args); TUnknown }
-    FESafeField(recv, m) -> { infer(env, recv); inferArgList(env, args); TUnknown }
+    FEField(recv, m) -> { inferMethodOrStaticDot(env, recv, m); inferArgList(env, args); TUnknown }
+    FESafeField(recv, m) -> { inferMethodOrStaticDot(env, recv, m); inferArgList(env, args); TUnknown }
     else -> {
-      val tf = infer(env, f)
-      inferArgList(env, args)
-      when (tf) { TFun(params, ret) -> checkCallArgs(env, params, args, ret, calleeBounds(env, f)); else -> TUnknown }
+      val nm = when (f) { FEIdent(s) -> s; else -> "" }
+      // A secondary-constructor call `Owner(args)` whose arity matches a `__ctor_<arity>` factory (not the
+      // primary field list) is accepted with the owner type — bypassing the primary-ctor arity check.
+      if (cmIsType(env.mtab, nm) && hasSecondaryCtor(env, nm, args.len())) { inferArgList(env, args); TNamed(nm, list()) }
+      else { if (nm != "" && funOverloadCount(env, nm) > 1) {
+        // OVERLOADED free function: arity-first + arg-type selection against the overload set (lenient tie).
+        resolveOverloadRet(env, nm, args)
+      }
+      else {
+        val tf = infer(env, f)
+        inferArgList(env, args)
+        when (tf) { TFun(params, ret) -> checkCallArgs(env, params, args, ret, calleeBounds(env, f)); else -> TUnknown }
+      } }
     }
   }
 }
@@ -1319,7 +1924,7 @@ fun infer(env: TEnv, e: FExpr): Ty {
     FENotNull(a) -> inferNotNull(env, a)
     FEField(a, f) -> inferField(env, a, f, 0)
     FESafeField(a, f) -> inferField(env, a, f, 1)
-    FEStatic(a, f) -> inferStatic(env, a)
+    FEStatic(a, f) -> inferStatic(env, a, f)
     FETypeApp(a, t) -> infer(env, a)
     FECast(a, ty) -> inferCast(env, a, ty)
     FEQuestion(a) -> { infer(env, a); TUnknown }
@@ -1470,7 +2075,13 @@ fun typecheckCheck(decls: IntBuf, lines: IntBuf, t1: Int): IntBuf {
   // The prelude decl list is parsed ONCE: it seeds the primitive registry (@prim markers in
   // lib/core/num.kite -> PReg, the checker's whole numeric classification) AND the function signatures.
   val pdecls = preludeDeclListT(t1)
-  val env = TEnv(list(), list(), list(), list(), list(), list(), list(), list(), list(), TUnknown, 0, list(), list(), diags, 0, buildPReg(pdecls))
+  // Phase M3: build the REAL member table (prelude + user decls) and turn the FATAL member gate on at
+  // level 3 — ALL receiver families (own structs/enums, then builtin nominals, then primitives), widened
+  // one at a time and full-gated at each step (2a own, 2b +builtin, 2c +primitive). shadowOn stays 0 (the
+  // TEnv shadow log is the resolver's job); the member check emits real diagnostics via requireMember,
+  // gated by receiver-family (memberFamilyEnabled). A level-3 shadow probe over the whole compiler+stdlib+
+  // test corpus surfaced 0 false positives, so a genuinely-undefined selector on ANY known type now errors.
+  val env = TEnv(list(), list(), list(), list(), list(), list(), list(), list(), list(), TUnknown, 0, list(), list(), diags, 0, buildPReg(pdecls), buildCMTab(pdecls, decls), list(), 0, 3)
   collectSigs(env, decls)
   // Seed prelude/lib FUNCTION signatures so their calls are arg-type-checked exactly like user calls (an
   // unsound gap otherwise: a wrong-typed argument to a stdlib function slipped through). Only functions
@@ -1482,6 +2093,14 @@ fun typecheckCheck(decls: IntBuf, lines: IntBuf, t1: Int): IntBuf {
   var i = 0
   while (i < decls.len()) { env.curLine = lines.get(i); checkDecl(env, decls.get(i)); i = i + 1 }
   return diags
+}
+
+// Parse a token stream and return ONLY the shadow-log lines (empty = every selector resolved). Mirrors
+// checkDiagsT's parse, but runs the RESOLVER shadow traversal (Phase M2) instead of the check gate.
+fun shadowDiagsT(toks: IntBuf, t1: Int): IntBuf {
+  val lines = list()
+  val decls = parseProgramLn(toks, lines)
+  return resolveShadow(decls, lines, t1)
 }
 
 // checkDiags is the reusable entry: parse a token stream, run name-resolution + type-check, return the

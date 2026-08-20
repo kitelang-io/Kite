@@ -6,10 +6,10 @@
 // and `c.isDigit()` / `c.toUpper()` resolve here via UFCS on the receiver's type.
 // Not in the default prelude (import kite::core::char to use them) — purely additive, zero self-host cost.
 //
-// The bodies call their siblings and the String queries by DIRECT name (Int_isUpper(c), String_byteAt(s,i))
-// rather than method sugar: a module-mangled free function is reached by its mangled name under a namespace
-// import while method dispatch resolves against the flat/global registry, so intra-module method sugar would
-// not bind (the same convention kite::core::string / kite::core::math follow internally).
+// The bodies call their siblings and the String queries through METHOD SUGAR (self.isUpper(), s.byteAt(i)):
+// the surface member form is the only spelling (Phase M6). The mangled `Int_`/`String_` names are no longer
+// valid surface identifiers, and the lowerer's module-aware resolver binds the receiver method across the
+// namespace-import module boundary.
 
 // Number of UTF-8 bytes in the sequence whose lead byte is `lead` (1..4; 1 for a continuation/invalid byte).
 fun Int.utf8SeqLen(): Int {
@@ -28,19 +28,19 @@ fun Int.charUtf8Len(): Int {
 }
 
 // Decode the Unicode scalar starting at byte offset `i` of the byte-string `s`. The caller advances by
-// `String_byteAt(s, i).utf8SeqLen()`. Continuation bytes contribute their low 6 bits (b - 128). Byte access
-// goes through String_byteAt so this is representation-agnostic: T0 (`s` is the raw pointer) and T1 (`s` is
-// the boxed {len,data} — String_byteAt loads `s.data`) both decode correctly.
+// `s.byteAt(i).utf8SeqLen()`. Continuation bytes contribute their low 6 bits (b - 128). Byte access goes
+// through `byteAt` so this is representation-agnostic: T0 (`self` is the raw pointer) and T1 (`self` is the
+// boxed {len,data} — byteAt loads `self.data`) both decode correctly.
 fun String.decodeUtf8At(i: Int): Int {
-  val b = String_byteAt(self, i)
+  val b = self.byteAt(i)
   if (b < 128) { return b }
   if (b < 224) {
-    return (b - 192) * 64 + (String_byteAt(self, i + 1) - 128)
+    return (b - 192) * 64 + (self.byteAt(i + 1) - 128)
   }
   if (b < 240) {
-    return (b - 224) * 4096 + (String_byteAt(self, i + 1) - 128) * 64 + (String_byteAt(self, i + 2) - 128)
+    return (b - 224) * 4096 + (self.byteAt(i + 1) - 128) * 64 + (self.byteAt(i + 2) - 128)
   }
-  return (b - 240) * 262144 + (String_byteAt(self, i + 1) - 128) * 4096 + (String_byteAt(self, i + 2) - 128) * 64 + (String_byteAt(self, i + 3) - 128)
+  return (b - 240) * 262144 + (self.byteAt(i + 1) - 128) * 4096 + (self.byteAt(i + 2) - 128) * 64 + (self.byteAt(i + 3) - 128)
 }
 
 // Append the UTF-8 encoding of the scalar `cp` onto a StrBuilder; returns the builder so pushes chain.
@@ -68,10 +68,10 @@ fun StrBuilder.encodeUtf8(cp: Int): StrBuilder {
 
 // Count the Unicode scalars in a UTF-8 byte-string (O(n), one step per lead byte).
 fun String.utf8CharCount(): Int {
-  val n = String_len(self)
+  val n = self.len()
   var i = 0
   var count = 0
-  while (i < n) { i = i + Int_utf8SeqLen(String_byteAt(self, i)); count = count + 1 }
+  while (i < n) { i = i + self.byteAt(i).utf8SeqLen(); count = count + 1 }
   return count
 }
 
@@ -82,12 +82,12 @@ fun Int.isUpper(): Bool { return self >= 65 && self <= 90 }
 
 fun Int.isLower(): Bool { return self >= 97 && self <= 122 }
 
-fun Int.isAlpha(): Bool { return Int_isUpper(self) || Int_isLower(self) }
+fun Int.isAlpha(): Bool { return self.isUpper() || self.isLower() }
 
-fun Int.isAlnum(): Bool { return Int_isAlpha(self) || Int_isDigit(self) }
+fun Int.isAlnum(): Bool { return self.isAlpha() || self.isDigit() }
 
 fun Int.isSpace(): Bool { return self == 32 || self == 9 || self == 10 || self == 13 }
 
-fun Int.toUpper(): Int { if (Int_isLower(self)) { return self - 32 } return self }
+fun Int.toUpper(): Int { if (self.isLower()) { return self - 32 } return self }
 
-fun Int.toLower(): Int { if (Int_isUpper(self)) { return self + 32 } return self }
+fun Int.toLower(): Int { if (self.isUpper()) { return self + 32 } return self }
