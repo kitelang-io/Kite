@@ -1,0 +1,2 @@
+error: type Widget has no member nope
+1 error(s)

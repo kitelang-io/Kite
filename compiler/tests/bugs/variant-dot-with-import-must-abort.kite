@@ -1,0 +1,13 @@
+// Phase M4 (REDO): a DOT-qualified enum-variant construction (`Color.Red`) must be rejected even when a
+// NAMESPACE import is present. The M4-gap fix closes the checker bypass — its concat-module parse no longer
+// stops at the first `pub`/`const`/`use`, so the member-table CHECKER now catches this under a namespace
+// import (variants bind with `::`), hard-aborting with no binary before the lowerer backstop is reached.
+// Emitting a dangling `EField(EIdent(Color), Red)` would segfault at runtime; `Color::Red` is the valid form.
+import kite::core
+
+enum Color { Red; Green }
+
+fun main(): Int {
+  val c = Color.Red
+  return 0
+}

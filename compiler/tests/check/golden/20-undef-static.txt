@@ -1,0 +1,2 @@
+error: type Color has no member Purple
+1 error(s)

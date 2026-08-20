@@ -1,0 +1,10 @@
+// M5 (B): overloading allows same-name / different-signature functions, but the SAME signature declared
+// twice is a duplicate-definition CLASH — a compile error before lowering (the M5 skipDup hard-error rule).
+// `add(Int,Int)` is declared twice with an identical signature. The gate asserts a non-zero exit, no binary,
+// and the "duplicate top-level definition" diagnostic.
+fun add(a: Int, b: Int): Int { return a + b }
+fun add(a: Int, b: Int): Int { return a - b }
+
+fun main(): Int {
+  return add(1, 2)
+}

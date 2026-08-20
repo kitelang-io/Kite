@@ -7,21 +7,21 @@
 // exactly as before the split; Phase 9's T1 `class String` + deinit ends the leak. Nothing here changes
 // representation or emission; this is a pure relocation of the transform surface out of the core module.
 
-// String_substr(s, start, length): copy length bytes from s+start into a fresh NUL-terminated buffer.
-fun String_substr(s: String, st: Int, len: Int): String {
+// `s.substr(start, length)`: copy length bytes from s+start into a fresh NUL-terminated buffer.
+fun String.substr(st: Int, len: Int): String {
   val r = __rawAlloc(len + 1)
   var i = 0
-  while (i < len) { __rawStoreByte(r, i, __rawLoadByte(s, st + i)) i = i + 1 }
+  while (i < len) { __rawStoreByte(r, i, __rawLoadByte(self, st + i)) i = i + 1 }
   __rawStoreByte(r, len, 0)
   return r
 }
 
 // `s.repeat(n)` — n copies of s, concatenated (n<=0 yields ""). Builds onto ONE StrBuilder (amortized),
 // then seals with finish() — no O(n^2) concat chain, no per-iteration leak.
-fun String_repeat(s: String, n: Int): String {
+fun String.repeat(n: Int): String {
   val b = strNew()
   var i = 0
-  while (i < n) { b.pushStr(s) i = i + 1 }
+  while (i < n) { b.pushStr(self) i = i + 1 }
   return b.finish()
 }
 

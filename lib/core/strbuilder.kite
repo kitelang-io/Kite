@@ -20,7 +20,7 @@ class StrBuilder(var n: Int, var cap: Int, var data: USize) {
   // append every byte of a String; returns self so pushes chain (the interpolation desugar relies on this).
   @lang("str.build.push")
   fun pushStr(self, s: String): StrBuilder {
-    val ln = String_len(s)
+    val ln = s.len()
     var i = 0
     while (i < ln) { self.pushByte(__rawLoadByte(s, i)) i = i + 1 }
     return self
@@ -28,7 +28,7 @@ class StrBuilder(var n: Int, var cap: Int, var data: USize) {
   // append a single char/byte; returns self.
   fun pushChar(self, c: Int): StrBuilder { self.pushByte(c) return self }
   // append the base-10 rendering of an Int; returns self.
-  fun pushInt(self, v: Int): StrBuilder { self.pushStr(Int_toStr(v)) return self }
+  fun pushInt(self, v: Int): StrBuilder { self.pushStr(v.toStr()) return self }
   fun byteAt(self, i: Int): Int { return __rawLoadByte(self.data, i) }
   fun size(self): Int { return self.n }
   // seal to a real String: NUL-terminate and hand the buffer to the caller (ownership transfer).

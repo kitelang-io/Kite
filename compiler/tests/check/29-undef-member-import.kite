@@ -1,0 +1,9 @@
+import kite::core
+
+struct Widget(val x: Int)
+
+fun probe(): Int {
+  val w = Widget(1)
+  w.nope()
+  return 0
+}

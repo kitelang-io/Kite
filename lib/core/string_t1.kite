@@ -121,7 +121,7 @@ fun Int_toStr(n: Int): String {
   return String(total, r)
 }
 
-fun toStr(n: Int): String { return Int_toStr(n) }
+fun toStr(n: Int): String { return n.toStr() }
 
 // --- StrView: a NON-OWNING window into a String's bytes (Phase 9, §5). substr returns one instead of copying;
 // materialize a real owned String with toStr() when a copy is actually needed. `data` aliases the source
@@ -161,7 +161,7 @@ class StrBuilder(var n: Int, var cap: Int, var data: Int) {
     return self
   }
   fun pushChar(self, c: Int): StrBuilder { self.pushByte(c) return self }
-  fun pushInt(self, v: Int): StrBuilder { self.pushStr(Int_toStr(v)) return self }
+  fun pushInt(self, v: Int): StrBuilder { self.pushStr(v.toStr()) return self }
   fun byteAt(self, i: Int): Int { return __rawLoadByte(self.data, i) }
   fun size(self): Int { return self.n }
   // seal: NUL-terminate, hand the buffer to a fresh String box, and null out `data` so the builder's deinit

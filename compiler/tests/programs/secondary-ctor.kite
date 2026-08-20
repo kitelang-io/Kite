@@ -1,0 +1,19 @@
+// M5 (C) — secondary constructors delegating to the primary field-list constructor, selected by arity at a
+// `ClassName(args)` call. `Point` and `Rect` each add `constructor(..) : this(..)` overloads. Exit 29.
+class Point(val x: Int, val y: Int) {
+  constructor(v: Int) : this(v, v)
+}
+
+class Rect(val w: Int, val h: Int) {
+  constructor() : this(1, 1)
+  constructor(s: Int) : this(s, s)
+}
+
+fun main(): Int {
+  val p = Point(7)     // secondary -> 7, 7
+  val a = Rect()       // secondary -> 1, 1
+  val b = Rect(4)      // secondary -> 4, 4
+  val c = Rect(2, 3)   // primary   -> 2, 3
+  // (7+7) + (1+1) + (4+4) + (2+3) = 29
+  return p.x + p.y + a.w + a.h + b.w + b.h + c.w + c.h
+}

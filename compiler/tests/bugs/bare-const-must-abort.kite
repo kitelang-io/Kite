@@ -1,0 +1,8 @@
+// M5 (A): the ONE constant syntax is `const val NAME = <expr>`. A bare `const NAME = ...` (no `val`) is
+// rejected outright by the parser — a hard stderr diagnostic + abort, no binary. The gate asserts the
+// non-zero exit and the "const val" diagnostic.
+const MAX = 100
+
+fun main(): Int {
+  return MAX
+}

@@ -1,0 +1,1 @@
+fun grow(xs: IntBuf<Int>): Int { return xs.enlarge() }

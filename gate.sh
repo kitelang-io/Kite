@@ -56,6 +56,45 @@ grep -q "unsupported construct" "$T/uc_err" || fail "unsupported-construct diagn
 [ -s "$T/uc_stdout" ] && fail "unsupported-construct diagnostic leaked to stdout (must be stderr-only)"
 echo "  unsupported construct -> exit $rc, no binary, diagnostic on stderr ✓"
 
+echo "=== [robustness] undefined Type::member static hard-aborts, no silent bare-symbol binary ==="
+US=compiler/tests/bugs/undefined-static-must-abort.kite
+rm -f "$T/us_out"
+"$T/k2" --no-check "$US" "$T/us_out" >"$T/us_stdout" 2>"$T/us_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on an undefined Type::member — staticCallee bare-symbol fallback regressed"
+[ -f "$T/us_out" ] && fail "compiler wrote a binary despite an undefined static (dangling bare symbol)"
+grep -q "no such associated member" "$T/us_err" || fail "undefined-static diagnostic not on stderr"
+echo "  Widget::nope() -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] undefined Type.member DOT static is a compile error, no silent binary ==="
+UD=compiler/tests/bugs/undefined-dot-must-abort.kite
+rm -f "$T/ud_out"
+"$T/k2" "$UD" "$T/ud_out" >"$T/ud_stdout" 2>"$T/ud_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on an undefined Type.member DOT static — checker dot-routing regressed"
+[ -f "$T/ud_out" ] && fail "compiler wrote a binary despite an undefined Type.member dot static (dangling bare symbol)"
+grep -q "has no member" "$T/ud_err" || fail "undefined-dot-static diagnostic not on stderr"
+echo "  Widget.nope() -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] dot-qualified enum-variant construction under a namespace import hard-aborts, no segfaulting binary ==="
+VD=compiler/tests/bugs/variant-dot-with-import-must-abort.kite
+rm -f "$T/vd_out"
+"$T/k2" "$VD" "$T/vd_out" >"$T/vd_stdout" 2>"$T/vd_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on Color.Red under 'import kite::core' — dot-variant enforcement regressed"
+[ -f "$T/vd_out" ] && fail "compiler wrote a binary for a dot-qualified variant construction (would segfault at runtime)"
+# The member-table checker now enforces this under namespace imports too (its concat-module gate no longer
+# desyncs at `pub`), so the diagnostic reads "must be accessed with `::` not `.`" — caught before the
+# lowerer backstop that would otherwise fire on the `Color.Red` construction.
+grep -q "must be accessed with .::. not" "$T/vd_err" || fail "dot-variant diagnostic not on stderr"
+echo "  Color.Red (with import) -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] undefined instance x.nope() hard-aborts under --no-check, no silent bare-symbol binary ==="
+UM=compiler/tests/bugs/undefined-method-must-abort.kite
+rm -f "$T/um_out"
+"$T/k2" --no-check "$UM" "$T/um_out" >"$T/um_stdout" 2>"$T/um_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on an undefined instance method under --no-check — klower backstop regressed"
+[ -f "$T/um_out" ] && fail "compiler wrote a binary despite an undefined instance method (dangling bare symbol)"
+grep -q "no such method or function" "$T/um_err" || fail "undefined-method diagnostic not on stderr"
+echo "  w.nope() --no-check -> exit $rc, no binary, diagnostic on stderr ✓"
+
 echo "=== [robustness] @derive of a non-derivable trait hard-aborts, no silent binary ==="
 DR=compiler/tests/bugs/derive-nonderivable-must-abort.kite
 rm -f "$T/dr_out"
@@ -92,6 +131,33 @@ rm -f "$T/xf_out"
 grep -q "extension function" "$T/xf_err" || fail "malformed-extension diagnostic not on stderr"
 [ -s "$T/xf_stdout" ] && fail "malformed-extension diagnostic leaked to stdout (must be stderr-only)"
 echo "  fun Int..dbl() -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] bare \`const\` (no \`val\`) is rejected, no silent binary (M5) ==="
+BC=compiler/tests/bugs/bare-const-must-abort.kite
+rm -f "$T/bc_out"
+"$T/k2" "$BC" "$T/bc_out" >"$T/bc_stdout" 2>"$T/bc_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on a bare \`const\` — const-val unification regressed"
+[ -f "$T/bc_out" ] && fail "compiler wrote a binary despite a bare \`const\` decl"
+grep -q "const val" "$T/bc_err" || fail "bare-const diagnostic not on stderr"
+echo "  const MAX = 100 -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] a same-signature duplicate definition is a hard error, no silent last-wins (M5) ==="
+DS=compiler/tests/bugs/duplicate-signature-must-abort.kite
+rm -f "$T/ds_out"
+"$T/k2" "$DS" "$T/ds_out" >"$T/ds_stdout" 2>"$T/ds_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on a same-signature duplicate — skipDup hard-error regressed"
+[ -f "$T/ds_out" ] && fail "compiler wrote a binary despite a same-signature duplicate definition"
+grep -q "duplicate top-level definition" "$T/ds_err" || fail "duplicate-definition diagnostic not on stderr"
+echo "  fun add(Int,Int) x2 -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] a bare \`<Type>_<member>\` surface identifier is rejected, no silent binary (M6) ==="
+MS=compiler/tests/bugs/mangled-surface-must-abort.kite
+rm -f "$T/ms_out"
+"$T/k2" "$MS" "$T/ms_out" >"$T/ms_stdout" 2>"$T/ms_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on a bare \`String_len\` — member-table surface enforcement regressed"
+[ -f "$T/ms_out" ] && fail "compiler wrote a binary despite a bare \`<Type>_<member>\` surface identifier"
+grep -q "not a valid identifier" "$T/ms_err" || fail "mangled-surface diagnostic not on stderr"
+echo "  String_len(s) -> exit $rc, no binary, diagnostic on stderr ✓"
 
 echo "✅ GATE PASSED (no OCaml, no shared /tmp) — suite green, kcc2==kcc3, robust to malformed input"
 rm -rf "$T"

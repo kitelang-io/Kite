@@ -1,0 +1,1 @@
+fun twice(n: Int): Int { return n.wobble() }

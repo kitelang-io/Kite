@@ -1,0 +1,2 @@
+error: line 1: type Int has no member wobble
+1 semantic error(s)

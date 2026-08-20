@@ -1,0 +1,1 @@
+fun probe(x: Int): Int { val y = x::foo return 0 }

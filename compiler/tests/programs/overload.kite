@@ -1,0 +1,18 @@
+// M5 (B) — overloading resolved by ARITY first, then argument TYPES among same-arity candidates (contained).
+// Free functions `make`/`tag` and methods `Box.scaled` each carry two overloads. Exit 90.
+fun make(w: Int): Int { return w * w }
+fun make(w: Int, h: Int): Int { return w * h }
+
+fun tag(x: Int): Int { return 1 }
+fun tag(x: String): Int { return 7 }
+
+class Box(val n: Int) {
+  fun scaled(self, k: Int): Int { return self.n * k }
+  fun scaled(self, a: Int, b: Int): Int { return self.n + a + b }
+}
+
+fun main(): Int {
+  val b = Box(10)
+  // make: 25 + 12 = 37 ; tag: 1 + 7 = 8 ; scaled: 30 + 15 = 45  -> 90
+  return make(5) + make(3, 4) + tag(9) + tag("hi") + b.scaled(3) + b.scaled(2, 3)
+}

@@ -1,0 +1,11 @@
+// Phase M3 item 1 regression (DOT form): `Type.member` / `Type.member()` static-access on a DEFINED type
+// with no such member must be a COMPILE ERROR before lowering — the dot analogue of the `::` case. Before
+// the fix, `Widget.nope()` slipped past the checker (the type-name base infers to the constructor's fn
+// type, so requireMember skipped) and lowered to a bare `nope` external -> silent-0 / dyld crash. Now the
+// checker routes a type-name dot base through requireTypeMemberDot: `type Widget has no member nope`. The
+// gate compiles with the DEFAULT (checked) path and asserts a no-member error + no binary.
+struct Widget(val id: Int)
+
+fun main(): Int {
+  return Widget.nope()
+}

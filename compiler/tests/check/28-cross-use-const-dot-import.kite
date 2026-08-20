@@ -1,0 +1,3 @@
+import kite::core
+
+fun probe(): Int { val m = Int.MAX return 0 }

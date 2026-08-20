@@ -1,10 +1,10 @@
-const MAX = 100
+const val MAX = 100
 
-const SHIFT = 1 << 4
+const val SHIFT = 1 << 4
 
-const NEG = 0 - 5
+const val NEG = 0 - 5
 
-const COMBO = (10 + 5) * 3
+const val COMBO = (10 + 5) * 3
 
 fun useConst(): Int { return MAX + COMBO }
 

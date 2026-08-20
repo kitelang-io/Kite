@@ -1,20 +1,20 @@
 // kite::core::math — integer math, as extension methods on Int. No allocation, no OS.
-// Convention-by-name (Kotlin style): the bodies are the mangled `Int_<name>` methods, so `x.abs()` /
-// `a.min(b)` / `a.max(b)` / `x.clamp(lo, hi)` / `base.pow(exp)` / `a.gcd(b)` resolve here via UFCS on an
-// Int-typed receiver. Opt in with `import kite::core::math` (or `import kite::core`).
+// Convention-by-name (Kotlin style): `x.abs()` / `a.min(b)` / `a.max(b)` / `x.clamp(lo, hi)` /
+// `base.pow(exp)` / `a.gcd(b)` resolve here via UFCS on an Int-typed receiver. Opt in with
+// `import kite::core::math` (or `import kite::core`).
 //
-// The bodies call their SIBLINGS by direct name (Int_min(...), Int_abs(...)) rather than method sugar: a
-// module-mangled free function is reached via its mangled name under a namespace import, and method dispatch
-// resolves against the flat/global registry — so intra-module method sugar would not bind (same convention
-// the String methods in kite::core::string follow: internal callers use String_len(self), not self.len()).
+// The bodies call their SIBLINGS through method sugar (`self.abs()`, `lo.max(..)`) — the surface member
+// form is the ONLY spelling (Phase M6): the mangled `Int_<name>` name is no longer a valid surface
+// identifier, and the lowerer's module-aware resolver (resolveFun) binds the receiver method across the
+// namespace-import module boundary.
 fun Int.abs(): Int { if (self < 0) { return 0 - self } return self }
 
 fun Int.max(other: Int): Int { if (self > other) { return self } return other }
 
 fun Int.min(other: Int): Int { if (self < other) { return self } return other }
 
-fun Int.clamp(lo: Int, hi: Int): Int { return Int_max(lo, Int_min(self, hi)) }
+fun Int.clamp(lo: Int, hi: Int): Int { return lo.max(self.min(hi)) }
 
 fun Int.pow(exp: Int): Int { var r = 1 var i = 0 while (i < exp) { r = r * self i = i + 1 } return r }
 
-fun Int.gcd(other: Int): Int { var x = Int_abs(self) var y = Int_abs(other) while (y != 0) { val t = y y = x % y x = t } return x }
+fun Int.gcd(other: Int): Int { var x = self.abs() var y = other.abs() while (y != 0) { val t = y y = x % y x = t } return x }

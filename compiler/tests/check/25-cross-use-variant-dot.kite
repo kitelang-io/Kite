@@ -1,0 +1,3 @@
+enum Color { Red; Green; Blue }
+
+fun pick(): Int { val z = Color.Red return 0 }

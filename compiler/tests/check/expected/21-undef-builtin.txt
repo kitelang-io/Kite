@@ -1,0 +1,2 @@
+error: line 1: type IntBuf has no member enlarge
+1 semantic error(s)

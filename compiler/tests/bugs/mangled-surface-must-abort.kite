@@ -1,0 +1,8 @@
+// Phase M6 robustness fixture: a `<Type>_<member>` name is INTERNAL (codegen still computes the mangled
+// symbol), never a valid SURFACE identifier. A bare call to one — here `String_len(s)`, the internal mangle
+// of `s.len()` — must hard-abort with no binary (call it as `s.len()` / `String::len`). Guards the member-
+// table surface enforcement (rejectMangledSurface) against regressing to a silent bare-symbol call.
+fun main(): Int {
+  val s = "hi"
+  return String_len(s)
+}
