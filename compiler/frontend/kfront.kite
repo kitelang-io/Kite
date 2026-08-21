@@ -279,13 +279,15 @@ fun kw(w: String): Int {
   if (w == "constructor") { return 86 }
   if (w == "until") { return 84 }
   if (w == "as") { return 85 }
+  if (w == "vararg") { return 87 }
+  if (w == "infix") { return 88 }
   return 1
 }
 
 fun push2(lx: Lx, toks: IntBuf, kind: Int, text: String): Int { toks.push(Tok(kind, text, lx.line)); return 0 }
 
 fun lex(src: String): IntBuf {
-  val toks = list()
+  val toks = intBuf()
   val lx = Lx(src, src.len(), 0, 1)
   var go = 1
   while (go == 1) {
@@ -463,7 +465,7 @@ enum FStmt {
 
 struct Anno(val name: String, val args: IntBuf) // args: IntBuf<FExpr>
 
-struct FParam(val name: String, val ty: String) // mode prefix baked into ty
+struct FParam(val name: String, val ty: String, val isVararg: Int) // mode prefix baked into ty; isVararg=1 => the vararg (variadic) param, its `ty` is the element type's Array<E> carrier
 
 struct FFunc(val annos: IntBuf, val name: String, val gen: String, val recv: String, val params: IntBuf, val ret: String, val whr: String, val body: FExpr) // body FENoRes = signature-only
 
@@ -473,7 +475,7 @@ struct FTDecl(val annos: IntBuf, val kind: Int, val name: String, val gen: Strin
 
 struct FVariant(val name: String, val payKind: Int, val tys: IntBuf, val flds: IntBuf) // payKind 0 none / 1 positional / 2 named
 
-struct FEDecl(val annos: IntBuf, val name: String, val gen: String, val variants: IntBuf, val consts: IntBuf) // consts = synthesized nullary assoc-const FFuncs (const val in an enum body)
+struct FEDecl(val annos: IntBuf, val name: String, val gen: String, val variants: IntBuf, val consts: IntBuf, val methods: IntBuf) // consts = synthesized nullary assoc-const FFuncs (const val in an enum body); methods = enum-body `fun` decls (member `fun m(self)` + associated `fun m()`), owned like class-body methods
 
 struct FAssoc(val name: String, val text: String)
 
@@ -482,7 +484,59 @@ struct FTraitDecl(val annos: IntBuf, val name: String, val gen: String, val supe
 struct FImplDecl(val annos: IntBuf, val gen: String, val traitName: String, val forTy: String, val whr: String, val assoc: IntBuf, val methods: IntBuf) // traitName "" = inherent
 
 // ============================ Parser =======================================
-struct P(val toks: IntBuf, var pos: Int)
+// `infixNames` carries the set of DECLARED `infix fun` method names (short selectors) collected by a
+// lightweight token PRE-PASS (scanInfixNames) BEFORE the real parse. Kite lexes newlines as insignificant
+// whitespace and the parser is single-pass, so at parse time it cannot yet know which functions are
+// `infix`; the set lets the expression parser (parseInfix) treat an identifier in operator position as an
+// infix operator ONLY when it names a declared infix fun. An identifier NOT in the set ends the expression
+// exactly as before, so adjacent statements never wrongly merge. Empty set => byte-identical to pre-infix.
+struct P(val toks: IntBuf, var pos: Int, val infixNames: IntBuf)
+
+// membership check for the infix-name set (a small deduped IntBuf<String>).
+fun infixSetHas(names: IntBuf, nm: String): Bool {
+  var i = 0
+  while (i < names.len()) { val x: String = names.get(i); if (x == nm) { return true }; i = i + 1 }
+  return false
+}
+
+// token PRE-PASS: for every `infix fun ...` declaration in `toks`, collect the METHOD NAME it declares —
+// the identifier immediately before the parameter-list `(`. This handles all forms uniformly: a member
+// `infix fun m(x)` (name `m`), an extension `infix fun A.m(x)` (name `m`, after the receiver dot), and a
+// generic extension `infix fun <A,B> A.to(that)` (name `to`) — in each the last identifier before `(` is
+// the operator name. Names appended to `out` (deduped). Uses only kfront-local helpers so the frontend
+// stays standalone (kitefmt / kparse include kfront but not kcheck/klower).
+fun scanInfixNames(toks: IntBuf, out: IntBuf): Int {
+  var i = 0
+  while (i < toks.len()) {
+    val t: Tok = toks.get(i)
+    if (t.kind == 88) { // `infix`
+      var j = i + 1
+      var last = ""
+      var go = 1
+      while (go == 1 && j < toks.len()) {
+        val u: Tok = toks.get(j)
+        if (u.kind == 20 || u.kind == 0) { go = 0 } // `(` opens the param list, or EOF
+        else { if (u.kind == 1) { last = u.text }; j = j + 1 }
+      }
+      if (last != "") { if (infixSetHas(out, last) == false) { out.push(last) } }
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+// build a parser over `toks` whose infix-name set is SEEDED (with prelude/imported infix names) plus every
+// infix fun declared inside `toks` itself.
+fun mkPSeed(toks: IntBuf, seed: IntBuf): P {
+  val names = intBuf()
+  var i = 0
+  while (i < seed.len()) { val s: String = seed.get(i); if (infixSetHas(names, s) == false) { names.push(s) }; i = i + 1 }
+  scanInfixNames(toks, names)
+  return P(toks, 0, names)
+}
+
+// build a parser over `toks` whose infix set is only the infix funs declared inside `toks`.
+fun mkP(toks: IntBuf): P { return mkPSeed(toks, intBuf()) }
 
 // Current-token accessors. These MUST bounds-check: on malformed input the grammar can advance the
 // cursor past the final EOF token, and an unchecked listGet returns null -> `t.kind` faults at 0x0
@@ -607,11 +661,11 @@ fun parseWhere(p: P): String { // "" if no 'where', else " where ..."
 }
 
 fun parseAnnos(p: P): IntBuf { // ('@' ident ['(' expr,* ')'])* -> IntBuf<Anno>
-  val annos = list()
+  val annos = intBuf()
   while (pk(p) == 73) {
     eat(p)
     val nm = ptext(p); eat(p)
-    val args = list()
+    val args = intBuf()
     if (pk(p) == 20) { eat(p)
       if (pk(p) != 21) { var more = 1
         while (more == 1) { args.push(parseExpr(p)); if (pk(p) == 24) { eat(p) } else { more = 0 } } }
@@ -698,7 +752,7 @@ fun parseRawArg(p: P): FRawArg {
 
 fun parseCtorPat(p: P, path: String): FPat {
   eat(p) // '('
-  val raws = list()
+  val raws = intBuf()
   if (pk(p) != 21) {
     var more = 1
     while (more == 1) { raws.push(parseRawArg(p)); if (pk(p) == 24) { eat(p) } else { more = 0 } }
@@ -710,12 +764,12 @@ fun parseCtorPat(p: P, path: String): FPat {
   while (i < raws.len()) { val r: FRawArg = raws.get(i)
     if (r.tag == 2) { hasRest = 1 }; if (r.tag == 1) { hasNamed = 1 }; i = i + 1 }
   if (hasRest == 0 && hasNamed == 0) { // positional
-    val pats = list()
+    val pats = intBuf()
     var j = 0
     while (j < raws.len()) { val r: FRawArg = raws.get(j); pats.push(r.pat); j = j + 1 }
     return FPCtor(path, pats)
   }
-  val flds = list() // record
+  val flds = intBuf() // record
   var m = 0
   while (m < raws.len()) { val r: FRawArg = raws.get(m)
     if (r.tag == 1) { flds.push(FRFld(r.name, 1, r.pat)) }
@@ -742,18 +796,18 @@ fun parseWhen(p: P): FExpr {
     eat(p) // ')'
   }
   eat(p) // '{'
-  val arms = list()
+  val arms = intBuf()
   while (pk(p) != 23 && pk(p) != 0) {
     if (pk(p) == 51) { // else -> body
       eat(p); eat(p)
-      arms.push(FArm(1, FENoRes, list(), FENoRes, parseExpr(p)))
+      arms.push(FArm(1, FENoRes, intBuf(), FENoRes, parseExpr(p)))
     } else {
       if (hasSubj == 0) { // cond -> body
         val cond = parseExpr(p)
         eat(p)
-        arms.push(FArm(0, cond, list(), FENoRes, parseExpr(p)))
+        arms.push(FArm(0, cond, intBuf(), FENoRes, parseExpr(p)))
       } else { // pattern [| pattern]* [if guard] -> body
-        val pats = list()
+        val pats = intBuf()
         pats.push(parsePattern(p))
         while (pk(p) == 61) { eat(p); pats.push(parsePattern(p)) }
         var guard = FENoRes
@@ -774,12 +828,12 @@ fun isRetStop(k: Int): Bool {
 // split a kind-15 raw body into IntBuf<FIPart>: literal chunks + $ident / ${expr} code chunks
 // (each code chunk re-lexed+parsed with a fresh P via parseInterpSub).
 fun parseInterpSub(src: String): FExpr {
-  val sp = P(lex(src), 0)
+  val sp = mkP(lex(src))
   return parseExpr(sp)
 }
 
 fun interpParts(body: String, isRaw: Int): IntBuf {
-  val parts = list()
+  val parts = intBuf()
   val n = body.len()
   var i = 0
   var lit = ""
@@ -831,16 +885,16 @@ fun panicKind(name: String): Int {
 
 fun buildAbort(prefix: String, msg: FExpr): FExpr {
   val cat = FEBin("+", FEStr(prefix, 0), msg)
-  val ea = list(); ea.push(FArg("", cat))
-  val stmts = list()
+  val ea = intBuf(); ea.push(FArg("", cat))
+  val stmts = intBuf()
   stmts.push(FSExprS(FECall(FEIdent("eprintln"), ea)))
-  stmts.push(FSExprS(FECall(FEIdent("__abort"), list())))
+  stmts.push(FSExprS(FECall(FEIdent("__abort"), intBuf())))
   return FEBlock(stmts, FEInt("0"))
 }
 
 fun parsePanicForm(p: P, kind: Int, ln: Int): FExpr {
   eat(p) // '('
-  val args = list()
+  val args = intBuf()
   if (pk(p) != 21) {
     var more = 1
     while (more == 1) { args.push(parseExpr(p)); if (pk(p) == 24) { eat(p) } else { more = 0 } }
@@ -898,11 +952,11 @@ fun parsePrimary(p: P): FExpr {
 // after '[': empty -> list; parse first expr; if next is ':' -> map (k: v pairs) else list.
 fun parseListOrMap(p: P): FExpr {
   eat(p) // '['
-  if (pk(p) == 75) { eat(p); return FEList(list()) } // empty list
+  if (pk(p) == 75) { eat(p); return FEList(intBuf()) } // empty list
   val first = parseExpr(p)
   if (pk(p) == 25) { // ':' => map
     eat(p)
-    val ents = list()
+    val ents = intBuf()
     ents.push(FMapEnt(first, parseExpr(p)))
     while (pk(p) == 24) {
       eat(p)
@@ -911,7 +965,7 @@ fun parseListOrMap(p: P): FExpr {
     eat(p) // ']'
     return FEMap(ents)
   }
-  val elems = list() // list
+  val elems = intBuf() // list
   elems.push(first)
   while (pk(p) == 24) { eat(p); if (pk(p) != 75) { elems.push(parseExpr(p)) } }
   eat(p) // ']'
@@ -927,7 +981,7 @@ fun parseArg(p: P): FArg {
 }
 
 fun parseArgs(p: P): IntBuf {
-  val args = list()
+  val args = intBuf()
   if (pk(p) != 21) {
     var more = 1
     while (more == 1) { args.push(parseArg(p)); if (pk(p) == 24) { eat(p); if (pk(p) == 21) { more = 0 } } else { more = 0 } }
@@ -1018,9 +1072,28 @@ fun parseShift(p: P): FExpr { // << >>  (bp 15, between rel and range)
   return e
 }
 
-fun parseRel(p: P): FExpr {
+// USER-DEFINABLE INFIX FUNCTIONS. A `NAME` in operator position where NAME is a DECLARED `infix fun` name
+// (registry-driven via p.infixNames, never hardcoded per name) is a left-associative binary operator:
+// `a NAME b` desugars to the method-call form `a.NAME(b)` == FECall(FEField(a, NAME), [b]). That reuses the
+// existing method/extension call lowering (methodCallee/mangleMethod) — a member `infix fun m` resolves to
+// `<Recv>_m`, an extension `infix fun A.m` to its desugared free fn, and a generic extension `A.to` to its
+// erased symbol. PRECEDENCE (Kotlin's slot): looser than range/additive/multiplicative/shift, TIGHTER than
+// comparison/equality — so `x + 1 to y` parses as `(x + 1) to y` and `a to b == c` as `(a to b) == c`.
+// An identifier NOT in the set is left untouched (returns the parseShift operand), so a following statement
+// starting with an ordinary identifier never merges into this expression.
+fun parseInfix(p: P): FExpr {
   var e = parseShift(p)
-  while (isRel(pk(p))) { val o = opStr(pk(p)); eat(p); e = FEBin(o, e, parseShift(p)) }
+  while (pk(p) == 1 && infixSetHas(p.infixNames, ptext(p))) {
+    val nm = ptext(p); eat(p)
+    val args = intBuf(); args.push(FArg("", parseShift(p)))
+    e = FECall(FEField(e, nm), args)
+  }
+  return e
+}
+
+fun parseRel(p: P): FExpr {
+  var e = parseInfix(p)
+  while (isRel(pk(p))) { val o = opStr(pk(p)); eat(p); e = FEBin(o, e, parseInfix(p)) }
   return e
 }
 
@@ -1071,7 +1144,7 @@ fun isStmtStart(k: Int): Bool { return k == 11 || k == 12 || k == 13 || k == 14 
 fun parseBlock(p: P): FExpr { eat(p); return parseBlockBody(p) } // eats '{'
 
 fun parseBlockBody(p: P): FExpr { // '{' already consumed
-  val stmts = list()
+  val stmts = intBuf()
   var res = FENoRes
   var go = 1
   while (go == 1) {
@@ -1123,7 +1196,7 @@ fun parseTrailingLam(p: P): FExpr { // sees '{'
 
 fun callAppend(f: FExpr, args: IntBuf, larg: FArg): FExpr { args.push(larg); return FECall(f, args) }
 
-fun callNew(e: FExpr, larg: FArg): FExpr { val a = list(); a.push(larg); return FECall(e, a) }
+fun callNew(e: FExpr, larg: FArg): FExpr { val a = intBuf(); a.push(larg); return FECall(e, a) }
 
 fun trailingLambda(p: P, e: FExpr): FExpr {
   val larg = FArg("", parseTrailingLam(p))
@@ -1172,13 +1245,38 @@ fun parseStmt(p: P): FStmt {
 }
 
 fun parseParam(p: P): FParam {
+  var va = 0
+  if (pk(p) == 87) { eat(p); va = 1 } // `vararg` modifier precedes the parameter (Kotlin: `vararg xs: E`)
   val nm = ptext(p); eat(p)
-  if (pk(p) != 25) { return FParam(nm, "") } // untyped param (no ':') — don't eat the return-type colon
+  if (pk(p) != 25) { return FParam(nm, "", va) } // untyped param (no ':') — don't eat the return-type colon
   eat(p) // ':'
   var pre = ""
   if (pk(p) == 71) { eat(p); pre = "inout " }
   else { if (pk(p) == 72) { eat(p); pre = "consuming " } }
-  return FParam(nm, pre + parseTy(p))
+  val ety = parseTy(p)
+  // A vararg param's DECLARED element type is `ety`; its IN-BODY type is the monomorphized `Array<E>`
+  // carrier (lib/alloc/collections/array.kite). Bake `Array<E>` into `ty` so the checker binds `xs` as
+  // Array<E> and the mono machinery instantiates `Array$E` — the call site collects trailing args into it.
+  if (va == 1) { return FParam(nm, "Array<" + (ety + ">"), 1) }
+  return FParam(nm, pre + ety, 0)
+}
+
+// Enforce the vararg rules (Kotlin semantics): AT MOST ONE vararg parameter, and it MUST be the LAST
+// parameter. A violation is a hard parse error routed through the shared stderr Diagnostic sink + __abort
+// (exit 134, no binary) — the same discipline every other malformed-signature case uses.
+fun checkVarargParams(params: IntBuf, fname: String): Int {
+  var i = 0
+  var nva = 0
+  while (i < params.len()) {
+    val pp: FParam = params.get(i)
+    if (pp.isVararg == 1) {
+      nva = nva + 1
+      if (i != params.len() - 1) { parseFail("function `" + (fname + "`: a `vararg` parameter must be the LAST parameter")) }
+    }
+    i = i + 1
+  }
+  if (nva > 1) { parseFail("function `" + (fname + "`: at most one `vararg` parameter is allowed")) }
+  return 0
 }
 
 fun parseRecv(p: P): String {
@@ -1189,7 +1287,26 @@ fun parseRecv(p: P): String {
   return ""
 }
 
+// count a function's OPERAND parameters, excluding an injected extension receiver (a first param named
+// "this"). A member `infix fun m(x)` has 1; an extension `infix fun A.m(x)` has params [this, x] -> 1.
+fun operandParamCount(params: IntBuf): Int {
+  if (params.len() == 0) { return 0 }
+  val p0: FParam = params.get(0)
+  if (p0.name == "this") { return params.len() - 1 }
+  return params.len()
+}
+
+// enforce the Kotlin `infix` rule: an infix fun takes EXACTLY ONE operand parameter (besides the receiver).
+// A violation is a hard parse error routed through the shared stderr Diagnostic sink + __abort (exit 134,
+// no binary) — the same discipline the vararg-parameter checks use.
+fun checkInfixParams(params: IntBuf, fname: String): Int {
+  if (operandParamCount(params) != 1) { parseFail("infix function `" + (fname + "` must take exactly one parameter")) }
+  return 0
+}
+
 fun parseFunc(p: P, annos: IntBuf): FFunc {
+  var isInfix = 0
+  if (pk(p) == 88) { eat(p); isInfix = 1 } // `infix` modifier precedes `fun` (Kotlin: `infix fun m(x)`)
   eat(p) // 'fun'
   var gen = parseGenerics(p) // free-fn: fun <T> name
   var name = ptext(p); eat(p)
@@ -1230,13 +1347,15 @@ fun parseFunc(p: P, annos: IntBuf): FFunc {
   }
   eat(p) // '('
   val recv = parseRecv(p)
-  val params = list()
-  if (extRecv != "") { params.push(FParam("this", extRecv)) } // injected receiver param
+  val params = intBuf()
+  if (extRecv != "") { params.push(FParam("this", extRecv, 0)) } // injected receiver param
   var need = 0
   if (recv == "") { if (pk(p) != 21) { need = 1 } }
   else { if (pk(p) == 24) { eat(p); need = 1 } }
   if (need == 1) { var more = 1
     while (more == 1) { params.push(parseParam(p)); if (pk(p) == 24) { eat(p) } else { more = 0 } } }
+  checkVarargParams(params, name)
+  if (isInfix == 1) { checkInfixParams(params, name) }
   eat(p) // ')'
   var ret = ""
   if (pk(p) == 25) { eat(p); ret = parseTy(p) }
@@ -1292,8 +1411,8 @@ fun parseConstMember(p: P): FFunc {
   if (pk(p) == 25) { eat(p); ty = parseTy(p) }
   eat(p) // '='
   val e = parseExpr(p)
-  val a = list(); a.push(Anno("constval", list())) // marker: this assoc fn is a `const val` (kind "const" for dot/:: rule)
-  return FFunc(a, name, "", "", list(), ty, "", e)
+  val a = intBuf(); a.push(Anno("constval", intBuf())) // marker: this assoc fn is a `const val` (kind "const" for dot/:: rule)
+  return FFunc(a, name, "", "", intBuf(), ty, "", e)
 }
 
 // is this FFunc a synthesized associated `const val` (carries the `@constval` marker anno)? Used by the
@@ -1313,9 +1432,10 @@ fun parseSecondaryCtor(p: P, owner: String, fields: IntBuf): FFunc {
   eat(p) // 'constructor'
   if (pk(p) != 20) { parseFail("secondary constructor: expected `(` after `constructor`") }
   eat(p) // '('
-  val params = list()
+  val params = intBuf()
   if (pk(p) != 21) { var more = 1
     while (more == 1) { params.push(parseParam(p)); if (pk(p) == 24) { eat(p) } else { more = 0 } } }
+  checkVarargParams(params, "constructor")
   eat(p) // ')'
   if (pk(p) != 25) { parseFail("secondary constructor must delegate to the primary: `constructor(..) : this(..)`") }
   eat(p) // ':'
@@ -1328,19 +1448,19 @@ fun parseSecondaryCtor(p: P, owner: String, fields: IntBuf): FFunc {
   val nm = "__ctor_" + params.len().toStr()
   if (pk(p) == 22) {
     val blk = parseBlock(p) // FEBlock(stmts, res) — the optional post-delegation body
-    val stmts = list()
+    val stmts = intBuf()
     stmts.push(FSLet(0, "this", owner, cons))
     stmts.push(FSExprS(blk))
-    return FFunc(list(), nm, "", "", params, owner, "", FEBlock(stmts, FEThis))
+    return FFunc(intBuf(), nm, "", "", params, owner, "", FEBlock(stmts, FEThis))
   }
-  return FFunc(list(), nm, "", "", params, owner, "", cons)
+  return FFunc(intBuf(), nm, "", "", params, owner, "", cons)
 }
 
 fun parseTypeDecl(p: P, annos: IntBuf, kind: Int): FTDecl {
   eat(p) // 'struct' | 'class'
   val name = ptext(p); eat(p)
   val gen = parseGenerics(p)
-  val fields = list()
+  val fields = intBuf()
   if (pk(p) == 20) { eat(p)
     if (pk(p) != 21) { var more = 1
       while (more == 1) {
@@ -1356,7 +1476,7 @@ fun parseTypeDecl(p: P, annos: IntBuf, kind: Int): FTDecl {
     eat(p) } // ')'
   val whr = parseWhere(p)
   var dtor = FENoRes
-  val methods = list()
+  val methods = intBuf()
   if (pk(p) == 22) { eat(p)
     while (pk(p) != 23 && pk(p) != 0) {
       val manns = parseAnnos(p)
@@ -1371,12 +1491,12 @@ fun parseTypeDecl(p: P, annos: IntBuf, kind: Int): FTDecl {
 
 fun parseVariant(p: P): FVariant {
   val vn = ptext(p); eat(p)
-  if (pk(p) != 20) { return FVariant(vn, 0, list(), list()) }
+  if (pk(p) != 20) { return FVariant(vn, 0, intBuf(), intBuf()) }
   eat(p) // '('
-  if (pk(p) == 21) { eat(p); return FVariant(vn, 0, list(), list()) } // '()'
+  if (pk(p) == 21) { eat(p); return FVariant(vn, 0, intBuf(), intBuf()) } // '()'
   val named = if (pk(p) == 1 && pk1(p) == 25) { 1 } else { 0 } // IDENT ':' ?
   if (named == 1) {
-    val flds = list()
+    val flds = intBuf()
     var more = 1
     while (more == 1) {
       val fn = ptext(p); eat(p)
@@ -1385,13 +1505,13 @@ fun parseVariant(p: P): FVariant {
       if (pk(p) == 24) { eat(p) } else { more = 0 }
     }
     eat(p) // ')'
-    return FVariant(vn, 2, list(), flds)
+    return FVariant(vn, 2, intBuf(), flds)
   }
-  val tys = list()
+  val tys = intBuf()
   var more2 = 1
   while (more2 == 1) { tys.push(parseTy(p)); if (pk(p) == 24) { eat(p) } else { more2 = 0 } }
   eat(p) // ')'
-  return FVariant(vn, 1, tys, list())
+  return FVariant(vn, 1, tys, intBuf())
 }
 
 fun parseEnum(p: P, annos: IntBuf): FEDecl {
@@ -1399,14 +1519,17 @@ fun parseEnum(p: P, annos: IntBuf): FEDecl {
   val name = ptext(p); eat(p)
   val gen = parseGenerics(p)
   eat(p) // '{'
-  val variants = list()
-  val consts = list()
+  val variants = intBuf()
+  val consts = intBuf()
+  val methods = intBuf()
   while (pk(p) != 23 && pk(p) != 0) {
+    val manns = parseAnnos(p)
     if (pk(p) == 80) { consts.push(parseConstMember(p)) } // const val NAME = <expr> (associated constant)
-    else { variants.push(parseVariant(p)) }
+    else { if (pk(p) == 10 || pk(p) == 88) { methods.push(parseFunc(p, manns)) } // enum-body method (opt. `infix`): `fun m(self)` / `infix fun m(x)`
+    else { variants.push(parseVariant(p)) } }
   }
   eat(p) // '}'
-  return FEDecl(annos, name, gen, variants, consts)
+  return FEDecl(annos, name, gen, variants, consts, methods)
 }
 
 fun parseTrait(p: P, annos: IntBuf): FTraitDecl {
@@ -1417,8 +1540,8 @@ fun parseTrait(p: P, annos: IntBuf): FTraitDecl {
   if (pk(p) == 25) { eat(p); supers = " : " + parseBoundList(p) } // ' : ' supers
   val whr = parseWhere(p)
   eat(p) // '{'
-  val assoc = list()
-  val methods = list()
+  val assoc = intBuf()
+  val methods = intBuf()
   while (pk(p) != 23 && pk(p) != 0) {
     val manns = parseAnnos(p)
     if (pk(p) == 1 && ptext(p) == "type") { // associated type
@@ -1442,8 +1565,8 @@ fun parseImpl(p: P, annos: IntBuf): FImplDecl {
   if (pk(p) == 52) { eat(p); traitName = first; forTy = parseTy(p) } // 'for'
   val whr = parseWhere(p)
   eat(p) // '{'
-  val assoc = list()
-  val methods = list()
+  val assoc = intBuf()
+  val methods = intBuf()
   while (pk(p) != 23 && pk(p) != 0) {
     val manns = parseAnnos(p)
     if (pk(p) == 1 && ptext(p) == "type") { // associated-type binding

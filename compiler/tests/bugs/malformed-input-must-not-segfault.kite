@@ -22,4 +22,4 @@ fun f(s: String, i: Int, steps: IntBuf): Int {
   else { steps.push(8) } } } }
   return 0
 }
-fun main(): Int { val s = list() f("x", 0, s) return s.len() }
+fun main(): Int { val s = intBuf() f("x", 0, s) return s.len() }

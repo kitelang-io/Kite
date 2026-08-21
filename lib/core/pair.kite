@@ -1,0 +1,16 @@
+// kite::core::pair — the generic 2-tuple `Pair<A, B>` and the `to` infix constructor.
+//
+// A Pair holds two heap-word fields `first: A` and `second: B`, accessed as `.first` / `.second`. Because
+// Kite erases generics to word-width slots, ONE compiled Pair layout serves every (A, B) instantiation —
+// so, unlike the packed `@mono` collections (Array/Vec), Pair needs no monomorphization: it is a plain
+// generic reference type, constructed directly as `Pair(a, b)` and shared (ARC) on bind. This is also what
+// lets it be built inside the type-erased generic extension `to` below (a `@mono` type could not, since its
+// concrete instantiation is unknown while `to` is compiled once for all A, B).
+//
+// `to` is a generic extension INFIX function: `a to b` desugars to `a.to(b)` == the erased call `A_to(a, b)`,
+// yielding `Pair(a, b)`. It binds looser than range/additive/multiplicative but tighter than comparison, so
+// `x + 1 to y` parses as `(x + 1) to y`. This module is auto-included (compiler/prelude.conf), so `k to v`
+// and `.first` / `.second` work with no explicit import.
+class Pair<A, B>(val first: A, val second: B)
+
+infix fun <A, B> A.to(that: B): Pair<A, B> { return Pair(self, that) }

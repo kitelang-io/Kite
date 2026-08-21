@@ -1,0 +1,36 @@
+// factory-names.kite — exercises the renamed erased-kernel collection factories.
+// intBuf() constructs an empty IntBuf (the Int-only buffer that backs the [..] literal); rawMap()
+// constructs an empty RawMap (the insertion-ordered word map that backs the {..} literal). The old
+// misleading names list()/map() are retired — the language has no `list` type.
+//
+// The generic hashed map HashMap<K,V> is constructed directly via its turbofish constructor
+// `HashMap::<K,V>(0,..)`. (A `@mono` factory-function wrapper — `hashMap::<K,V>()` — now also works, via
+// generic FREE-FUNCTION monomorphization; see mono-fn.kite.) Returns the number of passed checks (10).
+import "lib/alloc/collections/hashmap.kite"
+fun main(): Int {
+  var acc = 0
+
+  // intBuf() — empty IntBuf; push / len / get / sum
+  val xs = intBuf()
+  xs.push(10) xs.push(20) xs.push(30)
+  if (xs.len() == 3) { acc = acc + 1 }
+  if (xs.get(1) == 20) { acc = acc + 1 }
+  if (xs.sum() == 60) { acc = acc + 1 }
+
+  // rawMap() — empty RawMap; set / get / has (String-keyed)
+  val m = rawMap()
+  m.set("a", 1) m.set("b", 2)
+  if (m.size() == 2) { acc = acc + 1 }
+  if (m.get("a") == 1) { acc = acc + 1 }
+  if (m.has("b")) { acc = acc + 1 }
+  if (!m.has("z")) { acc = acc + 1 }
+
+  // HashMap<Int,Int> — direct turbofish construction
+  val h = HashMap::<Int, Int>(0, 0, 0, 0, 0, 0)
+  h.set(10, 100) h.set(20, 200)
+  if (h.size() == 2) { acc = acc + 1 }
+  if (h.getOr(10, 0) == 100) { acc = acc + 1 }
+  if (h.getOr(20, 0) == 200) { acc = acc + 1 }
+
+  return acc
+}

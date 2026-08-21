@@ -2,6 +2,7 @@
 // callable (a thunk closure invoked via blr), NOT a garbage value (which crashed, rc138). `xs.map(dbl)`,
 // `xs.filter(pred)`, and `xs.fold(acc, f)` all accept a named function by reference. Exit code sums the
 // three results: 12 + 12 + 10 = 34.
+// map/filter/fold/sum are IntBuf methods (the `[..]` literal is now a first-class Vec<T>), so build IntBufs.
 fun dbl(x: Int): Int { return x * 2 }
 
 fun isEven(x: Int): Bool { return x % 2 == 0 }
@@ -9,11 +10,14 @@ fun isEven(x: Int): Bool { return x % 2 == 0 }
 fun addup(a: Int, x: Int): Int { return a + x }
 
 fun main(): Int {
-  val s = [1, 2, 3].map(dbl).sum()
+  val l1 = intBuf() l1.push(1) l1.push(2) l1.push(3)
+  val s = l1.map(dbl).sum()
   // [2,4,6] -> 12
-  val e = [1, 2, 3, 4, 5, 6].filter(isEven).sum()
+  val l2 = intBuf() l2.push(1) l2.push(2) l2.push(3) l2.push(4) l2.push(5) l2.push(6)
+  val e = l2.filter(isEven).sum()
   // 2+4+6 -> 12
-  val f = [1, 2, 3, 4].fold(0, addup)
+  val l3 = intBuf() l3.push(1) l3.push(2) l3.push(3) l3.push(4)
+  val f = l3.fold(0, addup)
   // 1+2+3+4 -> 10
   return s + e + f
 }

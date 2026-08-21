@@ -1,6 +1,5 @@
-// String-T1 (Phase 9) end-to-end: the boxed `class String(len,data)` surface. Compiled with `--string-t1`
-// (see run-string-t1-tests.sh) so String is the reference-counted boxed representation, not the T0 C-string.
-// Every check must hold or `ok` drops to 0; main returns 77 iff all pass (the runner asserts exit 77).
+// Boxed-String end-to-end: the `class String(n,data)` surface (the unconditional String representation).
+// Every check must hold or `ok` drops to 0; main returns 77 iff all pass (the suite asserts exit 77).
 fun eqStr(a: String, b: String): Int { return if (a == b) { 1 } else { 0 } }
 
 fun main(): Int {
@@ -18,7 +17,7 @@ fun main(): Int {
   if (c.len() != 6) { ok = 0 }
   if (eqStr(c, "foobar") != 1) { ok = 0 }
 
-  // (3) substr -> a non-owning StrView window; toStr() materializes an owned String.
+  // (3) substr -> a fresh owned String copy; toStr() on a String is the identity materialize.
   val v = c.substr(1, 3)
   if (v.len() != 3) { ok = 0 }
   if (v.byteAt(0) != 111) { ok = 0 }
@@ -46,11 +45,14 @@ fun main(): Int {
   if (fin.len() != 4) { ok = 0 }
   if (eqStr(fin, "Ka9!") != 1) { ok = 0 }
 
-  // (7) aliasing co-owns (retain); moving does not over-retain.
+  // (7) String is ARC-EXEMPT (@arc(manual)): the box carries a refcount header (initialized to 1 at
+  // allocation) but NO auto retain/release is emitted, so aliasing does NOT bump the count — it stays 1 —
+  // and the buffer is a never-freed owned blob (leak-managed). This exemption is what makes the whole
+  // compiler self-host with boxed strings (see the @arc(manual) rationale in lib/core/string.kite).
   val a = "hello"
   if (__refcount(a) != 1) { ok = 0 }
   val al = a
-  if (__refcount(a) != 2) { ok = 0 }
+  if (__refcount(a) != 1) { ok = 0 }
   println(al)
 
   return if (ok == 1) { 77 } else { 0 }

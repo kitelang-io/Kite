@@ -93,15 +93,15 @@ fun zfLexToken(l: Lx, pieces: IntBuf, nl: Int): Int {
   val s = l.pos
   val c = cur(l)
   var kind = 0
-  if (isDigit(c)) { val sc = list(); readNum(l, sc); kind = zfLastKind(sc) }
+  if (isDigit(c)) { val sc = intBuf(); readNum(l, sc); kind = zfLastKind(sc) }
   else { if (isAlpha(c)) {
       while (isAlnum(cur(l))) { adv(l) }
       kind = kw(l.src.substr(s, l.pos - s))
     }
-    else { if (c == 34) { val sc = list(); lexStr(l, sc); kind = zfLastKind(sc) }
-      else { if (c == 39) { val sc = list(); lexChar(l, sc); kind = 9 }
+    else { if (c == 34) { val sc = intBuf(); lexStr(l, sc); kind = zfLastKind(sc) }
+      else { if (c == 39) { val sc = intBuf(); lexChar(l, sc); kind = 9 }
         else { if (c == 59) { adv(l); kind = 90 } // ; -> a real token to the formatter
-          else { val sc = list(); lexOp(l, sc); kind = zfLastKind(sc) } } } } }
+          else { val sc = intBuf(); lexOp(l, sc); kind = zfLastKind(sc) } } } } }
   pieces.push(ZfPiece(kind, l.src.substr(s, l.pos - s), nl))
   return 0
 }
@@ -110,7 +110,7 @@ fun zfLexToken(l: Lx, pieces: IntBuf, nl: Int): Int {
 // cursor; whitespace / newlines / `;` and comment openers are handled here (the formatter keeps the
 // trivia the compiler throws away), and every real token is delegated to kfront's lexer via zfLexToken.
 fun zfLex(src: String): IntBuf {
-  val pieces = list()
+  val pieces = intBuf()
   val l = Lx(src, src.len(), 0, 1)
   var pendingNl = 0
   var go = 1
@@ -142,7 +142,7 @@ fun zfValueEnding(k: Int): Bool {
 // mark prefix-unary `-`/`+`/`!` (glue to their operand). `!` is always prefix here.
 fun zfMarkUnary(pieces: IntBuf): IntBuf {
   val m = pieces.len()
-  val res = list()
+  val res = intBuf()
   var prevSig = 0
   var i = 0
   while (i < m) {
@@ -172,7 +172,7 @@ fun zfPieceKind(pieces: IntBuf, i: Int): Int { val p: ZfPiece = pieces.get(i); r
 // `>` at depth 0. Otherwise both `<` and `>` stay comparisons.
 fun zfMarkAngles(pieces: IntBuf): IntBuf {
   val m = pieces.len()
-  val res = list()
+  val res = intBuf()
   var t = 0
   while (t < m) { res.push(0); t = t + 1 }
   var i = 0
@@ -290,7 +290,7 @@ fun zfIsDeclStart(k: Int): Bool {
 fun zfJoin(cs: IntBuf): String {
   var work = cs
   while (work.len() > 1) {
-    val nxt = list()
+    val nxt = intBuf()
     var i = 0
     while (i + 1 < work.len()) {
       val a: String = work.get(i)
@@ -313,8 +313,8 @@ fun zfFormat(src: String): String {
   if (m == 0) { return "" }
   val angle = zfMarkAngles(pieces)
   val unary = zfMarkUnary(pieces)
-  val out = list()
-  val scopes = list() // ZfScope stack, indexed by (depth - 1)
+  val out = intBuf()
+  val scopes = intBuf() // ZfScope stack, indexed by (depth - 1)
   var depth = 0
   var pendingType = 0 // a class/struct/enum header is open, awaiting its body `{`
   var pendingTypeDepth = 0 // the depth the header keyword appeared at

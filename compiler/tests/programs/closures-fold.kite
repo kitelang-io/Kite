@@ -1,3 +1,5 @@
+// `fold` takes the erased-kernel IntBuf, so this fixture builds one explicitly (the `[..]` literal is now a
+// first-class Vec<T>, a distinct type). Exercises closures folded over an IntBuf via for-in.
 fun fold(xs: IntBuf, init: Int, f: (Int, Int) -> Int): Int {
   var acc = init
   for (v in xs) { acc = f(acc, v) }
@@ -5,6 +7,7 @@ fun fold(xs: IntBuf, init: Int, f: (Int, Int) -> Int): Int {
 }
 
 fun main(): Int {
-  val xs = [1, 2, 3, 4, 5]
+  val xs = intBuf()
+  xs.push(1) xs.push(2) xs.push(3) xs.push(4) xs.push(5)
   return fold(xs, 0, { a, b -> a + b })
 }

@@ -1,3 +1,4 @@
+// `fold` takes the erased-kernel IntBuf (the `[..]` literal is now a first-class Vec<T>), so build one.
 fun fold(xs: IntBuf, init: Int, f: (Int, Int) -> Int): Int { var acc = init for (v in xs) { acc = f(acc, v) } return acc }
 
-fun main(): Int { val xs = [1, 2, 3, 4, 5] return fold(xs, 1, { a, b -> a * b }) }
+fun main(): Int { val xs = intBuf() xs.push(1) xs.push(2) xs.push(3) xs.push(4) xs.push(5) return fold(xs, 1, { a, b -> a * b }) }

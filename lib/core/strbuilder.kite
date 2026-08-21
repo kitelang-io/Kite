@@ -1,14 +1,19 @@
 // lib/core/strbuilder.kite — the growable String (byte-buffer) builder (kite::core::strbuilder), split out
 // of kite::core::string so the String type's queries/operators and its mutable builder live in separate
-// files. Auto-included via compiler/prelude.conf immediately AFTER kite::core::string (String_len/charAt,
+// files. Auto-included via compiler/prelude.conf immediately AFTER kite::core::string (String.len/charAt,
 // which strFrom uses, are in scope). The interpolation desugar's str.build.new/push/finish roles land on
 // strNew / StrBuilder_pushStr / StrBuilder_finish here.
 //
 // A mutable byte buffer on the raw-memory intrinsics: the amortized way to assemble a String incrementally
 // (doubling growth) instead of a chain of whole-string `concat`s (O(n^2) copies + a leak per intermediate).
 // `+`-heavy loops and string interpolation build onto ONE StrBuilder and `finish()` once. finish() SEALS the
-// builder: it NUL-terminates the scratch buffer and TRANSFERS its ownership to the returned String (no extra
-// copy, no leak — the buffer IS the result), leaving data=0 so the builder's deinit frees nothing.
+// builder: it NUL-terminates the scratch buffer and TRANSFERS its ownership to the returned boxed String (no
+// extra copy, no leak — the buffer IS the result), leaving data=0 so the builder's deinit frees nothing.
+//
+// @arc(manual) for the same reason as String: StrBuilders flow through the same type-erased paths and their
+// `deinit { __rawFree }` would double-free a transferred/aliased buffer. Exempt = leak the scratch buffer,
+// never corrupt.
+@arc(manual)
 class StrBuilder(var n: Int, var cap: Int, var data: USize) {
   // append one raw byte (grow by doubling when full).
   fun pushByte(self, b: Int): Int {
@@ -22,7 +27,7 @@ class StrBuilder(var n: Int, var cap: Int, var data: USize) {
   fun pushStr(self, s: String): StrBuilder {
     val ln = s.len()
     var i = 0
-    while (i < ln) { self.pushByte(__rawLoadByte(s, i)) i = i + 1 }
+    while (i < ln) { self.pushByte(__rawLoadByte(s.data, i)) i = i + 1 }
     return self
   }
   // append a single char/byte; returns self.
@@ -31,12 +36,13 @@ class StrBuilder(var n: Int, var cap: Int, var data: USize) {
   fun pushInt(self, v: Int): StrBuilder { self.pushStr(v.toStr()) return self }
   fun byteAt(self, i: Int): Int { return __rawLoadByte(self.data, i) }
   fun size(self): Int { return self.n }
-  // seal to a real String: NUL-terminate and hand the buffer to the caller (ownership transfer).
+  // seal: NUL-terminate, hand the buffer to a fresh String box, and null out `data` so the builder's deinit
+  // frees nothing (the String now owns the buffer — no copy, no double free).
   @lang("str.build.finish")
   fun finish(self): String {
     if (self.n == self.cap) { self.cap = self.cap + 1 self.data = __rawRealloc(self.data, self.cap) }
     __rawStoreByte(self.data, self.n, 0)
-    val r = self.data
+    val r = String(self.n, self.data)
     self.data = 0
     self.n = 0
     self.cap = 0

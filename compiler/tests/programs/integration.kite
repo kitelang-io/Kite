@@ -8,7 +8,9 @@ fun each(xs: IntBuf, f: (Int) -> Int): Int { for (v in xs) { f(v) } return 0 }
 
 fun main(): Int {
   val a = Acc(0, 0)
-  val xs = [10, 20, 30, 40]
+  // `each` takes the erased IntBuf (the `[..]` literal is now a first-class Vec<T>), so build one explicitly.
+  val xs = intBuf()
+  xs.push(10) xs.push(20) xs.push(30) xs.push(40)
   each(xs, { v -> record(a, v) })
   return a.mean()
 }

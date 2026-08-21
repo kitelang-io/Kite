@@ -1,7 +1,8 @@
 // Phase 5 — String T0 refactor. Exercises the StrBuilder (pushStr/pushInt/pushChar/finish ownership-
 // transfer seal), multi-piece string interpolation lowered onto ONE builder (not an O(n^2) concat chain),
-// single-piece interpolation passthrough, the String Ord impl (`<`/`>` lexicographic), and the builder-
-// based joinList / String_repeat transforms in kite::alloc::string. Returns the count of passed assertions.
+// single-piece interpolation passthrough, the String Ord impl (`<`/`>` lexicographic), the footgun-free
+// `Vec<T>.join` (kite::alloc::collections::vec) over a `[..]` literal, and String_repeat. Returns the count
+// of passed assertions.
 fun main(): Int {
   var acc = 0
 
@@ -31,10 +32,10 @@ fun main(): Int {
   if ("zebra" > "apple") { acc = acc + 1 }   // 7
   if ("abc" < "abc") { acc = acc + 0 } else { acc = acc + 1 } // 8 (equal -> not less)
 
-  // builder-based transforms (kite::alloc::string)
-  val xs = ["x", "y", "z"]
-  if (joinList(xs, ",") == "x,y,z") { acc = acc + 1 } // 9
-  if ("ab".repeat(3) == "ababab") { acc = acc + 1 }   // 10
+  // builder-based transforms. The string-join helper is now the footgun-free `Vec<T>.join` method
+  // (kite::alloc::collections::vec) over a first-class `[..]` Vec literal, not the old erased-IntBuf joinList.
+  if (["x", "y", "z"].join(",") == "x,y,z") { acc = acc + 1 } // 9
+  if ("ab".repeat(3) == "ababab") { acc = acc + 1 }           // 10
 
   return acc // 10
 }

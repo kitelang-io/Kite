@@ -1,0 +1,53 @@
+// infix-pair — exercises the user-definable `infix fun` feature + the stdlib `Pair<A,B>` / `to`.
+//
+// `Pair` and the generic extension infix `to` come from the auto-included prelude (lib/core/pair.kite via
+// compiler/prelude.conf), so `k to v` and `.first`/`.second` need no import. A user-declared `infix fun`
+// (combine, below) proves the feature is registry-driven, not hardcoded to `to`.
+//
+// PRECEDENCE (documented in kfront.kite parseInfix): an infix operator binds LOOSER than
+// range/additive/multiplicative/shift but TIGHTER than comparison/equality. So `1 + 2 to 3` groups as
+// `(1 + 2) to 3` and `1 to 2 + 3` as `1 to (2 + 3)` — both asserted below via `.first`/`.second`.
+//
+// main returns 111 on full success; any failed check returns that check's number (1..N) instead.
+
+infix fun Int.combine(b: Int): Int { return self * 100 + b }
+
+fun main(argc: Int, argv: USize): Int {
+  // (1) `3 to 5` -> Pair<Int,Int>; fields read back as 3 and 5, sum 8.
+  val p = 3 to 5
+  if (p.first != 3) { return 1 }
+  if (p.second != 5) { return 2 }
+  if (p.first + p.second != 8) { return 3 }
+
+  // (2) `"k" to 42` -> Pair<String,Int>. The `first` field is type-erased, so it is bound through a typed
+  // local to recover its String-ness before calling String.len() (an inherent type-erasure step).
+  val kv = "k" to 42
+  val ks: String = kv.first
+  if (ks.len() + kv.second != 43) { return 4 }
+
+  // (3) user-defined infix fun used in infix position.
+  if (7 combine 9 != 709) { return 5 }
+
+  // (4) PRECEDENCE: `1 + 2 to 3` == `(1 + 2) to 3` -> first 3, second 3 (additive tighter than infix).
+  val prA = 1 + 2 to 3
+  if (prA.first != 3) { return 6 }
+  if (prA.second != 3) { return 7 }
+
+  // (5) PRECEDENCE: `1 to 2 + 3` == `1 to (2 + 3)` -> first 1, second 5 (additive tighter on the right too).
+  val prB = 1 to 2 + 3
+  if (prB.first != 1) { return 8 }
+  if (prB.second != 5) { return 9 }
+
+  // (6) ADJACENT-STATEMENT: an expression-statement (`mark.first`) immediately followed by a statement that
+  // STARTS with an ordinary identifier (`after = 77`). `after` is not a registered infix name, so the two do
+  // NOT merge — `mark.first` ends the expression and `after = 77` is a separate assignment.
+  val mark = 5 to 6
+  var after = 0
+  mark.first
+  after = 77
+  if (mark.first != 5) { return 10 }
+  if (mark.second != 6) { return 11 }
+  if (after != 77) { return 12 }
+
+  return 111
+}

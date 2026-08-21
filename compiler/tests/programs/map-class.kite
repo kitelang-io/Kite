@@ -1,7 +1,9 @@
-// {..} builds a REAL RawMap class (not a IntBuf-as-[k,v] alias): exercises m.get/set/has/size + key
-// iteration, m[k] / m[k]=v index sugar, map() returning a real RawMap, and IntBuf's .length()/.len() methods.
+// rawMap() builds a REAL RawMap class (not an IntBuf-as-[k,v] alias): exercises m.get/set/has/size + key
+// iteration, m[k] / m[k]=v index sugar, and IntBuf's .length()/.len() methods. The `[k:v]` map literal now
+// flips to a first-class HashMap<K,V> (m[k] yields Option<V>), so a RawMap is built explicitly via rawMap().
 fun main(): Int {
-  val m = ["a": 10, "b": 20] // real RawMap via {..}
+  val m = rawMap()
+  m.set("a", 10) m.set("b", 20) // real RawMap
   var acc = 0
   acc = acc + m.get("a") // 10  -> 10
   acc = acc + m.get("b") // 20  -> 30
@@ -16,7 +18,7 @@ fun main(): Int {
   m["c"] = 9 // index write (update in place)
   acc = acc + m["c"] // 9   -> 151
 
-  val e = map() // map() returns a real RawMap
+  val e = rawMap() // rawMap() returns a real RawMap
   e.set("k", 7)
   acc = acc + e.size() // 1   -> 152
   acc = acc + e.get("k") // 7   -> 159
@@ -27,7 +29,9 @@ fun main(): Int {
   while (i < ks.len()) { if (ks.get(i) == "b") { ksum = ksum + 1 } i = i + 1 }
   acc = acc + ksum // 1   -> 160
 
-  val xs = [3, 5, 8]
+  // IntBuf's `length`/`len` aliases (the `[..]` literal is now a first-class Vec<T>), so build an IntBuf.
+  val xs = intBuf()
+  xs.push(3) xs.push(5) xs.push(8)
   acc = acc + xs.length() // 3   -> 163  (canonical length method)
   acc = acc + xs.len() // 3   -> 166
   return acc

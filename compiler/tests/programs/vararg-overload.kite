@@ -1,0 +1,18 @@
+// vararg overload interplay: an EXACT fixed-arity non-vararg overload is preferred over the vararg one
+// (Kotlin semantics), while arities the exact overload doesn't cover fall through to the vararg.
+import "lib/alloc/collections/array.kite"
+
+fun f(a: Int, b: Int): Int { return a * b }   // exact 2-arg
+fun f(vararg xs: Int): Int {                    // variadic
+  var s = 0
+  var i = 0
+  while (i < xs.len()) { s = s + xs.get(i) i = i + 1 }
+  return s
+}
+
+fun main(): Int {
+  // f(3,4) binds the EXACT 2-arg overload = 12 (NOT vararg-sum=7)
+  // f(1,2,3) has no exact 3-arg overload -> vararg = 6
+  // f() -> vararg (0 args) = 0
+  return f(3, 4) + f(1, 2, 3) + f()  // 12 + 6 + 0 = 18
+}

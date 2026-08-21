@@ -1,0 +1,36 @@
+// Boxed-String no-corruption / leak-stability proof. The `class String(n,data)` is ARC-EXEMPT (@arc(manual))
+// — a leak-managed regime chosen because auto-ARC on String double-frees the shared byte buffer of any String
+// aliased into a type-erased container (the whole compiler's symbol tables), which corrupted the heap and
+// aborted the boxed self-host. So the invariant that
+// matters is NOT "the buffer is freed" but "the buffer is NEVER freed-then-corrupted": a String stored away
+// keeps its exact bytes no matter how much allocation churn happens afterwards.
+//
+// This stores N distinct boxed Strings into a type-erased IntBuf (the exact pattern that double-freed under
+// auto-ARC), churns thousands of unrelated allocations to reuse any block a buggy free would have released,
+// then verifies every stored String still compares byte-equal to its expected value. Returns 0 iff all hold.
+fun makeName(i: Int): String { return "kite_string_" + i.toStr() }
+
+fun churn(): Int {
+  var i = 0
+  var acc = 0
+  while (i < 2000) { val junk = "zzzzzzzzzzzz_" + i.toStr() acc = acc + junk.len() i = i + 1 }
+  return acc
+}
+
+fun main(): Int {
+  val names = intBuf()
+  var i = 0
+  while (i < 200) { names.push(makeName(i)) i = i + 1 }
+  churn()
+  churn()
+  churn()
+  var ok = 1
+  var j = 0
+  while (j < 200) {
+    val got: String = names.get(j)
+    val want = "kite_string_" + j.toStr()
+    if (got == want) { 0 } else { ok = 0 }
+    j = j + 1
+  }
+  return if (ok == 1) { 0 } else { 1 }
+}
