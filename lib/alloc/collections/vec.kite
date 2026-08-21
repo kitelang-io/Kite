@@ -35,17 +35,38 @@ class Vec<T>(var n: Int, var cap: Int, var buf: RawBuf) {
       val used = self.n * stride
       var i = 0
       while (i < used) { __rawStoreByte(nd, i, __rawLoadByte(self.buf.data, i)) i = i + 1 }
+      // element-ARC: the clone's byte-copy duplicated each class element POINTER without a retain, so the two
+      // buffers now co-own the same elements. Retain each so both handles' drops balance (else a double-free).
+      // No-op (byte-free) for non-class T, so a non-class Vec's ensureUnique is byte-identical.
+      __packedRetainAll::<T>(nd, self.n)
       val old = self.buf
       self.buf = RawBuf(nd)
       old.drop()
     }
     return 0
   }
+  // TRUE element-ARC drop: for a CLASS-element instantiation (Vec$Box), the compiler SYNTHESIZES a
+  // `deinit` (klower monoInstantiate -> synthContainerDeinit) that, at the last owner of the shared buffer,
+  // releases the buffer's +1 on every live element (slots 0..n, all push-initialized) then drops the buffer;
+  // the generated ___rel_Vec$Box runs it on last release. It is NOT written here as a template `deinit {}`
+  // block on purpose: that would give the erased TEMPLATE `Vec` a `Vec_deinit` and make the bootstrap seed
+  // emit a ___rel_Vec calling the (dropped) template deinit — a dangling symbol. Synthesizing per class
+  // instantiation keeps the template deinit-free (seed-safe) and Vec$Int deinit-free (byte-identical).
   // value COPY on bind: share the buffer (+1) so a later write on either side copy-on-writes.
   fun copy(self): Vec<T> {
     __retain(self.buf)
     return Vec::<T>(self.n, self.cap, self.buf)
   }
+  // `[..]` COLLECTION-LITERAL PROTOCOL (opt-in, see klower recordProtocol / buildSeqLit). A type joins the
+  // `[a, b, c]` desugar by declaring an ASSOCIATED empty-constructor tagged `@lang("seq.new")` (the desugar
+  // calls it to build a fresh empty instance) plus a mutator tagged `@lang("seq.push")` (the desugar appends
+  // each element through it, element type = the first generic param). `@lang("seq.default")` additionally
+  // designates Vec as the type a bare `[a, b, c]` (no expected user type) builds — the compiler-wide default,
+  // sourced from HERE, not a hardcoded type-name in the lowerer.
+  @lang("seq.new")
+  @lang("seq.default")
+  fun empty(): Vec<T> = Vec::<T>(0, 0, RawBuf(0))
+  @lang("seq.push")
   fun push(self, x: consuming T): Int {
     self.ensureUnique()
     if (self.n == self.cap) {
@@ -67,7 +88,9 @@ class Vec<T>(var n: Int, var cap: Int, var buf: RawBuf) {
   fun set(self, i: Int, x: consuming T): Int {
     if (i < 0 || i >= self.n) { panicOOB("Vec.set", i, self.n) }
     self.ensureUnique()
-    __packedSet::<T>(self.buf.data, i, x)
+    // OVERWRITE of an occupied slot: release the old class element (the buffer's +1) before storing the new
+    // one. Safe because a Vec slot i<n was always filled by push. For non-class T this is a plain store.
+    __packedSetOw::<T>(self.buf.data, i, x)
     return 0
   }
   fun len(self): Int { return self.n }
@@ -85,20 +108,20 @@ class Vec<T>(var n: Int, var cap: Int, var buf: RawBuf) {
     }
     return 0
   }
-  fun pop(self): Option {
+  fun pop(self): Option<T> {
     if (self.n == 0) { return None }
     self.n = self.n - 1
     return Some(__packedGet::<T>(self.buf.data, self.n))
   }
-  fun first(self): Option {
+  fun first(self): Option<T> {
     if (self.n == 0) { return None }
     return Some(__packedGet::<T>(self.buf.data, 0))
   }
-  fun last(self): Option {
+  fun last(self): Option<T> {
     if (self.n == 0) { return None }
     return Some(__packedGet::<T>(self.buf.data, self.n - 1))
   }
-  fun indexOf(self, x: T): Option {
+  fun indexOf(self, x: T): Option<Int> {
     var i = 0
     while (i < self.n) {
       if (__packedGet::<T>(self.buf.data, i) == x) { return Some(i) }
@@ -107,6 +130,26 @@ class Vec<T>(var n: Int, var cap: Int, var buf: RawBuf) {
     return None
   }
   fun contains(self, x: T): Bool { return self.indexOf(x).isSome() }
+
+  // ---- sequence combinators (Kotlin-style) ----
+  // The Vec<T> analogues of IntBuf's Int-only fold/find/map/filter, now on the public generic Vec (what
+  // `[..]` yields). Each is a read-only walk that INVOKES the caller's closure; the method body itself does
+  // no arithmetic on T (only `find`/`filter` build Options/Vecs), so every one monomorphizes cleanly for ANY
+  // element type — important because a Vec<T> instantiation specializes ALL its template methods, used or not.
+  // `fold`'s accumulator is `Int` (matching IntBuf.fold, the common reduce-to-a-number case); `find` returns
+  // `Option<T>`; `map`/`filter` return a fresh `Vec<T>`. `sum` (the one method that arithmetically combines
+  // elements) stays on IntBuf only — a Vec<T>.sum would monomorphize `a + x` for every instantiated T
+  // (String/Box/...), silently misrouting for a non-numeric element; use `.fold(0){ a, x -> a + x }`.
+  // A closure whose body calls a METHOD on the element (`{ s -> s.len() }`) needs an explicit param type
+  // (`{ s: String -> s.len() }`) since the erased element type does not flow into an unannotated lambda param.
+  fun forEach(self, f: (T) -> Int): Int { var i = 0 while (i < self.n) { f(self.get(i)) i = i + 1 } return 0 }
+  fun fold(self, acc: Int, f: (Int, T) -> Int): Int { var a = acc var i = 0 while (i < self.n) { a = f(a, self.get(i)) i = i + 1 } return a }
+  fun any(self, pred: (T) -> Bool): Bool { var i = 0 while (i < self.n) { if (pred(self.get(i))) { return true } i = i + 1 } return false }
+  fun all(self, pred: (T) -> Bool): Bool { var i = 0 while (i < self.n) { if (pred(self.get(i)) == false) { return false } i = i + 1 } return true }
+  fun find(self, pred: (T) -> Bool): Option<T> { var i = 0 while (i < self.n) { val x = self.get(i) if (pred(x)) { return Some(x) } i = i + 1 } return None }
+  fun map(self, f: (T) -> T): Vec<T> { val out = Vec::<T>(0, 0, RawBuf(0)) var i = 0 while (i < self.n) { out.push(f(self.get(i))) i = i + 1 } return out }
+  fun filter(self, pred: (T) -> Bool): Vec<T> { val out = Vec::<T>(0, 0, RawBuf(0)) var i = 0 while (i < self.n) { val x = self.get(i) if (pred(x)) { out.push(x) } i = i + 1 } return out }
+
   // Kotlin `joinToString`: render EACH element to its string form and concatenate with `sep`, onto ONE
   // StrBuilder (amortized, no O(n^2) concat chain). The element is rendered through interpolation
   // (`"${self.get(i)}"`) — which lowers via the `str.show` role — so in each MONOMORPHIZED specialization

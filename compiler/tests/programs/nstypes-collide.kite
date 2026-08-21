@@ -1,0 +1,45 @@
+// Namespace TYPES across modules: two modules each declare a same-named `Foo` type + `mk`/`greet` fns.
+// This proves:
+//  - per-module TYPE mangling: moda's Foo and modb's Foo do NOT collide;
+//  - qualified `mod::Type` construction: `modb::Foo(7)` builds modb's Foo;
+//  - `use mod::Type as Alias`: `use moda::Foo as AFoo` -> bare `AFoo` builds moda's Foo;
+//  - `use fn as g` rename for a free function;
+//  - method dispatch routes to the right per-module type (moda__Foo_who vs modb__Foo_who);
+//  - a return-typed free fn (`fun mk(): Foo`) works qualified (moda::mk / modb::mk) — type-string ret.
+// Asserts via println; exit code = number of checks passed.
+import compiler::tests::programs::nstypes::moda
+import compiler::tests::programs::nstypes::modb
+use moda::Foo as AFoo
+use moda::greet as g
+
+fun main(): Int {
+  var passed = 0
+
+  // (1) `use moda::Foo as AFoo` — bare alias constructs moda's Foo; annotation resolves through the alias.
+  val a: AFoo = AFoo(5)
+  println(a.who()) // 5
+  if (a.who() == 5) { passed = passed + 1 }
+
+  // (2) qualified `modb::Foo(..)` constructs modb's Foo (who adds 1000).
+  val b = modb::Foo(7)
+  println(b.who()) // 1007
+  if (b.who() == 1007) { passed = passed + 1 }
+
+  // (3) same-named `Foo` from the two modules coexist and dispatch to their OWN method.
+  if (a.who() != b.who()) { passed = passed + 1 }
+
+  // (4) qualified `mod::mk` returns each module's own Foo (ret-type string namespaced).
+  val a2 = moda::mk(3)
+  val b2 = modb::mk(3)
+  println(a2.who()) // 3
+  println(b2.who()) // 1003
+  if (a2.who() == 3) { passed = passed + 1 }
+  if (b2.who() == 1003) { passed = passed + 1 }
+
+  // (5) `use moda::greet as g` renames the free function; qualified modb::greet still reachable.
+  if (g() == 1) { passed = passed + 1 }
+  if (modb::greet() == 2) { passed = passed + 1 }
+
+  println(passed) // 7
+  return passed
+}

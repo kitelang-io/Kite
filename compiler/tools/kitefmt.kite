@@ -13,7 +13,7 @@
 // truth for token boundaries/kinds — no parallel lexer). It is a flat quoted include, so kfmt's calls
 // to lex helpers (cur/adv/readNum/lexStr/lexOp/kw/scanLineComment/…) resolve to kfront's definitions.
 import "compiler/frontend/kfront.kite"
-import "compiler/driver/kfmt.kite"
+import "compiler/tools/kfmt.kite"
 
 fun main(argc: Int, argv: USize): Int {
   var file = ""

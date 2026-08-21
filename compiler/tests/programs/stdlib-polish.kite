@@ -1,0 +1,78 @@
+// stdlib API-consistency polish (branch stdlib/api-consistency). Exercises, and PRINTS the actual result of,
+// each item of the audit: generic Option/Result (+ Result isOk/isErr/getOr), the collections aggregator
+// reaching a non-prelude type (TreeSet) by short name, isEmpty coverage (Array + String), TreeSet.add
+// returning Bool with newly-inserted semantics, and the new Vec<T> sequence combinators (fold/find/forEach/
+// any/all/map/filter). `acc` counts passed assertions; the suite asserts the exit code equals that count.
+//
+// NOTE (type-erasure, not a bug in this code): Option/Result are erased generics, so a `getOr` that yields a
+// String can't be RENDERED through interpolation (the show path can't see the erased word is a String). Its
+// VALUE is correct — verified below by binding to a `: String` local and comparing with `.eq`, never by
+// printing the word.
+import kite::alloc::collections
+
+fun mkOk(): Result<Int, String> { return Ok(42) }
+fun mkErr(): Result<Int, String> { return Err("bad") }
+
+fun main(): Int {
+  var acc = 0
+
+  // ---- item 1: generic Result<Int,String> — isOk / isErr / getOr ----
+  val r = mkOk()
+  val e = mkErr()
+  if (r.isOk()) { acc = acc + 1 }
+  if (r.getOr(0) == 42) { acc = acc + 1 }
+  if (e.isErr()) { acc = acc + 1 }
+  if (e.isOk() == false) { acc = acc + 1 }
+  if (e.getOr(99) == 99) { acc = acc + 1 }
+  println("Result: isOk=${r.isOk()} getOr=${r.getOr(0)} | err isErr=${e.isErr()} getOr=${e.getOr(99)}")
+
+  // ---- item 1: generic Option<String>.getOr (NON-Int T) ----
+  val os: Option<String> = Some("hello")
+  val on: Option<String> = None
+  val g1: String = os.getOr("?")
+  val g2: String = on.getOr("fallback")
+  if (g1.eq("hello")) { acc = acc + 1 }
+  if (g2.eq("fallback")) { acc = acc + 1 }
+  println("Option<String> getOr: Some->hello=${g1.eq("hello")} None->fallback=${g2.eq("fallback")}")
+
+  // ---- item 2: `import kite::alloc::collections` reaches TreeSet (a NON-prelude type) by short name ----
+  // ---- item 5: TreeSet.add -> Bool with newly-inserted semantics ----
+  val ts = TreeSet::<Int>(0 - 1, 0, 0, 0, 0, 0, 0)
+  val added = ts.add(7)
+  val dup = ts.add(7)
+  if (added) { acc = acc + 1 }
+  if (dup == false) { acc = acc + 1 }
+  if (ts.size() == 1) { acc = acc + 1 }
+  println("TreeSet(short-name): add-new=${added} add-dup=${dup} size=${ts.size()}")
+
+  // ---- item 4: isEmpty on Array + String ----
+  val arr = Array::<Int>(0, RawBuf(0))
+  if (arr.isEmpty()) { acc = acc + 1 }
+  if ("".isEmpty()) { acc = acc + 1 }
+  if ("hi".isEmpty() == false) { acc = acc + 1 }
+  println("isEmpty: Array=${arr.isEmpty()} empty=${"".isEmpty()} hi=${"hi".isEmpty()}")
+
+  // ---- item 3: Vec<T> sequence combinators ----
+  val v = [1, 2, 3, 4]
+  if (v.fold(0, { a, x -> a + x }) == 10) { acc = acc + 1 }
+  val fnd = v.find({ x -> x > 2 })
+  if (fnd.isSome()) { acc = acc + 1 }
+  if (fnd.getOr(0) == 3) { acc = acc + 1 }
+  if (v.find({ x -> x > 100 }).isNone()) { acc = acc + 1 }
+  if (v.any({ x -> x > 3 })) { acc = acc + 1 }
+  if (v.all({ x -> x > 0 })) { acc = acc + 1 }
+  if (v.all({ x -> x > 2 }) == false) { acc = acc + 1 }
+  if (v.map({ x -> x * 2 }).join(",").eq("2,4,6,8")) { acc = acc + 1 }
+  if (v.filter({ x -> x - (x / 2) * 2 == 0 }).join(",").eq("2,4")) { acc = acc + 1 }
+  println("Vec: fold=${v.fold(0, { a, x -> a + x })} find>2=${fnd.getOr(0)} map=${v.map({ x -> x * 2 }).join(",")} filter=${v.filter({ x -> x - (x / 2) * 2 == 0 }).join(",")}")
+
+  // forEach faithfully runs the closure per element; push into a captured Vec (a reference, so mutation is
+  // visible) proves every element is visited.
+  val sink = [0]
+  v.forEach({ x -> sink.push(x) 0 })
+  if (sink.len() == 5) { acc = acc + 1 }
+  println("Vec.forEach visited ${sink.len() - 1} elements")
+
+  println("stdlib-polish acc=${acc}")
+  return acc
+}

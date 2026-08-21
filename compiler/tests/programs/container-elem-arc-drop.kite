@@ -1,0 +1,167 @@
+// TRUE element-ARC (release-on-drop) for monomorphized value containers holding CLASS elements.
+//
+// A monomorphized `Vec$Box` now RELEASES its class elements when the handle drops (a synthesized
+// `Vec$Box_deinit` run by ___rel_Vec$Box), so the buffer's per-element +1 is balanced: released exactly
+// once at the last owner of the CoW buffer — no leak, no double-free. Four sites cooperate, all gated on a
+// CLASS element type (Int/String/@value/ARC-exempt containers are byte-for-byte unchanged):
+//   push               — the buffer takes an independent +1 (retain-on-store), matching the leak model.
+//   set (overwrite)    — release the OLD element (buffer's +1) before retaining/storing the new one.
+//   ensureUnique clone — the CoW clone RETAINs each element it now co-owns (else two drops double-free).
+//   drop               — release each live element (slots 0..n) at the last buffer owner, then free the buffer.
+//
+// PROOF METHOD: a helper builds + drops a container while `main` holds the element, and we read __refcount
+// before/after — a balanced drop returns the count to its pre-call value. Stress loops (100x/50x) would make
+// a per-call leak GROW the count, or a double-free CRASH / corrupt it; a constant count proves exactly-once.
+// A `Tracked` deinit counter additionally proves an element's deinit runs EXACTLY once. Array/HashMap value
+// cases and the Int/String controls confirm the non-class path is unchanged.
+// Exit code = the number of passing assertions (32).
+import "lib/alloc/collections/vec.kite"
+import "lib/alloc/collections/array.kite"
+import "lib/alloc/collections/hashmap.kite"
+
+class Box(val v: Int) {}
+
+// A class whose `deinit` bumps a shared counter, so we can prove an element is freed EXACTLY once (its
+// deinit runs on the last release — deep dispatch through the buffer's element-release loop).
+class Tracked(val v: Int, val log: IntBuf) {
+  deinit { self.log.set(0, self.log.get(0) + 1) }
+}
+
+// push an owned Tracked (owner local + buffer each hold a ref); at scope exit the local release + the Vec
+// drop bring it to rc 0, so its deinit runs exactly once.
+fun trackedPushDrop(log: IntBuf): Int {
+  val t = Tracked(1, log)
+  val v = Vec::<Tracked>(0, 0, RawBuf(0))
+  v.push(t)
+  return 0
+}
+
+// Vec<Box>: push an ALIAS three times (buffer owns +3 on b), then DROP. A balanced drop releases all 3.
+fun vecPushDrop(b: Box): Int {
+  val v = Vec::<Box>(0, 0, RawBuf(0))
+  v.push(b) v.push(b) v.push(b)
+  return 0
+}
+
+// Vec<Box>: OVERWRITE. push b1 (buffer +1 on b1); set(0, b2) releases b1's buffer +1 and takes b2's; drop
+// releases b2's buffer +1. Net: b1 and b2 each back to caller-only.
+fun vecOverwriteDrop(b1: Box, b2: Box): Int {
+  val v = Vec::<Box>(0, 0, RawBuf(0))
+  v.push(b1)
+  v.set(0, b2)
+  return 0
+}
+
+// Vec<Box>: CoW clone. `vc = v` shares the buffer; `vc.push` clones it (retaining b for the new buffer);
+// both handles then drop, each releasing its buffer's +1 on b exactly once.
+fun vecCowDrop(b: Box): Int {
+  val v = Vec::<Box>(0, 0, RawBuf(0))
+  v.push(b)
+  val vc = v
+  vc.push(b)
+  return 0
+}
+
+// Vec<Box>: PURE copy, NO subsequent mutation — the buffer is shared to the end, so the CoW `ensureUnique`
+// clone NEVER runs. The balance rests entirely on both handles dropping (the copy `c` must be recognized as
+// a droppable container despite `.copy()`'s inferred return tag being the un-substituted template `Vec$T`).
+// This is the exact shape of the +1/cycle leak that regressed; the last dropper releases b's single buffer +1.
+fun vecPureCopyDrop(b: Box): Int {
+  val a = [b]
+  val c = a.copy()
+  return 0
+}
+
+fun main(): Int {
+  var acc = 0
+
+  // ---- Vec<Box> drop releases the buffer's per-element ref ----
+  val b = Box(10)
+  if (__refcount(b) == 1) { acc = acc + 1 }            // 1: fresh
+  vecPushDrop(b)
+  if (__refcount(b) == 1) { acc = acc + 1 }            // 2: drop released all 3 buffer refs
+  if (b.v == 10) { acc = acc + 1 }                     // 3: not use-after-free
+  var i = 0
+  while (i < 100) { vecPushDrop(b) i = i + 1 }
+  if (__refcount(b) == 1) { acc = acc + 1 }            // 4: 100x — no accumulating leak, no double-free
+  if (b.v == 10) { acc = acc + 1 }                     // 5
+
+  // ---- Vec<Box> overwrite: old element released, new element released on drop ----
+  val o1 = Box(1)
+  val o2 = Box(2)
+  vecOverwriteDrop(o1, o2)
+  if (__refcount(o1) == 1) { acc = acc + 1 }           // 6: set() released o1's buffer +1
+  if (__refcount(o2) == 1) { acc = acc + 1 }           // 7: drop released o2's buffer +1
+  if (o1.v == 1) { acc = acc + 1 }                     // 8
+  if (o2.v == 2) { acc = acc + 1 }                     // 9
+  var j = 0
+  while (j < 100) { vecOverwriteDrop(o1, o2) j = j + 1 }
+  if (__refcount(o1) == 1) { acc = acc + 1 }           // 10: overwrite balanced under stress
+  if (__refcount(o2) == 1) { acc = acc + 1 }           // 11
+
+  // ---- Vec<Box> CoW clone: the clone retains, both drops balance ----
+  val c = Box(7)
+  vecCowDrop(c)
+  if (__refcount(c) == 1) { acc = acc + 1 }            // 12: clone-retain balanced by two drops
+  if (c.v == 7) { acc = acc + 1 }                      // 13
+  var k = 0
+  while (k < 50) { vecCowDrop(c) k = k + 1 }
+  if (__refcount(c) == 1) { acc = acc + 1 }            // 14: 50x — no leak, no double-free
+  if (c.v == 7) { acc = acc + 1 }                      // 15
+
+  // ---- Vec<Box> PURE copy (no mutation, no clone): both handles drop, last one releases the shared +1 ----
+  val pc = Box(3)
+  vecPureCopyDrop(pc)
+  if (__refcount(pc) == 1) { acc = acc + 1 }           // 16: `a.copy()` copy is dropped -> no leak
+  var pk = 0
+  while (pk < 200) { vecPureCopyDrop(pc) pk = pk + 1 }
+  if (__refcount(pc) == 1) { acc = acc + 1 }           // 17: 200x — rc returns to baseline (the regressed +1/cycle leak)
+  if (pc.v == 3) { acc = acc + 1 }                     // 18: alive, no double-free corruption
+
+  // ---- Vec<Tracked> deinit: element FREED EXACTLY ONCE on drop (deep release runs its deinit) ----
+  val log = intBuf()
+  log.push(0)
+  trackedPushDrop(log)
+  if (log.get(0) == 1) { acc = acc + 1 }               // 19: freed exactly once (deinit ran once)
+  var t = 0
+  while (t < 100) { trackedPushDrop(log) t = t + 1 }
+  if (log.get(0) == 101) { acc = acc + 1 }             // 20: exactly 101 frees (no leak, no double-free)
+
+  // ---- Array<Box> control: CoW copy value-independent, both handles valid, no double-free ----
+  // (Array is left leak-managed by design — its fixed-len buffer may hold uninitialized slots — so this
+  //  proves correct VALUES and no corruption, not element freeing.)
+  val a = Array::<Box>(2, RawBuf(__rawAlloc(2 * sizeOf::<Box>())))
+  a.set(0, Box(10)) a.set(1, Box(20))
+  val ac = a
+  ac.set(0, Box(99))                                   // CoW: clone a's buffer, mutate the copy
+  if (a.get(0).v == 10) { acc = acc + 1 }              // 21: original slot intact
+  if (a.get(1).v == 20) { acc = acc + 1 }              // 22
+  if (ac.get(0).v == 99) { acc = acc + 1 }             // 23: copy mutated independently
+  if (ac.get(1).v == 20) { acc = acc + 1 }             // 24
+
+  // ---- HashMap<String, Box> value case: round-trip + overwrite, no crash ----
+  // (HashMap is @arc(manual) with no drop — its values leak by design — but reads/overwrites are correct.
+  //  Read via getOr: the `when (m.get(k)) { Some(x) -> x.v }` Option-of-class binding is a PRE-EXISTING
+  //  issue — it mis-binds the payload on baseline too — and is unrelated to element-ARC-on-drop.)
+  val m = HashMap::<String, Box>(0, 0, 0, 0, 0, 0)
+  m.set("a", Box(100)) m.set("b", Box(200))
+  if (m.getOr("a", Box(0)).v == 100) { acc = acc + 1 } // 25
+  if (m.getOr("b", Box(0)).v == 200) { acc = acc + 1 } // 26
+  m.set("a", Box(111))                                 // overwrite the value for "a"
+  if (m.getOr("a", Box(0)).v == 111) { acc = acc + 1 } // 27
+  if (m.size() == 2) { acc = acc + 1 }                 // 28
+
+  // ---- controls: Int / String element containers behave exactly as before ----
+  val vi = Vec::<Int>(0, 0, RawBuf(0))
+  vi.push(1) vi.push(2) vi.push(3)
+  vi.set(0, 9)                                         // Int overwrite = plain store (no ARC)
+  if (vi.get(0) == 9) { acc = acc + 1 }                // 29
+  if (vi.get(2) == 3) { acc = acc + 1 }                // 30
+  val vs = Vec::<String>(0, 0, RawBuf(0))
+  vs.push("x") vs.push("y")
+  vs.set(0, "z")                                       // String is ARC-exempt: plain store
+  if (vs.get(0).eq("z")) { acc = acc + 1 }             // 31
+  if (vs.get(1).eq("y")) { acc = acc + 1 }             // 32
+
+  return acc
+}

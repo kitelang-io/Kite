@@ -34,31 +34,38 @@ Two more independent tools sit beside the compile path (they do not gate `run`/`
 
 ```
 compiler/
-  kitec.kite    entry / module manifest — quoted-includes the four units below so the compiler assembles
+  kitec.kite    entry / module manifest — quoted-includes the five units below so the compiler assembles
                 ITSELF via its own import (dogfooding), replacing a shell `cat`; byte-identical build.
   frontend/     kfront.kite  (lexer + surface AST + parser)   kprint.kite  (AST printer + test main)
   sema/         kcheck.kite  (name resolution + type check → `kitec check`-form diagnostics)
   codegen/      codegen.kite (core AST + the IR type `Instr` + AST→IR codegen)   ← target-independent
   backend/
     arm64/      arm64.kite   (IR→AArch64 encoder + two-pass assembler + Mach-O writer + SHA-256 signer)
-  driver/       klower.kite  (the integrated full-language compiler driver)
+  driver/       klower.kite  (lowering + the integrated full-language compiler driver — holds `main`)
+  tools/        kitefmt.kite (standalone `kitefmt` CLI)   kfmt.kite (the token-based, trivia-preserving
+                formatter core it drives; reuses kfront's lexer, and is kept OUT of the self-hosting kitec
+                so the compile fixpoint is unaffected)
   prelude.conf  the default-prelude CONFIG (data): names the lib modules auto-included into every
                 program (see "Prelude" below). The compiler's only tie to the stdlib — a list of names.
-  tests/        run-parser-tests.sh · run-check-tests.sh · run-compiler-tests.sh
-                parser/ (corpus + golden/) · check/ (corpus + golden/ + expected/) · programs/ ·
-                kenc_test.kite (backend self-test). The parser/checker harnesses diff kcc against the
-                committed golden snapshots — no live oracle.
+  tests/        run-parser-tests.sh · run-check-tests.sh · run-compiler-tests.sh · run-fmt-tests.sh ·
+                run-shadow-scan.sh
+                parser/ (corpus + golden/) · check/ (corpus + golden/ + expected/) · programs/ · bugs/.
+                The parser/checker harnesses diff kcc against the committed golden snapshots — no live oracle.
 lib/            the **kite** standard library (kite:: resolves here): core.kite (kite::core),
                 alloc.kite (kite::alloc), std.kite (kite::std); nested modules under these three
                 top-level packages (e.g. lib/std/… = kite::std::…). The default prelude's code lives
-                here too, each convention method WITH its type (Kotlin-style, no sugar package):
-                lib/alloc/collections/list.kite (List/Map data structure + List_push/Map_size/list()/
-                map()) + lib/core/string.kite (String_charAt/len/substr), injected via the prelude config.
-bootstrap/      kite-seed — the committed prebuilt compiler and the SOLE bootstrap; the gate/suite build
-                from it (NO OCaml). Also historical proof programs (calc, calcast, minikite, ...)
-                The OCaml stage-0 (Fledge) is retired to its own repo (kitelang-io/fledge); it is only
-                needed to reseed kite-seed after a parser change, and is no longer part of this tree.
-docs/           LANGUAGE-DESIGN.md, ROADMAP.md, PHASE-E-PARSER.md, this file, ...
+                here too, each convention method WITH its type (Kotlin-style, no sugar package): the
+                collections under lib/alloc/collections/ — `Vec<T>` (vec.kite, backing `[..]` literals),
+                `HashMap<K,V>` (hashmap.kite, backing `{..}`/`[k:v]` maps), `Array<T>` (array.kite), over
+                the internal backing buffers `IntBuf`/`RawBuf`/`RawMap` (internal/) — plus `String` at
+                lib/core/string.kite, all injected via the prelude config.
+bootstrap/      kite-seed — the committed prebuilt compiler and the SOLE bootstrap, and the only file
+                here; the gate/suite build from it (NO OCaml). The historical proof programs (calc,
+                calcast, minikite, ...) moved to compiler/tests/programs/. The OCaml stage-0 (Fledge) is
+                retired to its own repo (kitelang-io/fledge); it is only needed to reseed kite-seed after
+                a parser change, and is no longer part of this tree.
+docs/           LANGUAGE-DESIGN.md, ROADMAP.md, PHASE-E-PARSER.md, this file, ...; history/ (retired
+                validation reports) and archive/ (generated review blobs) hold superseded material.
 ```
 
 **Module system**: `import kite::core` (namespace path) resolves `kite::a::b` → `lib/a/b.kite` (the `kite`
@@ -79,15 +86,16 @@ the export surfaces of what it imports. So `import kite::alloc` gives you alloc'
 (collections/string) but NOT `collections`' private `import kite::core::option` — no transitive name leak.
 
 **Prelude (default availability, config-driven)**: every program has an implicit prelude — the
-language-primitive `List`/`Map` runtime plus the built-in nominal methods (`xs.push(x)`, `s.len()`,
-`m.size()`) — so `[..]` list literals and `{..}` maps work with no `import`, like C/C++ default
-availability. Crucially this is **configuration, not compiler code**: `compiler/prelude.conf` is a
-newline list of `kite::` module names, and `injectHelpers` resolves each through the ordinary
-`kite::`→`lib/` mapping and injects its functions as globals. The compiler has **no hardcoded prelude
-and no coupling to lib/** — the prelude's code lives in the stdlib, each type's convention methods with
-that type (Kotlin-style, no separate sugar package): List/Map + their methods at
-`lib/alloc/collections/list.kite`, String's methods at `lib/core/string.kite`. Swapping the config or
-those modules changes the defaults without touching the compiler.
+first-class collection types `Vec<T>`/`HashMap<K,V>` runtime plus the built-in nominal methods
+(`xs.push(x)`, `s.len()`, `m.size()`) — so `[..]` list literals and `{..}`/`[k:v]` maps work with no
+`import`, like C/C++ default availability. Crucially this is **configuration, not compiler code**:
+`compiler/prelude.conf` is a newline list of `kite::` module names, and `injectHelpers` resolves each
+through the ordinary `kite::`→`lib/` mapping and injects its functions as globals. The compiler has **no
+hardcoded prelude and no coupling to lib/** — the prelude's code lives in the stdlib, each type's
+convention methods with that type (Kotlin-style, no separate sugar package): `Vec`/`HashMap` (over their
+`IntBuf`/`RawBuf`/`RawMap` backing buffers) under `lib/alloc/collections/`, String's methods at
+`lib/core/string.kite`. Swapping the config or those modules changes the defaults without touching the
+compiler.
 
 **Bootstrap (OCaml retired)**: the gate compiles the current source with `bootstrap/kite-seed` to get
 gen-1, then verifies self-reproduction (kcc2==kcc3) — no OCaml. The seed is the **sole** bootstrap and

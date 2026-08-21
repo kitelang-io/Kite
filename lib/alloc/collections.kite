@@ -1,6 +1,19 @@
-// kite::alloc::collections — aggregator for the collection modules. There is nothing left to opt into:
-// IntBuf and RawMap are language primitives auto-injected via the prelude (kite::alloc::collections::internal::{intbuf,rawmap}),
-// the generic higher-order operations are IntBuf methods (xs.map(f), xs.fold(acc,f), xs.find(pred), ...),
-// and `rangeList` is a free factory in the intbuf module. The former orphan Vec module has been removed.
-pub import kite::alloc::collections::internal::intbuf
-pub import kite::alloc::collections::internal::rawmap
+// kite::alloc::collections — aggregator for the PUBLIC collection modules. `import kite::alloc::collections`
+// brings the whole target-tier collections family into scope by short name (Vec, Array, Deque, HashMap,
+// HashSet, TreeMap, TreeSet) without needing a per-type import line.
+//
+// It re-exports only the PUBLIC types. It does NOT re-export the `internal::*` modules (intbuf/rawmap/rawbuf):
+// those are language primitives auto-injected via the prelude (they back the `[..]`/`{..}` literals) and are
+// not part of the public collections surface — a program should reach for Vec/HashMap, not IntBuf/RawMap.
+// Vec/Array/HashMap are ALSO prelude modules, so a program gets them even without this aggregator; the
+// module collector dedups imports by path (the prelude paths seed `seen`), so re-exporting them here adds no
+// duplicate definition. Deque/HashSet/TreeMap/TreeSet are NOT in the prelude, so this aggregator is the
+// convenient single opt-in that makes them reachable by short name. (The packed sized-byte arrays
+// kite::alloc::collections::bytes stay a separate opt-in, re-exported by kite::alloc, not here.)
+pub import kite::alloc::collections::vec
+pub import kite::alloc::collections::array
+pub import kite::alloc::collections::deque
+pub import kite::alloc::collections::hashmap
+pub import kite::alloc::collections::hashset
+pub import kite::alloc::collections::treemap
+pub import kite::alloc::collections::treeset

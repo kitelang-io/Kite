@@ -1,0 +1,41 @@
+// DECOUPLE AUDIT item A — divergence test for the class-element container-deinit LAYOUT COUPLING.
+//
+// klower's synthContainerDeinit + its synthesis gate bake in the concrete field/method names of the
+// default seq container and its backing buffer (Vec.buf / Vec.n / RawBuf.data / RawBuf.drop / the seq
+// mutator `push`). Those names are an ACCEPTED, TESTED coupling (fields carry no @lang annotation slot, so
+// they are not role-sourced — see the rationale on synthContainerDeinit). This test makes the coupling
+// OBSERVABLE: it builds a CLASS-element Vec via a `[..]` LITERAL (so it also exercises item C's
+// listLitTag -> defaultSeqTy routing), drops it, and asserts the buffer's per-element refs are released.
+//
+// If the coupling desyncs (a rename of buf/n flips the gate false -> no `Vec$Box_deinit` synthesized), the
+// elements LEAK: __refcount(b) does NOT return to its pre-call baseline and `acc` diverges. Verified by
+// poisoning the gate `"buf"` -> `"bufQQ"`: acc drops from 5 to 3. A rename of data/drop instead makes the
+// synthesized deinit body fail to compile (loud), never a silent miscompile.
+//
+// Exit code = the number of passing assertions (5). Also printed, so a divergence is visible without
+// relying on the (8-bit) exit code.
+import "lib/alloc/collections/vec.kite"
+
+class Box(val v: Int) {}
+
+// build a Vec<Box> from a `[..]` LITERAL over an ALIASED element (the buffer takes +3 on b), then DROP at
+// return. A balanced synthesized deinit releases the buffer's 3 refs, returning b's refcount to baseline.
+fun litBuildDrop(b: Box): Int {
+  val a = [b, b, b]
+  return a.len()
+}
+
+fun main(): Int {
+  var acc = 0
+  val b = Box(42)
+  if (__refcount(b) == 1) { acc = acc + 1 }        // 1: fresh
+  litBuildDrop(b)
+  if (__refcount(b) == 1) { acc = acc + 1 }        // 2: literal Vec<Box> drop released the buffer's +3
+  if (b.v == 42) { acc = acc + 1 }                 // 3: not use-after-free
+  var i = 0
+  while (i < 100) { litBuildDrop(b) i = i + 1 }
+  if (__refcount(b) == 1) { acc = acc + 1 }        // 4: 100x — no accumulating leak, no double-free
+  if (b.v == 42) { acc = acc + 1 }                 // 5
+  println("container-elem-literal-drop acc=${acc}")
+  return acc
+}

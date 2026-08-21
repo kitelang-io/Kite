@@ -1,0 +1,63 @@
+// Function references as first-class collection-literal ELEMENTS. A `[..]` list literal whose elements are
+// homogeneous function references — bare `name`, explicit `::name`, or a full `mod::name` path — infers a
+// `Vec<(A..)->R>` and lowers each element to a proper callable closure (funRefClosure), so `fs.get(i)(x)`
+// works. A `[k: fn]` map literal likewise flips to `HashMap<K, (A..)->R>`, so `m[k]` is an `Option<fn>`.
+// Before this feature a bare `[inc, dbl]` stored raw code addresses in the erased IntBuf kernel and calling
+// an element SEGFAULTED (exit 139); now it is either a working Vec<fn> or a loud compile error, never a crash.
+// The full `mod::name` path form is exercised separately (needs a second module); see the branch report.
+// Exit code = 16 (count of passed assertions).
+fun inc(x: Int): Int { return x + 1 }
+fun dbl(x: Int): Int { return x * 2 }
+fun trip(x: Int): Int { return x * 3 }
+fun add(a: Int, b: Int): Int { return a + b }
+
+fun main(): Int {
+  var acc = 0
+
+  // 1. bare `[inc, dbl]` -> Vec<(Int)->Int>: each element is callable via get(i)(x).
+  val fs = [inc, dbl]
+  if (fs.get(0)(10) == 11) { acc = acc + 1 }   // 1
+  if (fs.get(1)(10) == 20) { acc = acc + 1 }   // 2
+  if (fs.len() == 2) { acc = acc + 1 }         // 3
+
+  // 2. explicit `::name` form -> the same Vec<(Int)->Int>.
+  val gs = [::inc, ::dbl, ::trip]
+  if (gs.get(2)(10) == 30) { acc = acc + 1 }   // 4
+  if (gs.get(0)(10) == 11) { acc = acc + 1 }   // 5
+
+  // 3. a MULTI-parameter function type (Int, Int)->Int is inferred + callable with two args.
+  val hs = [add]
+  if (hs.get(0)(3, 4) == 7) { acc = acc + 1 }  // 6
+
+  // 4. index sugar then call: fs[0] -> the closure, then (5).
+  if (fs[0](5) == 6) { acc = acc + 1 }         // 7
+
+  // 5. for-in over a Vec<fn>: apply each to 10 and sum (11 + 20 = 31).
+  var s = 0
+  for (f in fs) { s = s + f(10) }
+  if (s == 31) { acc = acc + 1 }               // 8
+
+  // 6. `[k: fn]` map literal -> HashMap<String, (Int)->Int>; m[k] is Option<fn>, a miss is None.
+  val m = ["a": inc, "b": dbl]
+  when (m["a"]) { Some(f) -> { if (f(10) == 11) { acc = acc + 1 } }; None -> 0 }   // 9
+  when (m["b"]) { Some(f) -> { if (f(10) == 20) { acc = acc + 1 } }; None -> 0 }   // 10
+  when (m["zz"]) { Some(f) -> 0; None -> { acc = acc + 1 } }                       // 11 (miss -> None)
+  if (m["a"].getOr(::dbl)(10) == 11) { acc = acc + 1 }                             // 12 (Option.getOr + call)
+
+  // 7. `::name` as a map VALUE.
+  val mg = ["p": ::trip]
+  when (mg["p"]) { Some(f) -> { if (f(10) == 30) { acc = acc + 1 } }; None -> 0 }  // 13
+
+  // 8. lambda-literal control still works alongside the fn-ref path.
+  val ls = [{ x -> x + 100 }]
+  if (ls.get(0)(1) == 101) { acc = acc + 1 }   // 14
+
+  // 9. shadowing: a local `val inc` wins for the BARE name (so a bare `[inc, ..]` would use the val — here a
+  // heterogeneous list is a compile error, tested out-of-band), but `::inc` is IMMUNE and still the function.
+  val inc = 5
+  val ss = [::inc, ::dbl]
+  if (ss.get(0)(7) == 8) { acc = acc + 1 }     // 15 (the FUNCTION inc, not the val 5)
+  if (inc == 5) { acc = acc + 1 }              // 16 (the val)
+
+  return acc
+}

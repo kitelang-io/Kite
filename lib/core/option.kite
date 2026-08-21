@@ -1,9 +1,20 @@
-// kite::core::option — Option/Result (global enums) + helpers. No allocation, no OS.
-enum Option {
-  Some(v); None
+// kite::core::option — Option/Result (global generic enums) + helpers. No allocation, no OS.
+//
+// Both are TYPE-ERASED generics: a type parameter is a plain machine word at runtime, so `Option<T>` and the
+// non-generic `Option` it replaces emit byte-identical code (T=Int is just a word, exactly the former Int
+// form). Parameterizing them only sharpens the annotations the collections tier already writes (`Option<T>`,
+// `Option<V>`); it changes no lowering. `getOr` is generic in T so `Option<String>.getOr("?")` type-checks
+// (it was hardcoded `Int`), and Result gains the parallel `isOk`/`isErr`/`getOr` helpers.
+enum Option<T> {
+  Some(v: T); None
   fun isSome(self): Bool { return when (self) { Some(v) -> true; None -> false } }
   fun isNone(self): Bool { return when (self) { Some(v) -> false; None -> true } }
-  fun getOr(self, dflt: Int): Int { return when (self) { Some(v) -> v; None -> dflt } }
+  fun getOr(self, dflt: T): T { return when (self) { Some(v) -> v; None -> dflt } }
 }
 
-enum Result { Ok(v); Err(e) }
+enum Result<T, E> {
+  Ok(v: T); Err(e: E)
+  fun isOk(self): Bool { return when (self) { Ok(v) -> true; Err(e) -> false } }
+  fun isErr(self): Bool { return when (self) { Ok(v) -> false; Err(e) -> true } }
+  fun getOr(self, dflt: T): T { return when (self) { Ok(v) -> v; Err(e) -> dflt } }
+}

@@ -26,6 +26,7 @@ class Array<T>(var n: Int, var buf: RawBuf) {
     return Array::<T>(self.n, self.buf)
   }
   fun len(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
   fun get(self, i: Int): T {
     if (i < 0 || i >= self.n) { panicOOB("Array.get", i, self.n) }
     return __packedGet::<T>(self.buf.data, i)
@@ -46,7 +47,7 @@ class Array<T>(var n: Int, var buf: RawBuf) {
     while (i < self.n) { __packedSet::<T>(self.buf.data, i, x) i = i + 1 }
     return 0
   }
-  fun indexOf(self, x: T): Option {
+  fun indexOf(self, x: T): Option<Int> {
     var i = 0
     while (i < self.n) { if (__packedGet::<T>(self.buf.data, i) == x) { return Some(i) } i = i + 1 }
     return None

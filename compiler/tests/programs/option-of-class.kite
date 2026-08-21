@@ -1,0 +1,43 @@
+// Regression: `when (m.get(k)) { Some(x) -> x.field }` for a HashMap whose VALUE is a class.
+//
+// Two bugs are covered, both surfacing only when the Option payload is a class with more than one field:
+//   (1) TYPING/OFFSET: the @mono method `HashMap$K_V.get` now returns the SUBSTITUTED `Option<V>` (subTyTokens
+//       recurses into the type argument), so codegen recovers the concrete payload type from the subject and a
+//       `Some(x)` arm binds `x: Box` — `x.field` reads the right offset instead of a fixed offset 0 (a wrong-
+//       field read, or a segfault). The INDEX form `m[k]` lowers to the same `HashMap$K_V.get`, so it is fixed
+//       in lockstep. A miss yields `None`.
+//   (2) MULTI-ACCESS SEGFAULT: `Some(__packedGet::<class>(..))` (get/index, Vec.pop/first/last) is the class
+//       element-read retain. It used to lower to `{ val r = load; __retain(r); r }` — an EBlock with a LOCAL
+//       in call-argument position, which codegen's collectE never allocated a frame slot for (slot 0 -> clobber
+//       -> crash on the next such access). It now lowers to `__retain(load)` (no local), safe in every position.
+//
+// Also locks in `Vec<String>.contains` (indexOf().isSome(), Int payload — no class offset involved).
+// Exit code = number of assertions passed (printed one-per-line as 1/0). All must pass -> 8.
+class Box(var a: Int, var v: Int) {}
+
+fun main(): Int {
+  var acc = 0
+
+  // Two class values in one map, so both the FIRST and a LATER `.get()` are exercised (the multi-access path).
+  val m = ["k": Box(3, 5), "j": Box(30, 50)]
+
+  // get() Some -> the SECOND field (offset 8) reads correctly, not offset 0.
+  when (m.get("k")) { Some(x) -> { if (x.v == 5) { acc = acc + 1 println(1) } else { println(0) } }; None -> println(0) }
+  // get() Some -> the FIRST field (offset 0) also reads correctly.
+  when (m.get("k")) { Some(x) -> { if (x.a == 3) { acc = acc + 1 println(1) } else { println(0) } }; None -> println(0) }
+  // a LATER key on the same map (multi-access): payload is the right Box, right field.
+  when (m.get("j")) { Some(x) -> { if (x.v == 50) { acc = acc + 1 println(1) } else { println(0) } }; None -> println(0) }
+  // a miss is None.
+  when (m.get("nope")) { Some(x) -> println(0); None -> { acc = acc + 1 println(1) } }
+
+  // index form `m[k]` lowers to the same HashMap.get -> Option<Box>; must still type + read correctly.
+  when (m["k"]) { Some(x) -> { if (x.v == 5) { acc = acc + 1 println(1) } else { println(0) } }; None -> println(0) }
+  when (m["nope"]) { Some(x) -> println(0); None -> { acc = acc + 1 println(1) } }
+
+  // Vec<String>.contains (indexOf().isSome()): true and false.
+  val xs = ["alpha", "beta", "gamma"]
+  if (xs.contains("beta")) { acc = acc + 1 println(1) } else { println(0) }
+  if (xs.contains("zzz") == false) { acc = acc + 1 println(1) } else { println(0) }
+
+  return acc
+}

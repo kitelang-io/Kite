@@ -7,7 +7,7 @@
 #     golden/<basename>.txt byte-for-byte. A corpus file with no golden (e.g. examples/demos/patterns.kite,
 #     which uses `when` patterns beyond the retired oracle's grammar) is smoke-only: it must parse without
 #     crashing.
-#   - Compiler sources (frontend/sema/codegen/backend/driver + kenc_test): smoke-only — kcc must parse each
+#   - Compiler sources (frontend/sema/codegen/backend/driver): smoke-only — kcc must parse each
 #     without crashing. The self-host fixpoint (gate.sh) already proves their correctness.
 # Usage: compiler/tests/run-parser-tests.sh
 export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
@@ -59,7 +59,7 @@ done
 
 echo "== compiler sources (parse smoke) =="
 for f in compiler/frontend/*.kite compiler/sema/*.kite compiler/codegen/*.kite \
-         compiler/backend/arm64/*.kite compiler/driver/*.kite compiler/tests/kenc_test.kite; do
+         compiler/backend/arm64/*.kite compiler/driver/*.kite; do
   [ -f "$f" ] || continue
   if smoke_one "$f"; then smoke=$((smoke+1)); else fail=$((fail+1)); fi
 done

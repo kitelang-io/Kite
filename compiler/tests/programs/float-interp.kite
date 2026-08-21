@@ -1,0 +1,85 @@
+// String interpolation of a Double/Float — `"$d"` must render via the %g (precision-6) renderer, exactly
+// as `println(d)` does, NOT format the raw IEEE-754 word as a base-10 integer (the old Int_toStr garbage:
+// `"val=$d"` for d=3.14 printed "val=6"). floatToStr(d) is the runtime Double->String renderer that
+// interpPiece routes a Float/Double tag to. Because `Vec<T>.join` renders each element via
+// `"${self.get(i)}"`, a `Vec<Double>.join(",")` inherits the same renderer with no join-specific code.
+// A Bool interpolation `"$b"` likewise renders the Kotlin literal "true"/"false" (boolToStr), not "1"/"0",
+// and `Vec<Bool>.join` inherits it. Exit code = count of passed assertions (expect 24). Also prints each
+// rendering for eyeball verification.
+fun main(): Int {
+  var acc = 0
+
+  // ---- single-piece `"$d"` renders identically to println(d)/%g ----
+  val a = 3.14
+  println("$a")
+  if ("$a" == "3.14") { acc = acc + 1 }            // 1
+
+  val one = 1.0
+  println("$one")
+  if ("$one" == "1") { acc = acc + 1 }             // 2  (%g drops the trailing .0)
+
+  val half = 0.5
+  println("$half")
+  if ("$half" == "0.5") { acc = acc + 1 }          // 3
+
+  val neg = 0.0 - 3.14
+  println("$neg")
+  if ("$neg" == "-3.14") { acc = acc + 1 }         // 4
+
+  val hundred = 100.0
+  println("$hundred")
+  if ("$hundred" == "100") { acc = acc + 1 }       // 5  (%g drops the trailing .0)
+
+  // ---- embedded (multi-piece StrBuilder) interpolation ----
+  if ("val=$a" == "val=3.14") { acc = acc + 1 }    // 6
+  if ("$a and $half" == "3.14 and 0.5") { acc = acc + 1 } // 7
+
+  // ---- a Float from a cast/arith expression (tag "Float") also routes to floatToStr ----
+  val two = 1.0 + 1.0
+  if ("$two" == "2") { acc = acc + 1 }             // 8
+  val fi = (7 as Double)
+  if ("$fi" == "7") { acc = acc + 1 }              // 9
+
+  // ---- Vec<Double>.join inherits the fix ----
+  val j = [3.14, 2.71].join(",")
+  println("join=$j")
+  if (j == "3.14,2.71") { acc = acc + 1 }          // 10
+  if ([1.5, 2.5, 3.5].join(" | ") == "1.5 | 2.5 | 3.5") { acc = acc + 1 } // 11
+  val single = [42.0].join(",")
+  if (single == "42") { acc = acc + 1 }            // 12
+  val empty: Vec<Double> = []
+  if (empty.join(",") == "") { acc = acc + 1 }     // 13
+
+  // ---- controls: Int interpolation and Int join are UNCHANGED (str.show / Int_toStr) ----
+  val i = 42
+  if ("$i" == "42") { acc = acc + 1 }              // 14
+  if ("n=$i" == "n=42") { acc = acc + 1 }          // 15
+  if ([100, 200, 300].join(",") == "100,200,300") { acc = acc + 1 } // 16
+
+  // ---- direct println(d) agrees with the interpolated form (same %g renderer) ----
+  println(a)                                        // eyeball: prints "3.14", same as "$a" above
+  if ("$a" == "3.14") { acc = acc + 1 }            // 17
+
+  // ---- String interpolation still passes a String through unchanged ----
+  val s = "hi"
+  if ("$s!" == "hi!") { acc = acc + 1 }            // 18
+
+  // ---- Bool interpolation renders "true"/"false" (Kotlin literal), NOT the integer 1/0 ----
+  val bt = true
+  println("$bt")
+  if ("$bt" == "true") { acc = acc + 1 }           // 19
+  val bf = false
+  println("$bf")
+  if ("$bf" == "false") { acc = acc + 1 }          // 20
+  if ("flag=$bt" == "flag=true") { acc = acc + 1 } // 21  (embedded / StrBuilder path)
+  // a comparison-derived Bool (tag "Bool" via tagBin) routes the same way.
+  val cmp = 3 > 2
+  if ("$cmp" == "true") { acc = acc + 1 }          // 22
+  // Vec<Bool>.join inherits the Bool renderer with no join-specific change.
+  val bj = [true, false].join(",")
+  println("join=$bj")
+  if (bj == "true,false") { acc = acc + 1 }        // 23
+  if ([true, true, false].join("-") == "true-true-false") { acc = acc + 1 } // 24
+
+  return acc
+}

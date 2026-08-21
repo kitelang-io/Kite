@@ -1,0 +1,9 @@
+// namespace-TYPES test fixture: module B. Same top-level names as moda.kite (`Foo`, `mk`, `greet`); each
+// module's `Foo` must mangle to its OWN module (modb__Foo), and `mk` must construct modb's Foo.
+struct Foo(val tag: Int) {
+  fun who(self): Int { return self.tag + 1000 }
+}
+
+fun mk(n: Int): Foo { return Foo(n) }
+
+fun greet(): Int { return 2 }

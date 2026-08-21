@@ -1,0 +1,44 @@
+// Deque memory-safety regression: `dq[i] = v` must route to `Deque_set` (ring-indexed, bounds-checked,
+// CoW) instead of falling through to the erased IntBuf `set` role and corrupting the {n,cap,head,buf}
+// layout; and growth (ensureCap) must free the replaced ring buffer without corrupting live elements.
+// Each check that passes adds 1 to acc; exit code = passed count (15) — asserted <256 by the runner.
+import "lib/alloc/collections/deque.kite"
+fun main(): Int {
+  var acc = 0
+  // dq[i] = v basic (ring-indexed store, head/layout stays intact)
+  var d = Deque::<Int>(0, 0, 0, RawBuf(0))
+  d.pushBack(10) d.pushBack(20) d.pushBack(30)
+  d[0] = 100 d[2] = 300
+  if (d.get(0) == 100) { acc = acc + 1 }
+  if (d.get(1) == 20) { acc = acc + 1 }
+  if (d.get(2) == 300) { acc = acc + 1 }
+  if (d.len() == 3) { acc = acc + 1 }
+  // set across the ring seam (pushFront wraps head)
+  var w = Deque::<Int>(0, 0, 0, RawBuf(0))
+  w.pushBack(1) w.pushBack(2) w.pushFront(0) w.pushBack(3) // logical 0,1,2,3
+  w[0] = 500 w[1] = 600 w[2] = 700 w[3] = 800
+  if (w.get(0) == 500) { acc = acc + 1 }
+  if (w.get(1) == 600) { acc = acc + 1 }
+  if (w.get(2) == 700) { acc = acc + 1 }
+  if (w.get(3) == 800) { acc = acc + 1 }
+  // growth past initial cap=8 twice (leak fix: grown ring reads back correct)
+  var g = Deque::<Int>(0, 0, 0, RawBuf(0))
+  var i = 0
+  while (i < 20) { g.pushBack(i) i = i + 1 }
+  g[0] = 9000 g[19] = 9019
+  if (g.len() == 20) { acc = acc + 1 }
+  if (g.get(0) == 9000) { acc = acc + 1 }
+  if (g.get(10) == 10) { acc = acc + 1 }
+  if (g.get(19) == 9019) { acc = acc + 1 }
+  var s = 0 var j = 0
+  while (j < g.len()) { s = s + g.get(j) j = j + 1 }
+  if (s == 18190) { acc = acc + 1 } // 9000 + (1..18)=171 + 9019
+  // CoW: a copy's set must not corrupt the original
+  var a = Deque::<Int>(0, 0, 0, RawBuf(0))
+  a.pushBack(1) a.pushBack(2) a.pushBack(3)
+  var b = a
+  b[1] = 999
+  if (a.get(1) == 2) { acc = acc + 1 }
+  if (b.get(1) == 999) { acc = acc + 1 }
+  return acc
+}

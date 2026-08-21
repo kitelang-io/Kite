@@ -1,22 +1,21 @@
 // variadic-factories — the variadic IntBuf factory `intBuf(vararg xs: Int)`, an element-initialized
 // construction sugar equivalent to the `[..]` literal, OVERLOADING the prelude's 0-arg `intBuf()`.
 //
-// The factory lives in the NON-prelude stdlib module kite::alloc::collections::factory (quoted-imported
-// below), NOT in the prelude's internal/intbuf.kite. That placement is deliberate: overloading the
-// pervasively-used 0-arg `intBuf()` forces the overload sig-mangle, and the committed bootstrap seed
-// predates the overload-aware return-tag inference (klower `freeCallRetSym`) that makes an overloaded
-// `intBuf()` result still tag as IntBuf — so a prelude overload would (a) stop the seed rebuilding the
-// compiler and (b) perturb the 594834-byte self-host fixpoint by emitting a new function into the compiler
-// binary. Kept out of the prelude, the compiler build stays byte-identical (594834) while the fixed
-// compiler compiles THIS program (which does import the factory). See the factory module header.
+// The factory now lives IN THE PRELUDE (kite::alloc::collections::internal::intbuf), co-located with the
+// 0-arg `intBuf()` it overloads, so `intBuf(1, 2, 3)` needs NO explicit import. This became possible after
+// the committed bootstrap seed was reseeded to the current fixpoint, which carries the overload-aware
+// return-tag inference (klower `freeCallRetSym`): an overloaded `intBuf()` result still tags as IntBuf, so
+// the seed can rebuild the compiler even though the compiler's own ~388 zero-arg `intBuf()` calls now go
+// through the overload sig-mangle (an EXACT fixed-arity overload wins over the vararg — Kotlin semantics).
+// Emitting this function into the compiler binary legitimately grew the self-host fixpoint; the invariant
+// is self-reproduction (kcc2==kcc3), not a fixed byte size.
 //
-// The companion `@mono fun hashMap<K,V>(vararg entries: Pair<K,V>)` was investigated and DROPPED: the
-// @mono monomorphization mangle (`hashMap$K_V`) is arity-blind, so a 0-arg and a vararg @mono overload
-// collide on one specialized symbol, and @mono call-site rewriting bypasses vararg collection — the combo
-// mis-specializes (compiles then returns wrong results). Not shipped rather than ship a broken factory.
+// The companion `@mono fun hashMap<K,V>(vararg entries: Pair<K,V>)` now SHIPS (lib/alloc/collections/hashmap.kite):
+// the @mono mangle is no longer arity-blind — a 0-arg and a vararg @mono overload get per-overload-distinct
+// symbols (`hashMap$K_V$a0` vs `hashMap$K_V$v0`) and the vararg overload keeps its `vararg` param through
+// specialization, so the call site both specializes AND collects the tail. See compiler/tests/programs/mono-vararg.kite.
 //
 // main returns the number of passed checks (14 on full success); the harness asserts exit 14.
-import "lib/alloc/collections/factory.kite"
 
 fun main(): Int {
   var acc = 0

@@ -14,6 +14,10 @@
 // Construct empty: `HashMap::<Int, String>(0, 0, 0, 0, 0, 0)`.
 import kite::core::panic
 import kite::core::hashable
+// the variadic `hashMap(vararg entries: Pair<K,V>)` factory below collects its trailing args into an
+// `Array<Pair<K,V>>`, so the monomorphized Array<T> carrier must be in scope wherever hashMap is used.
+import kite::alloc::collections::array
+import kite::core::pair
 
 // Storage words: n live entries; ecap entry-vector capacity; bcap bucket count (power of two, 0 until first
 // set); keys/vals packed entry buffers; buckets a word array of (entryIndex+1), 0 = empty slot.
@@ -62,6 +66,15 @@ class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var
     }
     return 0
   }
+  // `[k:v]` MAP-LITERAL PROTOCOL (opt-in, see klower recordProtocol / buildMapLit). A type joins the
+  // `[k0: v0, ...]` desugar by declaring an ASSOCIATED empty-constructor tagged `@lang("map.new")` (the
+  // desugar calls it to build a fresh empty map) plus a mutator tagged `@lang("map.set")` (the desugar
+  // inserts each entry through it). `@lang("map.default")` designates HashMap as the type a bare `[k:v]`
+  // (no expected user type) builds — the compiler-wide default, sourced from HERE, not a hardcoded name.
+  @lang("map.new")
+  @lang("map.default")
+  fun empty(): HashMap<K, V> = HashMap::<K, V>(0, 0, 0, 0, 0, 0)
+  @lang("map.set")
   fun set(self, k: consuming K, v: consuming V): Int {
     if (self.bcap == 0) { self.bcap = 8 self.buckets = __rawAlloc(self.bcap * 8) self.rehashAll() }
     val e = self.findIdx(k)
@@ -84,7 +97,7 @@ class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var
     }
     return 0
   }
-  fun get(self, k: K): Option {
+  fun get(self, k: K): Option<V> {
     val e = self.findIdx(k)
     if (e < 0) { return None }
     return Some(__packedGet::<V>(self.vals, e))
@@ -95,7 +108,7 @@ class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var
     return __packedGet::<V>(self.vals, e)
   }
   fun has(self, k: K): Bool { return self.findIdx(k) >= 0 }
-  fun remove(self, k: K): Option {
+  fun remove(self, k: K): Option<V> {
     val e = self.findIdx(k)
     if (e < 0) { return None }
     val old = __packedGet::<V>(self.vals, e)
@@ -133,3 +146,17 @@ class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var
 // use site. Requires a turbofish — the type args cannot be inferred from an empty construction.
 @mono
 fun hashMap<K, V>(): HashMap<K, V> = HashMap::<K, V>(0, 0, 0, 0, 0, 0)
+
+// Populated-HashMap factory: `hashMap::<A,B>(k1 to v1, k2 to v2, ...)` builds a map from `Pair` entries — the
+// variadic analogue of the `[..]`/`{..}` literals for an insertion-ordered hashed map. This is a SECOND @mono
+// overload of `hashMap` (arity-distinct from the 0-arg one): the @mono pass mints per-overload symbols
+// (`hashMap$A_B$a0` vs `hashMap$A_B$v0`) so the two never collide, and the vararg last param survives
+// specialization so the call site collects the trailing `Pair<A,B>` args into a concrete `Array<Pair<A,B>>`.
+// Requires a turbofish when the element types can't be inferred from the entries.
+@mono
+fun hashMap<K, V>(vararg entries: Pair<K, V>): HashMap<K, V> {
+  val m = HashMap::<K, V>(0, 0, 0, 0, 0, 0)
+  var i = 0
+  while (i < entries.len()) { val e: Pair<K, V> = entries.get(i) m.set(e.first, e.second) i = i + 1 }
+  return m
+}
