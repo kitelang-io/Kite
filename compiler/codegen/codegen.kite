@@ -94,10 +94,9 @@ fun containsStr(l: IntBuf, s: String): Bool {
   return false
 }
 
-// t1 = String-T1 mode flag (Phase 9): 0 = the default T0 primitive C-string String, 1 = the boxed
-// `class String(len,data)` representation. It is 0 for the self-host build (the compiler's own source is
-// pure T0), so every `gen.t1 == 1` branch below is inert while self-hosting — the fixpoint is untouched.
-struct Gen(val code: IntBuf, var ctr: Int, val cstrN: IntBuf, val cstrV: IntBuf, var cctr: Int, val structN: IntBuf, val structF: IntBuf, val structFT: IntBuf, val variantN: IntBuf, val variantTag: IntBuf, val variantTys: IntBuf, val funN: IntBuf, val funRet: IntBuf, val arcE: IntBuf, val t1: Int)
+// String is UNCONDITIONALLY the boxed `class String(n, data)` representation (Stage B): a String value is a
+// box, so every I/O / literal / print path below loads its `.data` field (offset 8) or boxes via ___mkStr.
+struct Gen(val code: IntBuf, var ctr: Int, val cstrN: IntBuf, val cstrV: IntBuf, var cctr: Int, val structN: IntBuf, val structF: IntBuf, val structFT: IntBuf, val variantN: IntBuf, val variantTag: IntBuf, val variantTys: IntBuf, val funN: IntBuf, val funRet: IntBuf, val arcE: IntBuf)
 
 struct Ctx(val gen: Gen, val names: IntBuf, val offs: IntBuf, val epi: String, val strLocals: IntBuf, val ltyN: IntBuf, val ltyV: IntBuf, val brkL: IntBuf, val contL: IntBuf, var loopDepth: Int)
 
@@ -314,7 +313,21 @@ fun genBinary(ctx: Ctx, op: String, a: Expr, b: Expr): Int {
 }
 
 // ---- struct type table + boxed struct codegen -----------------------------
-fun structIdx(gen: Gen, name: String): Int {
+// The erased struct-lookup KEY: drop a trailing generic-argument list `<..>` (and any nullable `?` / space
+// after it) so a generic instantiation type name resolves to the ONE registered nominal — `Pair<Int, Int>`
+// and `Pair` share a single struct layout under type erasure. Without this a value whose codegen type name
+// came from a function return (`fun mk(): Pair<Int, Int>` -> funRetOf "Pair<Int, Int>") missed structIdx and
+// every field folded to offset 0 (`.second` read `.first`). A `$`-mangled @mono instantiation (`Vec$Int`)
+// is a DISTINCT registered type and is left intact (no `<`). Inert for the compiler's own build: its
+// struct-lookup names are bare nominals with no `<`, so nothing is stripped and the fixpoint is untouched.
+fun structKey(name: String): String {
+  var i = 0
+  while (i < name.len()) { val c = name.charAt(i); if (c == 60 || c == 63 || c == 32) { return name.substr(0, i) }; i = i + 1 }
+  return name
+}
+
+fun structIdx(gen: Gen, name0: String): Int {
+  val name = structKey(name0)
   var i = 0
   while (i < gen.structN.len()) { val n: String = gen.structN.get(i); if (n == name) { return i }; i = i + 1 }
   return 0 - 1
@@ -389,9 +402,9 @@ fun typeNameOf(ctx: Ctx, e: Expr): String {
     EFBin(op, l, r) -> "Double"
     ECast(x, ty) -> ty
     ECall(nm, aa) -> {
-      // T1: a class-typed binding whose RHS is an ALIAS is klower-wrapped as __retain(x); see through it so
+      // A class-typed binding whose RHS is an ALIAS is klower-wrapped as __retain(x); see through it so
       // the bound local keeps the operand's type (String), driving %s print selection + field offsets.
-      if (ctx.gen.t1 == 1 && nm == "__retain" && aa.len() == 1) { typeNameOf(ctx, aAt(aa, 0)) }
+      if (nm == "__retain" && aa.len() == 1) { typeNameOf(ctx, aAt(aa, 0)) }
       else { if (isStructName(ctx.gen, nm)) { nm }
       else { val ft = floorRetTag(nm); if (ft != "") { ft } else { funRetOf(ctx.gen, nm) } } }
     }
@@ -453,7 +466,7 @@ fun variantTag(gen: Gen, name: String): Int { return gen.variantTag.get(variantI
 // payload type-strings of a variant (parallel to its positional payloads); empty if the variant is unknown.
 fun variantTysOf(gen: Gen, name: String): IntBuf {
   val idx = variantIdx(gen, name)
-  if (idx < 0) { return list() }
+  if (idx < 0) { return intBuf() }
   return gen.variantTys.get(idx)
 }
 
@@ -524,8 +537,17 @@ fun genFieldAssign(ctx: Ctx, base: Expr, f: String, rhs: Expr): Int {
 // ---- file / I/O builtins (the IntBuf/string builtins genListNew/…/genSubstr and genIntToStr were all
 // removed — those names are pure-Kite prelude functions now and route through the default ICallSym path
 // in genCall; genIntToStr was the sole consumer of the Lfmt_ld "%ld" cstring, also removed). ----------
+// Lower a String expression to a raw C-string pointer in x0. The value is a box, so evaluate it and load its
+// `.data` field (offset 8). Every libc I/O builtin that consumes a Kite String as a `char*` (fopen path, write
+// buffer, stderr) funnels through here.
+fun genStrPtr(ctx: Ctx, e: Expr): Int {
+  genExpr(ctx, e)
+  emit(ctx, ILoadOff(0, 0, 8))
+  return 0
+}
+
 fun genReadFile(ctx: Ctx, path: Expr): Int {
-  genExpr(ctx, path)
+  genStrPtr(ctx, path)
   val lr = internStr(ctx, "r"); emit(ctx, ISymHi(1, lr)); emit(ctx, ISymLo(1, 1, lr))
   emit(ctx, ICallSym("_fopen")); emit(ctx, IPush(0))
   // ROBUSTNESS: fopen returns NULL for a missing/unreadable file; feeding NULL into fseek/ftell/fread
@@ -551,7 +573,7 @@ fun genReadFile(ctx: Ctx, path: Expr): Int {
 }
 
 fun genWriteFile(ctx: Ctx, path: Expr, contents: Expr): Int {
-  genExpr(ctx, path); emit(ctx, IPush(0)); genExpr(ctx, contents); emit(ctx, IPush(0))
+  genStrPtr(ctx, path); emit(ctx, IPush(0)); genStrPtr(ctx, contents); emit(ctx, IPush(0))
   emit(ctx, ILoadOff(0, 31, 16))
   val lw = internStr(ctx, "w"); emit(ctx, ISymHi(1, lw)); emit(ctx, ISymLo(1, 1, lw))
   emit(ctx, ICallSym("_fopen")); emit(ctx, IPush(0))
@@ -562,7 +584,7 @@ fun genWriteFile(ctx: Ctx, path: Expr, contents: Expr): Int {
 }
 
 fun genFopenW(ctx: Ctx, path: Expr): Int {
-  genExpr(ctx, path)
+  genStrPtr(ctx, path)
   val lw = internStr(ctx, "w"); emit(ctx, ISymHi(1, lw)); emit(ctx, ISymLo(1, 1, lw))
   return emit(ctx, ICallSym("_fopen"))
 }
@@ -574,18 +596,15 @@ fun genFputByte(ctx: Ctx, byte: Expr, fp: Expr): Int {
 
 fun genFcloseF(ctx: Ctx, fp: Expr): Int { genExpr(ctx, fp); return emit(ctx, ICallSym("_fclose")) }
 
-// EStr literal. T0: raw pointer to the interned NUL-terminated cstring. T1 (Phase 9): a boxed String — call
-// the library ___mkStr(rawPtr, byteLen), which heap-copies the interned bytes into an owned buffer so the
-// String's deinit can free it. byteLen is the DECODED byte count (strBytesK, the same unescaping arm64 emits),
-// so an embedded \x00 counts and a literal's `.len()` is its true byte length, not the strlen-truncated one.
+// EStr literal — a boxed String: call the library ___mkStr(rawPtr, byteLen), which heap-copies the interned
+// bytes into an owned buffer so the String's deinit can free it. byteLen is the DECODED byte count (strBytesK,
+// the same unescaping arm64 emits), so an embedded \x00 counts and a literal's `.len()` is its true byte
+// length, not the strlen-truncated one.
 fun genStrLit(ctx: Ctx, s: String): Int {
   val lab = internStr(ctx, s)
-  if (ctx.gen.t1 == 1) {
-    emit(ctx, ISymHi(0, lab)); emit(ctx, ISymLo(0, 0, lab))
-    loadImm(ctx, 1, strBytesK(s).len())
-    return emit(ctx, ICallSym("___mkStr"))
-  }
-  emit(ctx, ISymHi(0, lab)); return emit(ctx, ISymLo(0, 0, lab))
+  emit(ctx, ISymHi(0, lab)); emit(ctx, ISymLo(0, 0, lab))
+  loadImm(ctx, 1, strBytesK(s).len())
+  return emit(ctx, ICallSym("___mkStr"))
 }
 
 // T1: box a runtime C-string pointer (already in x0) into an owned String via ___mkStr(ptr, strlen(ptr)).
@@ -651,8 +670,8 @@ fun genPrintln(ctx: Ctx, a0: Expr, fmtS: String, fmtI: String): Int {
     EStr(s) -> { genPrintStr(ctx, internStr(ctx, s), fmtS); 1 }
     else -> {
       if (isStrExpr(ctx, a0)) {
-        // T1: a String value is a box, so load its `.data` before %s; T0: the value IS the char pointer.
-        if (ctx.gen.t1 == 1) { genPrintStrBox(ctx, a0, fmtS) } else { genPrintVal(ctx, a0, fmtS) }
+        // A String value is a box, so load its `.data` before %s.
+        genPrintStrBox(ctx, a0, fmtS)
       } else { genPrintVal(ctx, a0, fmtI) }
       1
     }
@@ -666,7 +685,7 @@ fun genPrintln(ctx: Ctx, a0: Expr, fmtS: String, fmtI: String): Int {
 // other external). Keeping diagnostics off stdout is what lets a program's own stdout / the golden-stdout
 // corpus stay clean. eprintln appends a trailing newline with a second write(2, "\n", 1).
 fun genEStderr(ctx: Ctx, e: Expr, nl: Int): Int {
-  genExpr(ctx, e) // x0 = str ptr
+  genStrPtr(ctx, e) // x0 = str ptr (T1: box.data)
   emit(ctx, IPush(0)) // save ptr (16-byte aligned push, call-safe)
   emit(ctx, ICallSym("_strlen")) // x0 = strlen(ptr)  (arg already in x0)
   emit(ctx, IMov(2, 0)) // x2 = len
@@ -1016,7 +1035,7 @@ fun genReleaseDisp(ctx: Ctx, p: Expr): Int {
 // they realize exactly these names in the same order. Adding/removing an intrinsic's MEMBERSHIP is now a
 // single edit here (plus its lowering body, unavoidably, in genCall).
 fun intrinsicFloor(): IntBuf {
-  val f = list()
+  val f = intBuf()
   f.push("toInt"); f.push("toFloat"); f.push("__abort"); f.push("__allocRC"); f.push("__retain"); f.push("__release")
   f.push("__decRefcount"); f.push("__freeObj"); f.push("__refcount"); f.push("__typeId"); f.push("__isUnique")
   f.push("__rawAlloc"); f.push("__rawFree"); f.push("__rawRealloc"); f.push("__argv")
@@ -1064,7 +1083,7 @@ fun genCall(ctx: Ctx, name: String, args: IntBuf): Int {
   if (name == "__rawAlloc" && args.len() == 1) { return genRawAlloc(ctx, aAt(args, 0)) }
   if (name == "__rawFree" && args.len() == 1) { return genRawFree(ctx, aAt(args, 0)) }
   if (name == "__rawRealloc" && args.len() == 2) { return genRawRealloc(ctx, aAt(args, 0), aAt(args, 1)) }
-  if (name == "__argv" && args.len() == 2) { genArgv(ctx, aAt(args, 0), aAt(args, 1)); if (ctx.gen.t1 == 1) { return genBoxCstr(ctx) } return 0 }
+  if (name == "__argv" && args.len() == 2) { genArgv(ctx, aAt(args, 0), aAt(args, 1)); return genBoxCstr(ctx) }
   if (name == "__rawLoad" && args.len() == 2) { return genRawLoad(ctx, aAt(args, 0), aAt(args, 1)) }
   if (name == "__rawStore" && args.len() == 3) { return genRawStore(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2)) }
   if (name == "__rawLoadByte" && args.len() == 2) { return genRawLoadByte(ctx, aAt(args, 0), aAt(args, 1)) }
@@ -1090,7 +1109,7 @@ fun genCall(ctx: Ctx, name: String, args: IntBuf): Int {
   // intToStr) are pure-Kite prelude functions (lib/core/string.kite, lib/alloc/collections/list.kite)
   // on the raw memory/byte primitives; they resolve through the default ICallSym path below. Their
   // former machine lowerings were deleted.
-  if (name == "readFile" && args.len() == 1) { genReadFile(ctx, aAt(args, 0)); if (ctx.gen.t1 == 1) { return genBoxCstr(ctx) } return 0 }
+  if (name == "readFile" && args.len() == 1) { genReadFile(ctx, aAt(args, 0)); return genBoxCstr(ctx) }
   if (name == "writeFile" && args.len() == 2) { return genWriteFile(ctx, aAt(args, 0), aAt(args, 1)) }
   if (name == "fopenW" && args.len() == 1) { return genFopenW(ctx, aAt(args, 0)) }
   if (name == "fputByte" && args.len() == 2) { return genFputByte(ctx, aAt(args, 0), aAt(args, 1)) }
@@ -1196,7 +1215,7 @@ fun genExpr(ctx: Ctx, e: Expr): Int {
     EInt(t) -> loadImm(ctx, 0, parseIntK(t))
     EFLit(t) -> genFLit(ctx, t)
     EFBin(op, l, r) -> genFBin(ctx, op, l, r)
-    EIdent(nm) -> { if (isVariantName(ctx.gen, nm)) { genVariantNew(ctx, nm, list()) } else { ldFp(ctx, 0, slotOf(ctx, nm)) } }
+    EIdent(nm) -> { if (isVariantName(ctx.gen, nm)) { genVariantNew(ctx, nm, intBuf()) } else { ldFp(ctx, 0, slotOf(ctx, nm)) } }
     EStr(s) -> genStrLit(ctx, s)
     EUnary(op, x) -> { genExpr(ctx, x); if (op == "not !") { loadImm(ctx, 1, 0); emit(ctx, ICmp(0, 1)); emit(ctx, ICset(0, "eq")) } else { emit(ctx, INeg(0, 0)) } }
     EBin(op, l, r) -> genBinary(ctx, op, l, r)
@@ -1255,9 +1274,9 @@ fun collectE(acc: IntBuf, e: Expr): Int {
 }
 
 fun genFun(gen: Gen, fd: Func): Int {
-  val locals = list()
+  val locals = intBuf()
   collectE(locals, fd.body)
-  val names = list()
+  val names = intBuf()
   var i = 0
   while (i < fd.params.len()) { names.push(fd.params.get(i)); i = i + 1 }
   i = 0
@@ -1266,11 +1285,11 @@ fun genFun(gen: Gen, fd: Func): Int {
     if (containsStr(names, nm) == false) { names.push(nm) }
     i = i + 1
   }
-  val offs = list()
+  val offs = intBuf()
   i = 0
   while (i < names.len()) { offs.push(8 * (i + 1)); i = i + 1 }
   val frame = align16(8 * names.len())
-  val ctx = Ctx(gen, names, offs, "Lepi_" + fd.name, list(), list(), list(), list(), list(), 0)
+  val ctx = Ctx(gen, names, offs, "Lepi_" + fd.name, intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), 0)
   i = 0
   while (i < fd.paramTys.len()) {
     val pty: String = fd.paramTys.get(i)
@@ -1305,30 +1324,30 @@ fun buildRelRoutine(gen: Gen, name: String): Func {
   val idx = structIdx(gen, name)
   val fields: IntBuf = gen.structF.get(idx)
   val fts: IntBuf = gen.structFT.get(idx)
-  val stmts = list()
+  val stmts = intBuf()
   if (hasDeinit(gen, name)) { // run the destructor before releasing fields / freeing
-    val dArgs = list(); dArgs.push(EIdent("p"))
+    val dArgs = intBuf(); dArgs.push(EIdent("p"))
     stmts.push(SExprS(ECall(name + "_deinit", dArgs)))
   }
   var i = 0
   while (i < fields.len()) {
     val ft: String = fts.get(i)
     if (isRelField(gen, ft)) {
-      val relArgs = list(); relArgs.push(EField(EIdent("p"), fields.get(i)))
+      val relArgs = intBuf(); relArgs.push(EField(EIdent("p"), fields.get(i)))
       stmts.push(SExprS(ECall("__release", relArgs)))
     }
     i = i + 1
   }
-  val freeArgs = list(); freeArgs.push(EIdent("p"))
+  val freeArgs = intBuf(); freeArgs.push(EIdent("p"))
   stmts.push(SExprS(ECall("__freeObj", freeArgs)))
   val thenB = EBlock(stmts, ENoRes)
-  val decArgs = list(); decArgs.push(EIdent("p"))
+  val decArgs = intBuf(); decArgs.push(EIdent("p"))
   val cond = EBin("==", ECall("__decRefcount", decArgs), EInt("0"))
-  val body = list()
+  val body = intBuf()
   body.push(SExprS(EIf(cond, thenB, ENoRes)))
   body.push(SReturnV(EInt("0")))
-  val ps = list(); ps.push("p")
-  val pts = list(); pts.push(name)
+  val ps = intBuf(); ps.push("p")
+  val pts = intBuf(); pts.push(name)
   return Func("__rel_" + name, ps, pts, EBlock(body, ENoRes))
 }
 
@@ -1342,15 +1361,15 @@ fun genRelRoutines(gen: Gen): Int {
   return 0
 }
 
-fun genProgramG(funcs: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBuf, variantN: IntBuf, variantTag: IntBuf, variantTys: IntBuf, funN: IntBuf, funRet: IntBuf, arcE: IntBuf, t1: Int): Gen {
-  val gen = Gen(list(), 0, list(), list(), 0, structN, structF, structFT, variantN, variantTag, variantTys, funN, funRet, arcE, t1)
+fun genProgramG(funcs: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBuf, variantN: IntBuf, variantTag: IntBuf, variantTys: IntBuf, funN: IntBuf, funRet: IntBuf, arcE: IntBuf): Gen {
+  val gen = Gen(intBuf(), 0, intBuf(), intBuf(), 0, structN, structF, structFT, variantN, variantTag, variantTys, funN, funRet, arcE)
   var i = 0
   while (i < funcs.len()) { val f: Func = funcs.get(i); genFun(gen, f); i = i + 1 }
   genRelRoutines(gen)
   return gen
 }
 
-fun genProgram(funcs: IntBuf): IntBuf { return genProgramG(funcs, list(), list(), list(), list(), list(), list(), list(), list(), list(), 0).code }
+fun genProgram(funcs: IntBuf): IntBuf { return genProgramG(funcs, intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf()).code }
 
 // ============================================================================
 // IR PEEPHOLE OPTIMIZER  (target-independent; operates on the virtual-register IR)
@@ -1373,7 +1392,7 @@ fun popRegI(i: Instr): Int { return when (i) { IPop(r) -> r; else -> 0 - 1 } }
 fun isIdMov(i: Instr): Bool { return when (i) { IMov(d, m) -> d == m; else -> false } }
 
 fun peephole1(code: IntBuf): IntBuf {
-  val out = list()
+  val out = intBuf()
   val n = code.len()
   var i = 0
   while (i < n) {
@@ -1418,11 +1437,11 @@ fun eb(op: String, l: Expr, r: Expr): Expr { return EBin(op, l, r) }
 
 // one-statement `return E` block body
 fun retBody(e: Expr): Expr {
-  val stmts = list()
+  val stmts = intBuf()
   stmts.push(SReturnV(e))
   return EBlock(stmts, ENoRes)
 }
 
-fun oneFunc(f: Func): IntBuf { val l = list(); l.push(f); return l }
+fun oneFunc(f: Func): IntBuf { val l = intBuf(); l.push(f); return l }
 
-fun args2(a: Expr, b: Expr): IntBuf { val l = list(); l.push(a); l.push(b); return l }
+fun args2(a: Expr, b: Expr): IntBuf { val l = intBuf(); l.push(a); l.push(b); return l }

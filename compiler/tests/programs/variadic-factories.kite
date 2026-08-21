@@ -1,0 +1,56 @@
+// variadic-factories — the variadic IntBuf factory `intBuf(vararg xs: Int)`, an element-initialized
+// construction sugar equivalent to the `[..]` literal, OVERLOADING the prelude's 0-arg `intBuf()`.
+//
+// The factory lives in the NON-prelude stdlib module kite::alloc::collections::factory (quoted-imported
+// below), NOT in the prelude's internal/intbuf.kite. That placement is deliberate: overloading the
+// pervasively-used 0-arg `intBuf()` forces the overload sig-mangle, and the committed bootstrap seed
+// predates the overload-aware return-tag inference (klower `freeCallRetSym`) that makes an overloaded
+// `intBuf()` result still tag as IntBuf — so a prelude overload would (a) stop the seed rebuilding the
+// compiler and (b) perturb the 594834-byte self-host fixpoint by emitting a new function into the compiler
+// binary. Kept out of the prelude, the compiler build stays byte-identical (594834) while the fixed
+// compiler compiles THIS program (which does import the factory). See the factory module header.
+//
+// The companion `@mono fun hashMap<K,V>(vararg entries: Pair<K,V>)` was investigated and DROPPED: the
+// @mono monomorphization mangle (`hashMap$K_V`) is arity-blind, so a 0-arg and a vararg @mono overload
+// collide on one specialized symbol, and @mono call-site rewriting bypasses vararg collection — the combo
+// mis-specializes (compiles then returns wrong results). Not shipped rather than ship a broken factory.
+//
+// main returns the number of passed checks (14 on full success); the harness asserts exit 14.
+import "lib/alloc/collections/factory.kite"
+
+fun main(): Int {
+  var acc = 0
+
+  // (A) intBuf(vararg): a 3-element list built element-by-element.
+  val a = intBuf(1, 2, 3)
+  if (a.len() == 3) { acc = acc + 1 } // 1
+  if (a.get(0) == 1) { acc = acc + 1 } // 2
+  if (a.get(1) == 2) { acc = acc + 1 } // 3
+  if (a.get(2) == 3) { acc = acc + 1 } // 4
+  if (a.sum() == 6) { acc = acc + 1 } // 5
+
+  // (B) the 0-arg overload still binds the empty constructor (exact fixed-arity wins over vararg).
+  val e = intBuf()
+  if (e.len() == 0) { acc = acc + 1 } // 6
+  e.push(7)
+  e.push(8)
+  if (e.len() == 2) { acc = acc + 1 } // 7
+  if (e.sum() == 15) { acc = acc + 1 } // 8
+
+  // (C) the `[..]` literal still works alongside the overload (its @lang("intbuf.new") role follows the
+  //     overload sig-mangle via klower remangleRoles, so the literal's constructor call is not dangling).
+  val lit = [10, 20, 30]
+  if (lit.len() == 3) { acc = acc + 1 } // 9
+  if (lit.get(1) == 20) { acc = acc + 1 } // 10
+
+  // (D) single-arg and larger vararg calls; a set() write on a vararg-built buffer.
+  val one = intBuf(42)
+  if (one.len() == 1) { acc = acc + 1 } // 11
+  if (one.get(0) == 42) { acc = acc + 1 } // 12
+  val big = intBuf(1, 2, 3, 4, 5)
+  if (big.sum() == 15) { acc = acc + 1 } // 13
+  big.set(0, 100)
+  if (big.sum() == 114) { acc = acc + 1 } // 14
+
+  return acc
+}

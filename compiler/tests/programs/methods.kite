@@ -1,12 +1,14 @@
-struct Vec(val x: Int, val y: Int) {
+// `Vec` is now a prelude type (the [..] literal's monomorphized container), so this method-chaining fixture
+// names its own 2-D vector `V2` to avoid the reserved name.
+struct V2(val x: Int, val y: Int) {
   fun norm(self): Int = self.x + self.y
-  fun add(self, o: Vec): Vec = Vec(self.x + o.x, self.y + o.y)
-  fun scaled(self, k: Int): Vec = Vec(self.x * k, self.y * k)
+  fun add(self, o: V2): V2 = V2(self.x + o.x, self.y + o.y)
+  fun scaled(self, k: Int): V2 = V2(self.x * k, self.y * k)
 }
 
 fun main(): Int {
-  val a = Vec(1, 2)
-  val b = Vec(3, 4)
+  val a = V2(1, 2)
+  val b = V2(3, 4)
   val c = a.add(b).scaled(2)
   return c.norm()
 }

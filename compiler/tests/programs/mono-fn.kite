@@ -1,0 +1,57 @@
+// mono-fn — opt-in monomorphization of `@mono` generic FREE FUNCTIONS (klower Phase 6b).
+//
+// `hashMap<K,V>()` (from the imported hashmap module) and the local `singleton<T>(x)` are BOTH `@mono`
+// function templates: each turbofish call site `f::<A,B>(..)` is specialized (params substituted through the
+// body, nested `@mono` TYPE constructions cascaded to the concrete `HashMap$A_B` / `Vec$A`) and the call is
+// rewritten to `f$A_B(..)`. Exercised for TWO distinct instantiations of each, so a single template body
+// serves multiple concrete receivers — no erasure, no segfault.
+//
+// main returns the number of passed checks (16 on full success); the harness asserts exit 16.
+import kite::alloc::collections::hashmap
+
+// second @mono generic free function — proves generality beyond the factory: builds a 1-element Vec<T>.
+@mono
+fun singleton<T>(x: T): Vec<T> {
+  val v = Vec::<T>(0, 0, RawBuf(0))
+  v.push(x)
+  return v
+}
+
+fun main(argc: Int, argv: USize): Int {
+  var acc = 0
+
+  // (A) hashMap::<Int, Int> — one instantiation of the @mono factory.
+  val mi = hashMap::<Int, Int>()
+  mi.set(1, 42)
+  mi.set(2, 99)
+  mi.set(1, 7)                       // update in place
+  if (mi.size() == 2) { acc = acc + 1 }
+  if (mi.getOr(1, 0) == 7) { acc = acc + 1 }
+  if (mi.getOr(2, 0) == 99) { acc = acc + 1 }
+  if (mi.has(2)) { acc = acc + 1 }
+  if (mi.has(5) == false) { acc = acc + 1 }
+  when (mi.get(2)) { Some(v) -> { if (v == 99) { acc = acc + 1 } }; None -> 0 }
+  when (mi.get(9)) { Some(v) -> 0; None -> { acc = acc + 1 } }
+
+  // (B) hashMap::<String, Int> — a DIFFERENT instantiation of the SAME @mono factory (content-keyed).
+  val ms = hashMap::<String, Int>()
+  ms.set("alpha", 1)
+  ms.set("beta", 2)
+  ms.set("alpha", 11)                // content-keyed update, order preserved
+  if (ms.size() == 2) { acc = acc + 1 }
+  if (ms.getOr("alpha", 0) == 11) { acc = acc + 1 }
+  if (ms.getOr("beta", 0) == 2) { acc = acc + 1 }
+  if (ms.has("beta")) { acc = acc + 1 }
+  if (ms.has("gamma") == false) { acc = acc + 1 }
+
+  // (C) singleton::<Int> and singleton::<String> — the second @mono free function, two instantiations.
+  val vi = singleton::<Int>(77)
+  if (vi.len() == 1) { acc = acc + 1 }
+  if (vi.get(0) == 77) { acc = acc + 1 }
+  val vs = singleton::<String>("hi")
+  val s0: String = vs.get(0)
+  if (vs.len() == 1) { acc = acc + 1 }
+  if (s0.len() == 2) { acc = acc + 1 }
+
+  return acc
+}

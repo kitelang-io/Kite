@@ -37,7 +37,7 @@ class Vec<T>(var n: Int, var cap: Int, var buf: RawBuf) {
       while (i < used) { __rawStoreByte(nd, i, __rawLoadByte(self.buf.data, i)) i = i + 1 }
       val old = self.buf
       self.buf = RawBuf(nd)
-      rawBufDrop(old)
+      old.drop()
     }
     return 0
   }
@@ -107,4 +107,21 @@ class Vec<T>(var n: Int, var cap: Int, var buf: RawBuf) {
     return None
   }
   fun contains(self, x: T): Bool { return self.indexOf(x).isSome() }
+  // Kotlin `joinToString`: render EACH element to its string form and concatenate with `sep`, onto ONE
+  // StrBuilder (amortized, no O(n^2) concat chain). The element is rendered through interpolation
+  // (`"${self.get(i)}"`) — which lowers via the `str.show` role — so in each MONOMORPHIZED specialization
+  // `self.get(i)` has the concrete element type T and its renderer resolves at instantiation time: a
+  // `Vec$Int` renders via Int_toStr, a `Vec$String` passes the String through unchanged. There is no
+  // "assume the erased word is already a String" footgun — a `Vec<Int>.join(",")` prints "1,2,3", never
+  // crashes. An empty Vec joins to "", a single element to just that element (no separator).
+  fun join(self, sep: String): String {
+    val sb = strNew()
+    var i = 0
+    while (i < self.len()) {
+      if (i > 0) { sb.pushStr(sep) }
+      sb.pushStr("${self.get(i)}")
+      i = i + 1
+    }
+    return sb.finish()
+  }
 }

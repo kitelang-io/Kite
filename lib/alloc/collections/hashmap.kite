@@ -126,3 +126,10 @@ class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var
     return __packedGet::<V>(self.vals, i)
   }
 }
+
+// Empty-HashMap factory. `@mono` makes it a generic FUNCTION template: each `hashMap::<A,B>()` call specializes
+// the body's `HashMap::<A,B>` construction (which then cascades through the @mono TYPE pass to `HashMap$A_B`),
+// so `val m = hashMap::<Int, String>()` builds the concrete map with no explicit six-zero constructor at the
+// use site. Requires a turbofish — the type args cannot be inferred from an empty construction.
+@mono
+fun hashMap<K, V>(): HashMap<K, V> = HashMap::<K, V>(0, 0, 0, 0, 0, 0)

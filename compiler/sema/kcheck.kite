@@ -13,8 +13,10 @@ enum Decl { DFun(FFunc); DType(Int, FTDecl); DEnum(FEDecl); DTrait(FTraitDecl); 
 // 1-based source line where each decl begins — captured from the first token of the decl (its leading
 // annotation, if any). Diagnostics are later attributed to their enclosing decl's line.
 fun parseProgramLn(toks: IntBuf, lines: IntBuf): IntBuf {
-  val p = P(toks, 0)
-  val decls = list()
+  // Seed the infix-name set with the prelude's declared infix funs (e.g. `to`) so `a to b` in user code
+  // parses as an infix call even though `to` is declared in an auto-injected prelude module (not in `toks`).
+  val p = mkPSeed(toks, preludeInfixNames())
+  val decls = intBuf()
   var go = 1
   while (go == 1) {
     if (pk(p) == 0) { go = 0 }
@@ -28,7 +30,7 @@ fun parseProgramLn(toks: IntBuf, lines: IntBuf): IntBuf {
       if (pk(p) == 56) { eat(p) }
       val k = pk(p)
       val n0 = decls.len()
-      if (k == 10) { decls.push(DFun(parseFunc(p, annos))) }
+      if (k == 10 || k == 88) { decls.push(DFun(parseFunc(p, annos))) }
       else { if (k == 54) { decls.push(DType(0, parseTypeDecl(p, annos, 0))) }
         else { if (k == 65) { decls.push(DType(1, parseTypeDecl(p, annos, 1))) }
           else { if (k == 55) { decls.push(DEnum(parseEnum(p, annos))) }
@@ -69,7 +71,7 @@ fun isBuiltin(n: String): Bool {
 
 // lambda param string "x: Int, y" -> ["x","y"]; "" -> []
 fun splitLamParams(s: String): IntBuf {
-  val out = list()
+  val out = intBuf()
   if (s == "") { return out }
   val n = s.len()
   var i = 0
@@ -166,10 +168,10 @@ fun rBind(ctx: RCtx, n: String): Int {
 
 fun rPush(ctx: RCtx): IntBuf { // returns saved scopes for restore
   val saved = ctx.scopes
-  val ns = list()
+  val ns = intBuf()
   var i = 0
   while (i < saved.len()) { ns.push(saved.get(i)); i = i + 1 }
-  ns.push(list())
+  ns.push(intBuf())
   ctx.scopes = ns
   return saved
 }
@@ -350,6 +352,7 @@ fun rDecl(ctx: RCtx, d: Decl): Int {
   return when (d) {
     DFun(fd) -> rFun(ctx, fd)
     DType(kind, td) -> { if (isNoResF(td.dtor) == false) { val sv = rPush(ctx); rExpr(ctx, td.dtor); rPop(ctx, sv) } rMethods(ctx, td.methods) }
+    DEnum(ed) -> rMethods(ctx, ed.methods)
     DTrait(tr) -> rMethods(ctx, tr.methods)
     DImpl(im) -> rMethods(ctx, im.methods)
     else -> 0
@@ -360,7 +363,7 @@ fun rDecl(ctx: RCtx, d: Decl): Int {
 // skipDup=1 suppresses duplicate-definition errors: used when checking a MERGED multi-module source
 // (namespace imports), where two modules legitimately share a name (the module system mangles them).
 fun collectGlobals(decls: IntBuf, lines: IntBuf, globals: IntBuf, diags: IntBuf, skipDup: Int): Int {
-  val seen = list()
+  val seen = intBuf()
   var i = 0
   while (i < decls.len()) {
     val d: Decl = decls.get(i)
@@ -436,18 +439,14 @@ fun collectDeclNames(decls: IntBuf, out: IntBuf): Int {
 // The prelude's top-level declarations, parsed ONCE from the same module list preludeSigs/injectHelpers
 // read. Returned so BOTH the resolver (names only) and the type-checker (full param/return signatures)
 // can seed themselves from one source of truth.
-fun preludeDeclList(): IntBuf { return preludeDeclListT(0) }
-
-// t1 (Phase 9): thread the String-T1 flag so the checker seeds the boxed `class String` module instead of
-// the T0 primitive-String modules — mirrors the lowerer's injectHelpers path, keeping the two in agreement.
-fun preludeDeclListT(t1: Int): IntBuf {
-  val out = list()
-  val paths = preludeConfPathsT(t1)
+fun preludeDeclList(): IntBuf {
+  val out = intBuf()
+  val paths = preludeConfPaths()
   var pi = 0
   while (pi < paths.len()) {
     val src = readFile(paths.get(pi))
     if (src.len() > 0) {
-      val plines = list()
+      val plines = intBuf()
       val decls = parseProgramLn(lex(src), plines)
       var di = 0
       while (di < decls.len()) { out.push(decls.get(di)); di = di + 1 }
@@ -457,25 +456,23 @@ fun preludeDeclListT(t1: Int): IntBuf {
   return out
 }
 
-fun preludeSigs(): IntBuf { return preludeSigsT(0) }
-
-fun preludeSigsT(t1: Int): IntBuf {
-  val out = list()
-  collectDeclNames(preludeDeclListT(t1), out)
+fun preludeSigs(): IntBuf {
+  val out = intBuf()
+  collectDeclNames(preludeDeclList(), out)
   return out
 }
 
-fun resolveCheck(decls: IntBuf, lines: IntBuf, skipDup: Int, t1: Int): IntBuf {
-  val diags = list()
-  val globals = list()
-  val pre = preludeSigsT(t1)
+fun resolveCheck(decls: IntBuf, lines: IntBuf, skipDup: Int): IntBuf {
+  val diags = intBuf()
+  val globals = intBuf()
+  val pre = preludeSigs()
   var pj = 0
   while (pj < pre.len()) { globals.push(pre.get(pj)); pj = pj + 1 }
   collectGlobals(decls, lines, globals, diags, skipDup)
-  val scopes = list()
+  val scopes = intBuf()
   // shadowOn=0: the member table is empty and every rShadow* hook is inert — the real resolve diagnostics
   // are byte-identical to before (M2 is SHADOW-only, no output regression on the check/compile path).
-  val ctx = RCtx(globals, scopes, diags, 0, cmNew(), list(), 0, skipDup)
+  val ctx = RCtx(globals, scopes, diags, 0, cmNew(), intBuf(), 0, skipDup)
   var i = 0
   while (i < decls.len()) { val d: Decl = decls.get(i); ctx.curLine = lines.get(i); rDecl(ctx, d); i = i + 1 }
   return diags
@@ -485,16 +482,16 @@ fun resolveCheck(decls: IntBuf, lines: IntBuf, skipDup: Int, t1: Int): IntBuf {
 // no-member diagnostics (selectors that fail resolution against the table) into a SEPARATE shadow list.
 // The real resolve diagnostics are computed by the same traversal but DISCARDED here — this entry exists
 // only to harvest the shadow log, never to gate a build. Invoked only by the `kitec shadow` harness.
-fun resolveShadow(decls: IntBuf, lines: IntBuf, t1: Int): IntBuf {
-  val shadow = list()
-  val globals = list()
-  val pre = preludeSigsT(t1)
+fun resolveShadow(decls: IntBuf, lines: IntBuf): IntBuf {
+  val shadow = intBuf()
+  val globals = intBuf()
+  val pre = preludeSigs()
   var pj = 0
   while (pj < pre.len()) { globals.push(pre.get(pj)); pj = pj + 1 }
-  collectGlobals(decls, lines, globals, list(), 1)
-  val scopes = list()
-  val mtab = buildCMTab(preludeDeclListT(t1), decls)
-  val ctx = RCtx(globals, scopes, list(), 0, mtab, shadow, 1, 1)
+  collectGlobals(decls, lines, globals, intBuf(), 1)
+  val scopes = intBuf()
+  val mtab = buildCMTab(preludeDeclList(), decls)
+  val ctx = RCtx(globals, scopes, intBuf(), 0, mtab, shadow, 1, 1)
   var i = 0
   while (i < decls.len()) { val d: Decl = decls.get(i); ctx.curLine = lines.get(i); rDecl(ctx, d); i = i + 1 }
   return shadow
@@ -570,7 +567,7 @@ fun recordAlias(annos: IntBuf, name: String, reg: PReg): Int {
 // one (name, kind, bits) row; every @alias-marked one contributes an (alias -> primary) row. lib/core/
 // num.kite carries the whole tower + alias map, so this replaces the old hardcoded switch.
 fun buildPReg(decls: IntBuf): PReg {
-  val reg = PReg(list(), list(), list(), list(), list())
+  val reg = PReg(intBuf(), intBuf(), intBuf(), intBuf(), intBuf())
   var i = 0
   while (i < decls.len()) {
     val d: Decl = decls.get(i)
@@ -600,7 +597,7 @@ fun buildPReg(decls: IntBuf): PReg {
 //   kind        : "field" | "method" | "assocfn" | "traitmethod" | "variant" | "freefn" | "const".
 struct CMTab(val types: IntBuf, val aliasFrom: IntBuf, val aliasTo: IntBuf, val owner: IntBuf, val sel: IntBuf, val kind: IntBuf)
 
-fun cmNew(): CMTab { return CMTab(list(), list(), list(), list(), list(), list()) }
+fun cmNew(): CMTab { return CMTab(intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf()) }
 
 fun cmType(mt: CMTab, name: String): Int { if (memList(mt.types, name) == false) { mt.types.push(name) }; return 0 }
 
@@ -803,7 +800,10 @@ fun cmFreeFun(mt: CMTab, fd: FFunc): Int {
     if (p0.name == "this") {
       val recv = cmBaseName(cmStripMode(p0.ty))
       val sel = if (fd.name.len() > recv.len() + 1) { fd.name.substr(recv.len() + 1, fd.name.len() - recv.len() - 1) } else { fd.name }
-      cmAdd(mt, recv, sel, "method")
+      // A GENERIC extension (`fun <A,B> A.to(..)`, receiver a type PARAMETER) is universally callable via
+      // type erasure — a receiver of ANY type resolves it. Record the selector as a free UFCS-style fn so
+      // requireMember(x, sel) passes for any receiver, rather than attributing it to the phantom type "A".
+      if (isTypeParam(recv)) { cmAdd(mt, "", sel, "freefn") } else { cmAdd(mt, recv, sel, "method") }
       return 0
     }
   }
@@ -857,7 +857,7 @@ fun cmCollectMembers(mt: CMTab, decls: IntBuf): Int {
       // them so `Int::MAX` resolves and `Int.MAX` (dot on a const) is the locked cross-use error, not a
       // spurious "no member".
       DType(kind, td) -> { cmMethods(mt, td.name, td.methods); if (cmHasPrimAnno(td.annos) == false) { cmFields(mt, td); cmDerives(mt, td.annos, td.name) } }
-      DEnum(ed) -> { cmVariants(mt, ed); cmMethods(mt, ed.name, ed.consts); cmDerives(mt, ed.annos, ed.name) }
+      DEnum(ed) -> { cmVariants(mt, ed); cmMethods(mt, ed.name, ed.consts); cmMethods(mt, ed.name, ed.methods); cmDerives(mt, ed.annos, ed.name) }
       DTrait(tr) -> cmTraitMethods(mt, tr.name, tr.methods)
       DImpl(im) -> cmMethods(mt, im.forTy, im.methods)
       else -> 0
@@ -986,7 +986,7 @@ fun adoptArgLit(env: TEnv, e: FExpr, pt: Ty): Bool {
   }
 }
 
-fun cons1(t: Ty): IntBuf { val l = list(); l.push(t); return l }
+fun cons1(t: Ty): IntBuf { val l = intBuf(); l.push(t); return l }
 
 // --- type-string parser (reuses kfront's lexer + P) ---
 // `reg` classifies a bare name as a primitive (-> TPrim) vs a nominal type (-> TNamed), sourced from
@@ -994,14 +994,14 @@ fun cons1(t: Ty): IntBuf { val l = list(); l.push(t); return l }
 fun tyBase(reg: PReg, p: P): Ty {
   if (pk(p) == 20) {
     eat(p)
-    val args = list()
+    val args = intBuf()
     if (pk(p) != 21) { args.push(parseTyC(reg, p)); while (pk(p) == 24) { eat(p); args.push(parseTyC(reg, p)) } }
     eat(p); eat(p) // ')' '->'
     return TFun(args, parseTyC(reg, p))
   }
   var name = ptext(p); eat(p)
   while (pk(p) == 26) { eat(p); name = ptext(p); eat(p) }
-  val args = list()
+  val args = intBuf()
   if (pk(p) == 37) { eat(p); args.push(parseTyC(reg, p)); while (pk(p) == 24) { eat(p); args.push(parseTyC(reg, p)) }; eat(p) }
   if (isPrimitive(reg, name) && args.len() == 0) { return TPrim(name) }
   return TNamed(name, args)
@@ -1017,7 +1017,7 @@ fun parseTyC(reg: PReg, p: P): Ty {
 // modifier is not part of the type, so skip a leading `inout`(71)/`consuming`(72) token before parsing.
 fun parseTyStr(reg: PReg, s: String): Ty {
   if (s == "") { return TUnknown }
-  val p = P(lex(s), 0)
+  val p = P(lex(s), 0, intBuf())
   if (pk(p) == 71 || pk(p) == 72) { eat(p) }
   return parseTyC(reg, p)
 }
@@ -1165,7 +1165,7 @@ struct LP(val name: String, val ty: String)
 // enabled — into a REAL compile diagnostic (issued in the type-check pass, before lowering), which gates
 // the build. Widened one receiver-family at a time: 1 = own structs/enums, 2 = +builtin nominals,
 // 3 = +primitives. See memberFamilyEnabled / requireMember.
-struct TEnv(val funN: IntBuf, val funP: IntBuf, val funR: IntBuf, val funG: IntBuf, val structN: IntBuf, val structFN: IntBuf, val structFT: IntBuf, val enumN: IntBuf, var locals: IntBuf, var curRet: Ty, var hasRet: Int, val implN: IntBuf, val implT: IntBuf, val diags: IntBuf, var curLine: Int, val prim: PReg, val mtab: CMTab, val shadow: IntBuf, var shadowOn: Int, var memLevel: Int)
+struct TEnv(val funN: IntBuf, val funP: IntBuf, val funR: IntBuf, val funG: IntBuf, val funVA: IntBuf, val structN: IntBuf, val structFN: IntBuf, val structFT: IntBuf, val enumN: IntBuf, var locals: IntBuf, var curRet: Ty, var hasRet: Int, val implN: IntBuf, val implT: IntBuf, val diags: IntBuf, var curLine: Int, val prim: PReg, val mtab: CMTab, val shadow: IntBuf, var shadowOn: Int, var memLevel: Int)
 
 // trait subtyping: a concrete type is assignable to a trait it impls. implN/implT are parallel
 // (type name -> trait name), collected from `impl Trait for Type`. subtypeOk is checked ALONGSIDE
@@ -1199,10 +1199,10 @@ fun reservedTyErr(env: TEnv, t: Ty): Int {
 
 fun tPush(env: TEnv): IntBuf {
   val saved = env.locals
-  val ns = list()
+  val ns = intBuf()
   var i = 0
   while (i < saved.len()) { ns.push(saved.get(i)); i = i + 1 }
-  ns.push(list())
+  ns.push(intBuf())
   env.locals = ns
   return saved
 }
@@ -1227,7 +1227,7 @@ fun tLocal(env: TEnv, name: String): Look {
 }
 
 fun splitLamPairs(s: String): IntBuf {
-  val out = list()
+  val out = intBuf()
   if (s == "") { return out }
   val n = s.len()
   var i = 0
@@ -1267,7 +1267,7 @@ fun inferIdent(env: TEnv, s: String): Ty {
   var i = 0
   while (i < env.funN.len()) { if (env.funN.get(i) == s) { return TFun(env.funP.get(i), env.funR.get(i)) }; i = i + 1 }
   var j = 0
-  while (j < env.structN.len()) { if (env.structN.get(j) == s) { return TFun(env.structFT.get(j), TNamed(s, list())) }; j = j + 1 }
+  while (j < env.structN.len()) { if (env.structN.get(j) == s) { return TFun(env.structFT.get(j), TNamed(s, intBuf())) }; j = j + 1 }
   return TUnknown
 }
 
@@ -1513,10 +1513,10 @@ fun inferStatic(env: TEnv, a: FExpr, f: String): Ty {
     tErr(env, "member " + (f + (" of a value must be accessed with `.` not `::`")))
     return TUnknown
   }
-  if (base != "") { requireMember(env, TNamed(base, list()), f) }
+  if (base != "") { requireMember(env, TNamed(base, intBuf()), f) }
   // `Enum::variant` VALUE has the enum type; an `Enum::CONST` associated constant (kind "const") does NOT —
   // it has its own declared type, so it falls through to the permissive TUnknown (like a struct assoc const).
-  if (base != "" && memList(env.enumN, base)) { if (cmMemberKind(env.mtab, base, f) != "const") { return TNamed(base, list()) } }
+  if (base != "" && memList(env.enumN, base)) { if (cmMemberKind(env.mtab, base, f) != "const") { return TNamed(base, intBuf()) } }
   infer(env, a)
   return TUnknown
 }
@@ -1564,7 +1564,7 @@ fun bindTypeVar(env: TEnv, subN: IntBuf, subT: IntBuf, n: String, at: Ty): Int {
 }
 
 fun instTyList(l: IntBuf, subN: IntBuf, subT: IntBuf): IntBuf {
-  val out = list()
+  val out = intBuf()
   var i = 0
   while (i < l.len()) { out.push(instTy(l.get(i), subN, subT)); i = i + 1 }
   return out
@@ -1601,7 +1601,7 @@ fun trimStr(s: String): String {
 // split `s` on separator char `sep`, but only at angle-bracket depth 0 (so `RawMap<K, V>` stays whole);
 // each piece is trimmed.
 fun topSplit(s: String, sep: Int): IntBuf {
-  val out = list()
+  val out = intBuf()
   val n = s.len()
   var depth = 0
   var start = 0
@@ -1628,8 +1628,8 @@ fun headIdent(s: String): String {
 }
 
 fun parseGenBounds(gen: String): GBounds {
-  val names = list()
-  val traits = list()
+  val names = intBuf()
+  val traits = intBuf()
   if (gen == "") { return GBounds(names, traits) }
   val n = gen.len()
   var body = gen
@@ -1654,7 +1654,7 @@ fun parseGenBounds(gen: String): GBounds {
     var nameEnd = sl
     if (colon >= 0) { nameEnd = colon } else { if (eq >= 0) { nameEnd = eq } }
     val nm = trimStr(seg.substr(0, nameEnd))
-    val trs = list()
+    val trs = intBuf()
     if (colon >= 0) {
       var bEnd = sl
       if (eq >= 0 && eq > colon) { bEnd = eq }
@@ -1673,7 +1673,7 @@ fun parseGenBounds(gen: String): GBounds {
 fun boundsOf(gb: GBounds, n: String): IntBuf {
   var i = 0
   while (i < gb.names.len()) { if (gb.names.get(i) == n) { return gb.traits.get(i) }; i = i + 1 }
-  return list()
+  return intBuf()
 }
 
 // When a type parameter `n: SomeTrait` is instantiated with a CONCRETE type `at`, require that type to
@@ -1698,10 +1698,10 @@ fun checkBound(env: TEnv, gb: GBounds, n: String, at: Ty): Int {
 // other callee (struct constructor, local, method) has no bounds.
 fun calleeBounds(env: TEnv, f: FExpr): GBounds {
   val nm = when (f) { FEIdent(s) -> s; else -> "" }
-  if (nm == "") { return GBounds(list(), list()) }
+  if (nm == "") { return GBounds(intBuf(), intBuf()) }
   var i = 0
   while (i < env.funN.len()) { if (env.funN.get(i) == nm) { return parseGenBounds(env.funG.get(i)) }; i = i + 1 }
-  return GBounds(list(), list())
+  return GBounds(intBuf(), intBuf())
 }
 
 fun checkCallArgs(env: TEnv, params: IntBuf, args: IntBuf, ret: Ty, gb: GBounds): Ty {
@@ -1709,8 +1709,8 @@ fun checkCallArgs(env: TEnv, params: IntBuf, args: IntBuf, ret: Ty, gb: GBounds)
     tErr(env, "wrong number of arguments: expected " + (params.len().toStr() + (", got " + args.len().toStr())))
     return ret
   }
-  val subN = list()
-  val subT = list()
+  val subN = intBuf()
+  val subT = intBuf()
   var i = 0
   while (i < params.len()) {
     val pt: Ty = params.get(i)
@@ -1781,7 +1781,7 @@ fun overloadParamsFit(env: TEnv, ps: IntBuf, ats: IntBuf): Bool {
 // zero or multiple fits is accepted leniently (TUnknown) — the klower resolver is the final arbiter and emits
 // the 'ambiguous overload' hard error, so the checker never false-rejects a genuinely-overloaded call.
 fun resolveOverloadRet(env: TEnv, nm: String, args: IntBuf): Ty {
-  val ats = list()
+  val ats = intBuf()
   var a = 0
   while (a < args.len()) { val ar: FArg = args.get(a); ats.push(infer(env, ar.expr)); a = a + 1 }
   var best = TUnknown
@@ -1795,6 +1795,53 @@ fun resolveOverloadRet(env: TEnv, nm: String, args: IntBuf): Ty {
   return TUnknown
 }
 
+// the vararg FIXED-param count registered for free function `nm` (parallel to funN), or -1 if `nm` is not
+// a variadic free function. Used to relax the strict arity check on a call to a single vararg definition.
+fun funVarargFixed(env: TEnv, nm: String): Int {
+  var i = 0
+  while (i < env.funN.len()) { if (env.funN.get(i) == nm) { if (env.funVA.get(i) >= 0) { return env.funVA.get(i) } }; i = i + 1 }
+  return 0 - 1
+}
+
+// the ELEMENT type E of vararg free function `nm` — the type-arg of its trailing `Array<E>` param.
+fun funVarargElemTy(env: TEnv, nm: String): Ty {
+  var i = 0
+  while (i < env.funN.len()) {
+    if (env.funN.get(i) == nm) { if (env.funVA.get(i) >= 0) {
+      val ps: IntBuf = env.funP.get(i)
+      if (ps.len() >= 1) { val last: Ty = ps.get(ps.len() - 1); return when (last) { TNamed(hn, ta) -> if (ta.len() >= 1) { ta.get(0) } else { TUnknown }; else -> TUnknown } }
+    } }
+    i = i + 1
+  }
+  return TUnknown
+}
+
+// type-check a call to a vararg free function `nm`: the FIXED args (positions < `fixed`) against the fixed
+// parameters, and every TRAILING arg against the element type E (lenient compat||subtype, as elsewhere).
+// Returns the function's declared return type. No strict arity error — a vararg accepts >= `fixed` args.
+fun checkVarargCall(env: TEnv, nm: String, args: IntBuf, fixed: Int): Ty {
+  var fps = TUnknown
+  var fret = TUnknown
+  var i = 0
+  while (i < env.funN.len()) { if (env.funN.get(i) == nm) { if (env.funVA.get(i) >= 0) { fps = TFun(env.funP.get(i), env.funR.get(i)); fret = env.funR.get(i) } }; i = i + 1 }
+  val fparams = when (fps) { TFun(ps, r) -> ps; else -> intBuf() }
+  val elem = funVarargElemTy(env, nm)
+  var a = 0
+  while (a < args.len()) {
+    val ar: FArg = args.get(a)
+    val at = infer(env, ar.expr)
+    if (a < fixed) {
+      if (a < fparams.len()) { val pt: Ty = fparams.get(a)
+        if (isTypeParamTy(pt) == false) { if (adoptArgLit(env, ar.expr, pt)) { 0 } else { if (compat(env.prim, at, pt) == false) { if (subtypeOk(env, at, pt) == false) { tErr(env, "argument type " + (showTy(at) + (" is not compatible with parameter " + showTy(pt)))) } } } } }
+    }
+    else {
+      if (adoptArgLit(env, ar.expr, elem)) { 0 } else { if (compat(env.prim, at, elem) == false) { if (subtypeOk(env, at, elem) == false) { tErr(env, "vararg argument type " + (showTy(at) + (" is not compatible with element type " + showTy(elem)))) } } }
+    }
+    a = a + 1
+  }
+  return fret
+}
+
 fun inferCall(env: TEnv, f: FExpr, args: IntBuf): Ty {
   return when (f) {
     FEField(recv, m) -> { inferMethodOrStaticDot(env, recv, m); inferArgList(env, args); TUnknown }
@@ -1803,37 +1850,62 @@ fun inferCall(env: TEnv, f: FExpr, args: IntBuf): Ty {
       val nm = when (f) { FEIdent(s) -> s; else -> "" }
       // A secondary-constructor call `Owner(args)` whose arity matches a `__ctor_<arity>` factory (not the
       // primary field list) is accepted with the owner type — bypassing the primary-ctor arity check.
-      if (cmIsType(env.mtab, nm) && hasSecondaryCtor(env, nm, args.len())) { inferArgList(env, args); TNamed(nm, list()) }
+      if (cmIsType(env.mtab, nm) && hasSecondaryCtor(env, nm, args.len())) { inferArgList(env, args); TNamed(nm, intBuf()) }
       else { if (nm != "" && funOverloadCount(env, nm) > 1) {
         // OVERLOADED free function: arity-first + arg-type selection against the overload set (lenient tie).
         resolveOverloadRet(env, nm, args)
       }
       else {
+        // VARARG free function (single definition): accept >= fixed args, check fixed vs params and
+        // trailing vs element type E — no strict arity error (the lowerer collects the tail into Array<E>).
+        val vf = if (nm != "") { funVarargFixed(env, nm) } else { 0 - 1 }
+        if (vf >= 0) { checkVarargCall(env, nm, args, vf) }
+        else {
         val tf = infer(env, f)
         inferArgList(env, args)
-        when (tf) { TFun(params, ret) -> checkCallArgs(env, params, args, ret, calleeBounds(env, f)); else -> TUnknown }
+        when (tf) { TFun(params, ret) -> checkCallArgs(env, params, args, ret, calleeBounds(env, f)); else -> TUnknown } }
       } }
     }
   }
 }
 
+// Phase-8 literal FLIP: a `[..]` literal is a first-class `Vec<T>` (was the erased IntBuf). T is the join of
+// the element types (Unknown for an empty `[]`, which unifies with any `Vec<T>` annotation). Vec + its
+// methods (push/get/pop/…) are prelude-injected, so `xs.pop()` on a `[..]` literal resolves.
 fun inferList(env: TEnv, es: IntBuf): Ty {
   var acc = TUnknown
   var i = 0
   while (i < es.len()) { val x: FExpr = es.get(i); acc = joinTy(env.prim, acc, infer(env, x)); i = i + 1 }
-  return TNamed("IntBuf", cons1(acc))
+  return TNamed("Vec", cons1(acc))
 }
 
+// Phase-8 literal FLIP: a `[k:v]` map literal is a first-class `HashMap<K,V>` (was the erased RawMap). K is
+// the join of the key types, V the join of the value types (Unknown for a non-homogeneous column, which
+// unifies with any `HashMap<K,V>` annotation). HashMap + its methods (get/set/getOr/has/size/…) are
+// prelude-injected, so `m.getOr(k, d)` on a `[k:v]` literal resolves. `m[k]` types as `Option<V>` — see
+// indexResTy — so a miss is a None the code must handle, not a silent 0 (Kotlin's `V?`).
 fun inferMap(env: TEnv, ents: IntBuf): Ty {
+  var kacc = TUnknown
+  var vacc = TUnknown
   var i = 0
-  while (i < ents.len()) { val en: FMapEnt = ents.get(i); infer(env, en.k); infer(env, en.v); i = i + 1 }
-  val l = list(); l.push(TUnknown); l.push(TUnknown)
-  return TNamed("RawMap", l)
+  while (i < ents.len()) { val en: FMapEnt = ents.get(i); kacc = joinTy(env.prim, kacc, infer(env, en.k)); vacc = joinTy(env.prim, vacc, infer(env, en.v)); i = i + 1 }
+  val l = intBuf(); l.push(kacc); l.push(vacc)
+  return TNamed("HashMap", l)
+}
+
+// the static type of `a[ix]`: `Option<V>` when `a` is a `HashMap<K,V>` (Kotlin `map[k]: V?`), so an
+// unhandled miss surfaces at the type level; every other receiver (RawMap/IntBuf/Vec/String/…) stays the
+// lenient `TUnknown` — the pre-flip index behavior, so RawMap's raw-value indexing is unchanged.
+fun indexResTy(at: Ty): Ty {
+  return when (at) {
+    TNamed(n, args) -> if (n == "HashMap" && args.len() >= 2) { TNamed("Option", cons1(args.get(1))) } else { TUnknown }
+    else -> TUnknown
+  }
 }
 
 fun inferLambda(env: TEnv, params: String, body: FExpr): Ty {
   val saved = tPush(env)
-  val ptys = list()
+  val ptys = intBuf()
   val pairs = splitLamPairs(params)
   var i = 0
   while (i < pairs.len()) {
@@ -1929,7 +2001,7 @@ fun infer(env: TEnv, e: FExpr): Ty {
     FECast(a, ty) -> inferCast(env, a, ty)
     FEQuestion(a) -> { infer(env, a); TUnknown }
     FECall(f, args) -> inferCall(env, f, args)
-    FEIndex(a, ix) -> { infer(env, a); infer(env, ix); TUnknown }
+    FEIndex(a, ix) -> { val at = infer(env, a); infer(env, ix); indexResTy(at) }
     FEList(es) -> inferList(env, es)
     FEMap(ents) -> inferMap(env, ents)
     FELambda(params, body) -> inferLambda(env, params, body)
@@ -2020,22 +2092,33 @@ fun checkDecl(env: TEnv, d: Decl): Int {
   return when (d) {
     DFun(fd) -> checkFun(env, fd)
     DType(kind, td) -> { if (isNoResF(td.dtor) == false) { val sv = tPush(env); infer(env, td.dtor); tPop(env, sv) } checkMethods(env, td.methods) }
+    DEnum(ed) -> checkMethods(env, ed.methods)
     DTrait(tr) -> checkMethods(env, tr.methods)
     DImpl(im) -> checkMethods(env, im.methods)
     else -> 0
   }
 }
 
+// the vararg FIXED-parameter count of a function's signature: (#params - 1) when the LAST param is a
+// vararg, else -1 (not variadic). Recorded parallel to funN so an overloaded-away arity check is skipped.
+fun funVarargFixedOf(fd: FFunc): Int {
+  val n = fd.params.len()
+  if (n == 0) { return 0 - 1 }
+  val last: FParam = fd.params.get(n - 1)
+  if (last.isVararg == 1) { return n - 1 }
+  return 0 - 1
+}
+
 fun addFunSig(env: TEnv, fd: FFunc): Int {
-  val ptys = list()
+  val ptys = intBuf()
   var i = 0
   while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); ptys.push(parseTyStr(env.prim, pp.ty)); i = i + 1 }
-  env.funN.push(fd.name); env.funP.push(ptys); env.funR.push(retTy(env.prim, fd.ret)); env.funG.push(fd.gen)
+  env.funN.push(fd.name); env.funP.push(ptys); env.funR.push(retTy(env.prim, fd.ret)); env.funG.push(fd.gen); env.funVA.push(funVarargFixedOf(fd))
   return 0
 }
 
 fun addStructSig(env: TEnv, td: FTDecl): Int {
-  val fns = list(); val fts = list()
+  val fns = intBuf(); val fts = intBuf()
   var i = 0
   while (i < td.fields.len()) { val f: FFld = td.fields.get(i); fns.push(f.name); fts.push(parseTyStr(env.prim, f.ty)); i = i + 1 }
   env.structN.push(td.name); env.structFN.push(fns); env.structFT.push(fts)
@@ -2070,18 +2153,18 @@ fun collectSigs(env: TEnv, decls: IntBuf): Int {
   return 0
 }
 
-fun typecheckCheck(decls: IntBuf, lines: IntBuf, t1: Int): IntBuf {
-  val diags = list()
+fun typecheckCheck(decls: IntBuf, lines: IntBuf): IntBuf {
+  val diags = intBuf()
   // The prelude decl list is parsed ONCE: it seeds the primitive registry (@prim markers in
   // lib/core/num.kite -> PReg, the checker's whole numeric classification) AND the function signatures.
-  val pdecls = preludeDeclListT(t1)
+  val pdecls = preludeDeclList()
   // Phase M3: build the REAL member table (prelude + user decls) and turn the FATAL member gate on at
   // level 3 — ALL receiver families (own structs/enums, then builtin nominals, then primitives), widened
   // one at a time and full-gated at each step (2a own, 2b +builtin, 2c +primitive). shadowOn stays 0 (the
   // TEnv shadow log is the resolver's job); the member check emits real diagnostics via requireMember,
   // gated by receiver-family (memberFamilyEnabled). A level-3 shadow probe over the whole compiler+stdlib+
   // test corpus surfaced 0 false positives, so a genuinely-undefined selector on ANY known type now errors.
-  val env = TEnv(list(), list(), list(), list(), list(), list(), list(), list(), list(), TUnknown, 0, list(), list(), diags, 0, buildPReg(pdecls), buildCMTab(pdecls, decls), list(), 0, 3)
+  val env = TEnv(intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), TUnknown, 0, intBuf(), intBuf(), diags, 0, buildPReg(pdecls), buildCMTab(pdecls, decls), intBuf(), 0, 3)
   collectSigs(env, decls)
   // Seed prelude/lib FUNCTION signatures so their calls are arg-type-checked exactly like user calls (an
   // unsound gap otherwise: a wrong-typed argument to a stdlib function slipped through). Only functions
@@ -2097,23 +2180,21 @@ fun typecheckCheck(decls: IntBuf, lines: IntBuf, t1: Int): IntBuf {
 
 // Parse a token stream and return ONLY the shadow-log lines (empty = every selector resolved). Mirrors
 // checkDiagsT's parse, but runs the RESOLVER shadow traversal (Phase M2) instead of the check gate.
-fun shadowDiagsT(toks: IntBuf, t1: Int): IntBuf {
-  val lines = list()
+fun shadowDiags(toks: IntBuf): IntBuf {
+  val lines = intBuf()
   val decls = parseProgramLn(toks, lines)
-  return resolveShadow(decls, lines, t1)
+  return resolveShadow(decls, lines)
 }
 
 // checkDiags is the reusable entry: parse a token stream, run name-resolution + type-check, return the
 // combined diagnostics list (empty = clean). No `main` here — kcheck is a LIBRARY now, so it can be
 // quoted-included into kitec.kite alongside klower (which owns `main`). The standalone `kitec check`
 // tool lives in kcheck_main.kite.
-fun checkDiags(toks: IntBuf, skipDup: Int): IntBuf { return checkDiagsT(toks, skipDup, 0) }
-
-fun checkDiagsT(toks: IntBuf, skipDup: Int, t1: Int): IntBuf {
-  val lines = list()
+fun checkDiags(toks: IntBuf, skipDup: Int): IntBuf {
+  val lines = intBuf()
   val decls = parseProgramLn(toks, lines)
-  val diags = resolveCheck(decls, lines, skipDup, t1)
-  val td = typecheckCheck(decls, lines, t1)
+  val diags = resolveCheck(decls, lines, skipDup)
+  val td = typecheckCheck(decls, lines)
   var k = 0
   while (k < td.len()) { diags.push(td.get(k)); k = k + 1 }
   return diags

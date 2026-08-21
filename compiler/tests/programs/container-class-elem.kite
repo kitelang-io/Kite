@@ -1,0 +1,78 @@
+// Regression: monomorphized Vec<T>/Array<T> holding CLASS (reference) elements. Two bugs are covered:
+//   (1) sizeOf<class> mis-sized the element as the SUM of its inline fields (`class Box(v: Int)` -> 4)
+//       instead of one reference word (8), so the packed 32-bit store/load TRUNCATED the 8-byte element
+//       pointer -> a garbage pointer -> segfault on the next access. Fixed: a reference class packs as 8.
+//   (2) the element pointer was stored/loaded through raw packed intrinsics the auto-ARC pass cannot see,
+//       so the incoming `consuming` element (set) was released at set's scope end -> the buffer's copy
+//       dangled -> use-after-free. Fixed (leak model): packedSet retains before the store (buffer owns +1),
+//       packedGet retains the loaded element (caller owns +1) — never a double-free/UAF; elements leak on
+//       container drop, consistent with the @arc(manual) collections.
+// Exit code = 22 (a checksum of the assertions below).
+import "lib/alloc/collections/array.kite"
+import "lib/alloc/collections/vec.kite"
+
+class Box(val v: Int) {}
+
+// vararg with a CLASS element collects into an `Array<Box>` internally (build + set + get).
+fun firstBox(vararg xs: Box): Int {
+  if (xs.len() == 0) { return 0 }
+  return xs.get(0).v
+}
+fun sumBoxes(vararg xs: Box): Int {
+  var acc = 0
+  var i = 0
+  while (i < xs.len()) { acc = acc + xs.get(i).v i = i + 1 }
+  return acc
+}
+
+fun main(): Int {
+  var acc = 0
+
+  // Array<Box>: set + get single, `.field` value checks.
+  val a = Array::<Box>(3, RawBuf(__rawAlloc(3 * sizeOf::<Box>())))
+  a.set(0, Box(10))
+  a.set(1, Box(20))
+  a.set(2, Box(30))
+  if (a.get(0).v == 10) { acc = acc + 1 }    // 1
+  if (a.get(1).v == 20) { acc = acc + 1 }    // 2
+  if (a.get(2).v == 30) { acc = acc + 1 }    // 3
+  if (a.len() == 3) { acc = acc + 1 }        // 4
+
+  // repeated get of the SAME index — the element must never drop to rc0.
+  if (a.get(1).v == 20) { acc = acc + 1 }    // 5
+  if (a.get(1).v == 20) { acc = acc + 1 }    // 6
+  if (a.get(1).v == 20) { acc = acc + 1 }    // 7
+
+  // overwrite a slot; neighbours stay intact.
+  a.set(1, Box(99))
+  if (a.get(1).v == 99) { acc = acc + 1 }    // 8
+  if (a.get(0).v == 10) { acc = acc + 1 }    // 9
+  if (a.get(2).v == 30) { acc = acc + 1 }    // 10
+
+  // Vec<Box>: push + get + len.
+  val v = Vec::<Box>(0, 0, RawBuf(0))
+  v.push(Box(100))
+  v.push(Box(200))
+  v.push(Box(300))
+  if (v.len() == 3) { acc = acc + 1 }        // 11
+  if (v.get(0).v == 100) { acc = acc + 1 }   // 12
+  if (v.get(1).v == 200) { acc = acc + 1 }   // 13
+  if (v.get(2).v == 300) { acc = acc + 1 }   // 14
+  if (v.get(1).v == 200) { acc = acc + 1 }   // 15  (repeated get)
+  v.set(2, Box(333))
+  if (v.get(2).v == 333) { acc = acc + 1 }   // 16  (overwrite)
+
+  // push past capacity -> realloc moves the packed pointer array; elements survive.
+  v.push(Box(400))
+  v.push(Box(500))
+  if (v.len() == 5) { acc = acc + 1 }        // 17
+  if (v.get(0).v == 100) { acc = acc + 1 }   // 18
+  if (v.get(4).v == 500) { acc = acc + 1 }   // 19
+
+  // vararg CLASS element: 1 arg, 3 args, 0 args (builds Array<Box> at the call site).
+  if (firstBox(Box(7)) == 7) { acc = acc + 1 }                  // 20
+  if (sumBoxes(Box(1), Box(2), Box(3)) == 6) { acc = acc + 1 }  // 21
+  if (sumBoxes() == 0) { acc = acc + 1 }                        // 22
+
+  return acc
+}

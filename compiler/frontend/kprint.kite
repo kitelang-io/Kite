@@ -5,7 +5,7 @@
 fun main(argc: Int, argv: USize): Int {
   if (argc < 2) { println("usage: kparse <file.kite>"); return 1 }
   val src = readFile(__argv(argv, 1))
-  val p = P(lex(src), 0)
+  val p = mkP(lex(src))
   var count = 0
   var go = 1
   while (go == 1) {
@@ -13,7 +13,7 @@ fun main(argc: Int, argv: USize): Int {
     else {
       val annos = parseAnnos(p)
       val k = pk(p)
-      if (k == 10) { printFunc(parseFunc(p, annos)); count = count + 1 } // fun
+      if (k == 10 || k == 88) { printFunc(parseFunc(p, annos)); count = count + 1 } // fun (opt. `infix`)
       else { if (k == 54) { printTDecl(parseTypeDecl(p, annos, 0)); count = count + 1 } // struct
         else { if (k == 65) { printTDecl(parseTypeDecl(p, annos, 1)); count = count + 1 } // class
           else { if (k == 55) { printEDecl(parseEnum(p, annos)); count = count + 1 } // enum

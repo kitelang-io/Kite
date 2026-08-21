@@ -1,0 +1,21 @@
+// Regression: methods declared INSIDE an enum body (previously SILENTLY dropped — FEDecl had no `methods`
+// field, so an enum-body `fun` was misparsed as a phantom variant and the compiler emitted an EMPTY program).
+// Exercises a member method `fun m(self)` (dispatched via methodCallee for enum receivers), an associated
+// `fun m()` (resolved as Enum::m()), and a member method that calls another member method on self.
+enum Shape {
+  Circle(Int)
+  Square(Int)
+  fun area(self): Int { return when (self) { Circle(r) -> r * r; Square(s) -> s + s } }
+  fun unit(): Int { return 100 }
+  fun twice(self): Int { return self.area() * 2 }
+}
+
+fun main(): Int {
+  var acc = 0
+  acc = acc + Circle(3).area()   // 9  -> 9
+  acc = acc + Square(4).area()   // 8  -> 17
+  acc = acc + Shape::unit()      // 100 -> 117
+  acc = acc + Circle(3).twice()  // 18 -> 135
+  acc = acc + Square(4).twice()  // 16 -> 151
+  return acc
+}

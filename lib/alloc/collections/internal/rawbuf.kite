@@ -4,7 +4,7 @@
 // refcount shows another owner, so mutating a copy copy-on-writes instead of corrupting the original.
 //
 // @arc(manual): the compiler never auto-retains/releases it. The collection's `copy` method (+1 via
-// __retain) and ensureUnique/rawBufDrop (the -1) manage the count explicitly through the refcount
+// __retain) and ensureUnique/drop (the -1) manage the count explicitly through the refcount
 // intrinsics — __refcount reads it, __decRefcount drops without freeing, __freeObj/__rawFree free the
 // object shell and the byte buffer at the last owner.
 //
@@ -12,16 +12,15 @@
 // refcount 1 (the header the allocator installs), i.e. uniquely owned by the constructing handle.
 @arc(manual)
 class RawBuf(var data: USize) {
-}
-
-// drop one co-ownership of a buffer: at the LAST owner free the byte buffer and the object; otherwise
-// just decrement the shared count. Called by ensureUnique after it has cloned away from a shared buffer.
-fun rawBufDrop(b: RawBuf): Int {
-  if (__refcount(b) <= 1) {
-    if (b.data != 0) { __rawFree(b.data) }
-    __freeObj(b)
+  // drop one co-ownership of a buffer: at the LAST owner free the byte buffer and the object; otherwise
+  // just decrement the shared count. Called by ensureUnique after it has cloned away from a shared buffer.
+  fun drop(self): Int {
+    if (__refcount(self) <= 1) {
+      if (self.data != 0) { __rawFree(self.data) }
+      __freeObj(self)
+      return 0
+    }
+    __decRefcount(self)
     return 0
   }
-  __decRefcount(b)
-  return 0
 }

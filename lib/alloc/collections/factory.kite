@@ -1,0 +1,27 @@
+// lib/alloc/collections/factory.kite — variadic collection factory functions (kite::alloc::collections::factory).
+//
+// Element-initialized construction sugar: `intBuf(1, 2, 3)` builds a populated IntBuf, a convenient
+// equivalent of the `[..]` literal. `intBuf(vararg xs: Int)` OVERLOADS the prelude's 0-arg
+// `@lang("intbuf.new") fun intBuf(): IntBuf` (kite::alloc::collections::internal::intbuf): an EXACT
+// fixed-arity overload wins over a vararg one (Kotlin semantics), so a bare `intBuf()` still binds the
+// 0-arg constructor and the `@lang` role stays on it. The vararg tail is collected into a fresh
+// `Array<Int>` (hence the `array` import — the carrier's monomorphization needs the Array<T> template in
+// scope), then pushed into a new IntBuf.
+//
+// NOT A PRELUDE MODULE — imported explicitly with `import "lib/alloc/collections/factory.kite"`. This is
+// DELIBERATE, not an oversight: the compiler's OWN source uses the 0-arg `intBuf()` ~388 times, and
+// overloading it forces the overload sig-mangle (`intBuf` -> `intBuf__0__`). The committed bootstrap seed
+// predates the overload-aware return-tag inference this repo now carries (klower `freeCallRetSym`), so if
+// the overload were prelude-injected the SEED could not tag any `intBuf()` result and could not rebuild the
+// compiler — and it would perturb the 594834-byte self-host fixpoint by emitting a new function into the
+// compiler binary. Keeping it out of the prelude leaves the compiler build byte-identical (594834) while
+// the (fixed) compiler compiles user programs that DO import this factory. See the commit message.
+import "lib/alloc/collections/array.kite"
+
+// intBuf(xs..) — build an IntBuf holding the given elements (create empty, push each).
+fun intBuf(vararg xs: Int): IntBuf {
+  val out: IntBuf = intBuf()
+  var i = 0
+  while (i < xs.len()) { out.push(xs.get(i)) i = i + 1 }
+  return out
+}

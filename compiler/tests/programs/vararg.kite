@@ -1,0 +1,41 @@
+// vararg (variadic) parameters: trailing call-site args are collected into a fresh fixed-length Array<E>.
+// Exercises: 0 / 1 / 3 trailing args, a fixed-prefix vararg, a vararg METHOD, and Array<E> get/len access.
+import "lib/alloc/collections/array.kite"
+
+fun sum(vararg xs: Int): Int {
+  var acc = 0
+  var i = 0
+  while (i < xs.len()) { acc = acc + xs.get(i) i = i + 1 }
+  return acc
+}
+
+// fixed prefix (name: String) then a vararg tail collected into Array<Int>.
+fun label(name: String, vararg rest: Int): Int {
+  var acc = name.len()
+  var i = 0
+  while (i < rest.len()) { acc = acc + rest.get(i) i = i + 1 }
+  return acc
+}
+
+class Accum(var base: Int) {
+  // a METHOD with a vararg param; `self.base` is the fixed prefix carried on the receiver.
+  fun total(self, vararg xs: Int): Int {
+    var acc = self.base
+    var i = 0
+    while (i < xs.len()) { acc = acc + xs.get(i) i = i + 1 }
+    return acc
+  }
+}
+
+fun main(): Int {
+  var r = 0
+  r = r + sum()          // 0     -> 0
+  r = r + sum(5)         // 5     -> 5
+  r = r + sum(1, 2, 3)   // 6     -> 11
+  r = r + label("hi", 1, 2, 3) // 2 + 6 = 8  -> 19
+  r = r + label("x")           // 1 + 0 = 1  -> 20
+  val a = Accum(100)
+  r = r + a.total(1, 2, 3)     // 100 + 6 = 106 -> 126
+  r = r + a.total()            // 100 + 0 = 100 -> 226
+  return r
+}

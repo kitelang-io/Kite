@@ -1,0 +1,38 @@
+// Vec<T>.join — the footgun-free string-join. Each element is RENDERED to its string form via interpolation
+// (the `str.show` role), so in each MONOMORPHIZED specialization the concrete element type's renderer resolves
+// at instantiation time: a `Vec<String>` concatenates the strings unchanged, a `Vec<Int>` renders each via
+// Int_toStr. The ex-footgun `[1,2,3].join(",")` therefore prints "1,2,3" instead of dereferencing the raw Int
+// words as String pointers (the old joinList's SIGSEGV). Exit code = count of passed assertions (expect 10).
+fun main(): Int {
+  var acc = 0
+
+  // Vec<String>: elements pass through unchanged.
+  val ws = ["a", "b", "c"].join(",")
+  if (ws == "a,b,c") { acc = acc + 1 }         // 1
+  if (ws.length() == 5) { acc = acc + 1 }      // 2
+
+  // Vec<Int> (the ex-footgun): each Int is RENDERED, not deref'd — "1,2,3", no crash.
+  val is = [1, 2, 3].join(",")
+  if (is == "1,2,3") { acc = acc + 1 }         // 3
+  if (is.length() == 5) { acc = acc + 1 }      // 4
+
+  // multi-char separator + larger Ints render correctly.
+  if ([10, 20, 30].join(" | ") == "10 | 20 | 30") { acc = acc + 1 } // 5
+  // negative Ints render correctly (built with push so the computed element stays a real Vec<Int> — a
+  // `[0 - 1, ..]` LITERAL has a non-literal first element and falls back to the erased IntBuf, no join).
+  val neg: Vec<Int> = []
+  neg.push(0 - 1) neg.push(0) neg.push(5)
+  if (neg.join(",") == "-1,0,5") { acc = acc + 1 }                 // 6
+
+  // single element -> just that element, no separator.
+  if (["x"].join(",") == "x") { acc = acc + 1 }   // 7
+  if ([42].join(",") == "42") { acc = acc + 1 }   // 8
+
+  // empty Vec -> "" (String and Int specializations both).
+  val es: Vec<Int> = []
+  if (es.join(",") == "") { acc = acc + 1 }       // 9
+  val ss: Vec<String> = []
+  if (ss.join(",") == "") { acc = acc + 1 }       // 10
+
+  return acc
+}

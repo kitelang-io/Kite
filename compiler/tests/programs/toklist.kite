@@ -16,7 +16,7 @@ fun isSpace(c: Int): Bool { return c == 32 }
 
 // ---- lexer: String -> IntBuf<Tok> -------------------------------------------
 fun lex(src: String): IntBuf {
-  val toks = list()
+  val toks = intBuf()
   val n = src.len()
   var i = 0
   while (i < n) {

@@ -22,7 +22,7 @@ class Deque<T>(var n: Int, var cap: Int, var head: Int, var buf: RawBuf) {
       while (i < bytes) { __rawStoreByte(nd, i, __rawLoadByte(self.buf.data, i)) i = i + 1 }
       val old = self.buf
       self.buf = RawBuf(nd)
-      rawBufDrop(old)
+      old.drop()
     }
     return 0
   }

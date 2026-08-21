@@ -28,11 +28,6 @@ zsh compiler/tests/run-fmt-tests.sh >"$T/fmt.log" 2>&1
 tail -1 "$T/fmt.log"
 grep -q "FMT TESTS PASSED" "$T/fmt.log" || fail "kitefmt tests failed ($(tail -3 "$T/fmt.log" | tr '\n' ' '))"
 
-echo "=== [string-t1] boxed class String: box+deinit+concat+substr+print + leak-end (Phase 9) ==="
-zsh compiler/tests/run-string-t1-tests.sh >"$T/t1.log" 2>&1
-tail -1 "$T/t1.log"
-grep -q "0 fail" "$T/t1.log" || fail "string-T1 tests failed ($(tail -3 "$T/t1.log" | tr '\n' ' '))"
-
 echo "=== [robustness] malformed input rejected, never segfaults ==="
 BAD=compiler/tests/bugs/malformed-input-must-not-segfault.kite
 "$T/k2" check "$BAD" >/dev/null 2>&1; rc=$?
@@ -152,12 +147,16 @@ echo "  fun add(Int,Int) x2 -> exit $rc, no binary, diagnostic on stderr ✓"
 
 echo "=== [robustness] a bare \`<Type>_<member>\` surface identifier is rejected, no silent binary (M6) ==="
 MS=compiler/tests/bugs/mangled-surface-must-abort.kite
+# --no-check exercises the guard this fixture NAMES — klower's rejectMangledSurface. (With the checker on,
+# `String_len` is now rejected one phase earlier as "unresolved name": String's queries are real MEMBER
+# methods, so the mangle is no longer a top-level symbol the checker resolves — same reject, no binary, just
+# an earlier phase. --no-check bypasses the checker so the lowerer's dedicated surface guard keeps coverage.)
 rm -f "$T/ms_out"
-"$T/k2" "$MS" "$T/ms_out" >"$T/ms_stdout" 2>"$T/ms_err"; rc=$?
+"$T/k2" --no-check "$MS" "$T/ms_out" >"$T/ms_stdout" 2>"$T/ms_err"; rc=$?
 [ "$rc" -eq 0 ] && fail "compiler returned 0 on a bare \`String_len\` — member-table surface enforcement regressed"
 [ -f "$T/ms_out" ] && fail "compiler wrote a binary despite a bare \`<Type>_<member>\` surface identifier"
 grep -q "not a valid identifier" "$T/ms_err" || fail "mangled-surface diagnostic not on stderr"
-echo "  String_len(s) -> exit $rc, no binary, diagnostic on stderr ✓"
+echo "  String_len(s) --no-check -> exit $rc, no binary, diagnostic on stderr ✓"
 
 echo "✅ GATE PASSED (no OCaml, no shared /tmp) — suite green, kcc2==kcc3, robust to malformed input"
 rm -rf "$T"

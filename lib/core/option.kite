@@ -1,10 +1,9 @@
 // kite::core::option — Option/Result (global enums) + helpers. No allocation, no OS.
-enum Option { Some(v); None }
+enum Option {
+  Some(v); None
+  fun isSome(self): Bool { return when (self) { Some(v) -> true; None -> false } }
+  fun isNone(self): Bool { return when (self) { Some(v) -> false; None -> true } }
+  fun getOr(self, dflt: Int): Int { return when (self) { Some(v) -> v; None -> dflt } }
+}
 
 enum Result { Ok(v); Err(e) }
-
-fun Option.isSome(): Bool { return when (self) { Some(v) -> true; None -> false } }
-
-fun Option.isNone(): Bool { return when (self) { Some(v) -> false; None -> true } }
-
-fun Option.getOr(dflt: Int): Int { return when (self) { Some(v) -> v; None -> dflt } }

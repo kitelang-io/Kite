@@ -1,0 +1,57 @@
+// Phase-8 literal FLIP: a `[k:v]` map literal is now a first-class monomorphized HashMap<K,V> (was the
+// erased RawMap kernel). K,V are inferred from the entries. `m[k]` yields Option<V> (Kotlin's `V?`): a miss
+// is a None, not a silent 0. This exercises a String-keyed literal (set via m[k]=v; read via m[k]/getOr/
+// when/has/size), an Int-keyed literal (proving NO String-vs-Int role split — one HashMap<K,V> over any
+// Hash key), for-in over the keys, and confirms m["missing"] is really a None, not a garbage value.
+// A map literal whose value column is non-literal (a variable) stays the erased RawMap fallback (raw m[k]).
+// There is no empty-map literal in the surface: `[]` is an empty LIST, so no empty-{} case exists to flip.
+// Exit code = 19 (count of passed assertions).
+fun main(): Int {
+  var acc = 0
+
+  // ["a":1, "b":2] is a HashMap<String, Int>.
+  val m = ["a": 1, "b": 2]
+  if (m.size() == 2) { acc = acc + 1 }                 // 1
+  if (m.getOr("a", 99) == 1) { acc = acc + 1 }         // 2  (non-optional read)
+  if (m.has("b")) { acc = acc + 1 }                    // 3
+  if (m.has("z") == false) { acc = acc + 1 }           // 4
+
+  // m[k] yields Option<V>: extract via when / Option.getOr / isSome.
+  when (m["a"]) { Some(v) -> { if (v == 1) { acc = acc + 1 } }; None -> 0 }   // 5
+  if (m["b"].getOr(99) == 2) { acc = acc + 1 }          // 6  (Option.getOr)
+  if (m["a"].isSome()) { acc = acc + 1 }                // 7
+
+  // a MISS is a None, not a silent 0 (the deliberate Kotlin-aligned change).
+  when (m["missing"]) { Some(v) -> 0; None -> { acc = acc + 1 } }             // 8
+  if (m["missing"].isNone()) { acc = acc + 1 }          // 9
+
+  // m[k]=v routes to HashMap.set: insert a new key + update one in place.
+  m["c"] = 3                                            // insert
+  m["a"] = 11                                           // update in place
+  if (m.size() == 3) { acc = acc + 1 }                  // 10
+  if (m.getOr("c", 99) == 3) { acc = acc + 1 }          // 11
+  if (m.getOr("a", 99) == 11) { acc = acc + 1 }         // 12
+
+  // iterate the KEYS (insertion order): for (k in m) + keyAt/valAt/size surface.
+  var seen = 0
+  for (k in m) { if (m.has(k)) { seen = seen + 1 } }
+  if (seen == 3) { acc = acc + 1 }                      // 13
+  if (m.keyAt(0).eq("a")) { acc = acc + 1 }             // 14  (insertion order preserved)
+  var vsum = 0
+  var i = 0
+  while (i < m.size()) { vsum = vsum + m.valAt(i) i = i + 1 }
+  if (vsum == 16) { acc = acc + 1 }                     // 15  (updated "a"=11, "b"=2, "c"=3 -> 16)
+
+  // An Int-keyed literal -> HashMap<Int, String> (one HashMap<K,V> over any Hash key; no role split).
+  val g = [1: "x", 2: "y"]
+  if (g.size() == 2) { acc = acc + 1 }                  // 16
+  if (g.getOr(1, "?").eq("x")) { acc = acc + 1 }        // 17
+  when (g[2]) { Some(s) -> { if (s.eq("y")) { acc = acc + 1 } }; None -> 0 }  // 18
+
+  // Non-literal value column -> stays the erased RawMap fallback (raw-value m[k], no Option).
+  val vv = 5
+  val r = ["x": vv]
+  if (r["x"] == 5) { acc = acc + 1 }                    // 19
+
+  return acc
+}

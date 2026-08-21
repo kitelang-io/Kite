@@ -54,6 +54,7 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/generic-trait-bound.kite:119 compiler/tests/programs/comptime-computed.kite:25
        compiler/tests/programs/modules-collide.kite:42
        compiler/tests/programs/nominal-methods.kite:32 compiler/tests/programs/pub-reexport.kite:37
+       compiler/tests/programs/enum-methods.kite:151
        compiler/tests/programs/break-continue.kite:77 compiler/tests/programs/compound-assign.kite:96 compiler/tests/programs/exclusive-range.kite:57
        compiler/tests/programs/property-getset.kite:53
        compiler/tests/programs/map-class.kite:166
@@ -69,13 +70,19 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/sized-arrays.kite:12
        compiler/tests/programs/unsigned-ops.kite:7 compiler/tests/programs/cast-as.kite:11 compiler/tests/programs/to-float.kite:5 compiler/tests/programs/overflow-family.kite:16 compiler/tests/programs/convert-from.kite:10 compiler/tests/programs/width-wrap.kite:11
        compiler/tests/programs/derive.kite:18 compiler/tests/programs/derive-enum.kite:20
-       compiler/tests/programs/strbuilder.kite:10
+       compiler/tests/programs/strbuilder.kite:10 compiler/tests/programs/vec-join.kite:10
+       compiler/tests/programs/string-boxed-basics.kite:77 compiler/tests/programs/string-boxed-leak-end.kite:0
        compiler/tests/programs/mono-vec.kite:12 compiler/tests/programs/mono-vec-field.kite:5 compiler/tests/programs/mono-vec-return.kite:7
        compiler/tests/programs/vec-collection.kite:10 compiler/tests/programs/hashmap-int.kite:12 compiler/tests/programs/hashmap-string.kite:9
+       compiler/tests/programs/list-literal-vec.kite:17 compiler/tests/programs/map-literal-hashmap.kite:19
+       compiler/tests/programs/factory-names.kite:10
        compiler/tests/programs/treemap-int.kite:13 compiler/tests/programs/treemap-string.kite:6
        compiler/tests/programs/treemap-grow.kite:3 compiler/tests/programs/treeset-grow.kite:3
        compiler/tests/programs/hashset-int.kite:11 compiler/tests/programs/treeset-int.kite:9
        compiler/tests/programs/array-int.kite:6 compiler/tests/programs/deque-int.kite:11
+       compiler/tests/programs/vararg.kite:226 compiler/tests/programs/vararg-overload.kite:18
+       compiler/tests/programs/variadic-factories.kite:14
+       compiler/tests/programs/container-class-elem.kite:22
        compiler/tests/programs/collections-cow.kite:14
        compiler/tests/programs/ns-mono-vec.kite:12
        compiler/tests/programs/ns-method-sugar.kite:18
@@ -83,7 +90,9 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/string-escapes.kite:255 compiler/tests/programs/char-utf8.kite:127
        compiler/tests/programs/string-int-concat.kite:11 compiler/tests/programs/named-fn-ref.kite:34
        compiler/tests/programs/assoc-const-value.kite:11
-       compiler/tests/programs/const-val.kite:198 compiler/tests/programs/overload.kite:90 compiler/tests/programs/secondary-ctor.kite:29)
+       compiler/tests/programs/const-val.kite:198 compiler/tests/programs/overload.kite:90 compiler/tests/programs/secondary-ctor.kite:29
+       compiler/tests/programs/mono-fn.kite:16
+       compiler/tests/programs/infix-pair.kite:111)
 for t in $TESTS; do
   if check "${t%:*}" "${t##*:}"; then pass=$((pass+1)); else fail=$((fail+1)); fi
 done

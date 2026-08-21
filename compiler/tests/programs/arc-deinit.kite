@@ -8,7 +8,7 @@ fun makeAndDrop(log: IntBuf): Int {
 }
 
 fun main(): Int {
-  val log = list()
+  val log = intBuf()
   log.push(0)
   val x = makeAndDrop(log)
   val y = makeAndDrop(log)

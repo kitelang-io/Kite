@@ -1,4 +1,7 @@
+// The `[k:v]` map literal is now a first-class HashMap<K,V> (m[k] yields Option<V>). This fixture exercises
+// the erased-kernel RawMap (raw-value m[k]), so it builds one explicitly via rawMap() + set().
 fun main(): Int {
-  val ages = ["alice": 30, "bob": 25, "carol": 42]
+  val ages = rawMap()
+  ages.set("alice", 30) ages.set("bob", 25) ages.set("carol", 42)
   return ages["bob"] + ages["carol"]
 }
