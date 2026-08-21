@@ -1,10 +1,8 @@
-// compiler/kcheck.kite — M2 semantic checks (name resolution + type check) in Kite, ported from
+// compiler/sema/kcheck.kite — M2 semantic checks (name resolution + type check) in Kite, ported from
 // lib/resolve.ml + lib/typecheck.ml. Operates on kfront's surface AST (F-prefixed nodes).
-// Build:  kitec run compiler/kfront.kite compiler/kcheck.kite
-// The standalone tool (kcheck_main.kite) reads its source path from argv; it prints diagnostics in
-// `kitec check` form (path prefix stripped):
-//   no errors -> "ok (name resolution + type check passed)"
-//   errors    -> "error: <msg>" per diag, then "<N> semantic error(s)"
+// Build: assembled into compiler/kitec.kite (a quoted-include LIBRARY, no main). The `kitec check` verb
+// (klower's checkOnly) drives it; checkDiags is the reusable entry, returning the diagnostics list
+// (empty = clean). Diagnostics render as "error: <msg>" per diag, then "<N> semantic error(s)".
 
 // ---- top-level declaration wrapper (so we can iterate the program twice) ----
 enum Decl { DFun(FFunc); DType(Int, FTDecl); DEnum(FEDecl); DTrait(FTraitDecl); DImpl(FImplDecl); DImport(String); DConst(String) }
@@ -42,7 +40,13 @@ fun parseProgramLn(toks: IntBuf, lines: IntBuf): IntBuf {
                   // referencing code and would false-flag `NAME` as unresolved). `use` carries no checker
                   // Decl variant; parse+discard it so the loop stays token-synced rather than bailing.
                   else { if (k == 80) { decls.push(DConst(parseConst(p).name)) }
-                    else { if (k == 81) { parseUse(p) }
+                    // `use mod::name [as Alias]` introduces a bare name in the importing scope (the alias,
+                    // or `name`). For a FREE-FN import the bare name usually already exists as a global, but
+                    // for a TYPE rename (`use moda::Foo as AFoo`) the alias names NO existing global — record
+                    // it as a resolvable value name (DConst) so `AFoo(..)` / `g()` resolve. Type-annotation
+                    // strings (`val a: AFoo`) are not hard-validated by the checker, so the alias needs no
+                    // type-table entry. Recording it keeps the loop token-synced either way.
+                    else { if (k == 81) { decls.push(DConst(parseUse(p).alias)) }
                       else { go = 0 } } } } } } } } }
       if (decls.len() > n0) { lines.push(dl) }
     }
@@ -727,6 +731,37 @@ fun cmFields(mt: CMTab, td: FTDecl): Int {
   return 0
 }
 
+// The `[..]`/`[k:v]` collection-literal PROTOCOL role markers a method declares (klower's recordProtocol is
+// the lowerer analogue). Mirrored into the member table as a synthetic member `"#lang#<role>"` under the
+// owner so the checker can recognize an opt-in target type (cmIsSeqProto/cmIsMapProto) and accept a literal
+// bound to it, exactly as the lowerer routes it. Only the four protocol roles are mirrored.
+fun cmIsProtoRole(r: String): Bool { return r == "seq.new" || r == "seq.push" || r == "map.new" || r == "map.set" }
+// The two GLOBAL default-collection roles: `@lang("seq.default")`/`@lang("map.default")` name the type a
+// bare `[..]`/`[k:v]` literal builds. Mirrored (like the lowerer's recordProtoRole default branch) under a
+// synthetic `#default` owner keyed by the role, so inferList/inferMap/indexResTy read the declared name
+// instead of a hardcoded "Vec"/"HashMap" — single-sourced from lib exactly as the lowerer's defaultSeqTy.
+fun cmIsDefaultRole(r: String): Bool { return r == "seq.default" || r == "map.default" }
+fun cmLangRoles(mt: CMTab, owner: String, annos: IntBuf): Int {
+  var i = 0
+  while (i < annos.len()) {
+    val a: Anno = annos.get(i)
+    if (a.name == "lang" && a.args.len() > 0) { val r = primAnnoStr(a.args.get(0)); if (cmIsProtoRole(r)) { cmAdd(mt, owner, "#lang#" + r, "role") } else { if (cmIsDefaultRole(r)) { cmAdd(mt, "#default", r, owner) } } }
+    i = i + 1
+  }
+  return 0
+}
+// the type name a bare `[..]`/`[k:v]` literal builds, sourced from lib's @lang("seq.default")/
+// @lang("map.default") (recorded by cmLangRoles under the `#default` owner). The hardcoded default is a
+// never-hit fallback for a prelude with no such annotation, naming the built-in defaults (mirrors the
+// lowerer's roleSymFallback for seq.default/map.default).
+fun cmDefaultTy(mt: CMTab, role: String): String {
+  var i = 0
+  while (i < mt.owner.len()) { if (mt.owner.get(i) == "#default") { if (mt.sel.get(i) == role) { return mt.kind.get(i) } }; i = i + 1 }
+  return ""
+}
+fun cmSeqDefault(mt: CMTab): String { val s = cmDefaultTy(mt, "seq.default"); if (s != "") { return s } return "Vec" }
+fun cmMapDefault(mt: CMTab): String { val s = cmDefaultTy(mt, "map.default"); if (s != "") { return s } return "HashMap" }
+
 // struct/class body or impl-block methods: recv non-empty => instance ("method"); recv empty => "assocfn".
 fun cmMethods(mt: CMTab, owner: String, methods: IntBuf): Int {
   var i = 0
@@ -734,9 +769,22 @@ fun cmMethods(mt: CMTab, owner: String, methods: IntBuf): Int {
     val m: FFunc = methods.get(i)
     if (isConstValFn(m.annos)) { cmAdd(mt, owner, m.name, "const") }
     else { if (m.recv == "") { cmAdd(mt, owner, m.name, "assocfn") } else { cmAdd(mt, owner, m.name, "method") } }
+    cmLangRoles(mt, owner, m.annos)
     i = i + 1
   }
   return 0
+}
+
+// does type `base` carry the FULL `[..]` (resp `[k:v]`) protocol — both the empty-ctor and mutator role
+// markers? The checker mirror of the lowerer's isSeqImplTag/isMapImplTag (minus the instantiation gate,
+// which the lowerer owns): true means a collection literal may be bound to a `base<..>` annotation.
+fun cmIsSeqProto(mt: CMTab, base: String): Bool {
+  val o = cmCanon(mt, base)
+  return cmHasMember(mt, o, "#lang#seq.new") && cmHasMember(mt, o, "#lang#seq.push")
+}
+fun cmIsMapProto(mt: CMTab, base: String): Bool {
+  val o = cmCanon(mt, base)
+  return cmHasMember(mt, o, "#lang#map.new") && cmHasMember(mt, o, "#lang#map.set")
 }
 
 fun cmTraitMethods(mt: CMTab, owner: String, methods: IntBuf): Int {
@@ -1268,6 +1316,15 @@ fun inferIdent(env: TEnv, s: String): Ty {
   while (i < env.funN.len()) { if (env.funN.get(i) == s) { return TFun(env.funP.get(i), env.funR.get(i)) }; i = i + 1 }
   var j = 0
   while (j < env.structN.len()) { if (env.structN.get(j) == s) { return TFun(env.structFT.get(j), TNamed(s, intBuf())) }; j = j + 1 }
+  return TUnknown
+}
+
+// `::name` — an explicit free-function reference, immune to local val shadowing: resolve against the
+// top-level function table ONLY (never a local), yielding its function type. TUnknown if `name` is not a
+// visible free function (the lowerer raises the loud, actionable error for undefined/ambiguous refs).
+fun inferFnRef(env: TEnv, s: String): Ty {
+  var i = 0
+  while (i < env.funN.len()) { if (env.funN.get(i) == s) { return TFun(env.funP.get(i), env.funR.get(i)) }; i = i + 1 }
   return TUnknown
 }
 
@@ -1835,7 +1892,10 @@ fun checkVarargCall(env: TEnv, nm: String, args: IntBuf, fixed: Int): Ty {
         if (isTypeParamTy(pt) == false) { if (adoptArgLit(env, ar.expr, pt)) { 0 } else { if (compat(env.prim, at, pt) == false) { if (subtypeOk(env, at, pt) == false) { tErr(env, "argument type " + (showTy(at) + (" is not compatible with parameter " + showTy(pt)))) } } } } }
     }
     else {
-      if (adoptArgLit(env, ar.expr, elem)) { 0 } else { if (compat(env.prim, at, elem) == false) { if (subtypeOk(env, at, elem) == false) { tErr(env, "vararg argument type " + (showTy(at) + (" is not compatible with element type " + showTy(elem)))) } } }
+      // A generic vararg element type E (a bare type param, e.g. `vararg xs: T` reached via a turbofish
+      // `vecOf::<Int>(..)`) is satisfied by any arg — the concrete E is bound at the call, checked by the
+      // lowerer's monomorphization; only a CONCRETE element type gets the compat/subtype check.
+      if (isTypeParamTy(elem)) { 0 } else { if (adoptArgLit(env, ar.expr, elem)) { 0 } else { if (compat(env.prim, at, elem) == false) { if (subtypeOk(env, at, elem) == false) { tErr(env, "vararg argument type " + (showTy(at) + (" is not compatible with element type " + showTy(elem)))) } } } }
     }
     a = a + 1
   }
@@ -1848,18 +1908,22 @@ fun inferCall(env: TEnv, f: FExpr, args: IntBuf): Ty {
     FESafeField(recv, m) -> { inferMethodOrStaticDot(env, recv, m); inferArgList(env, args); TUnknown }
     else -> {
       val nm = when (f) { FEIdent(s) -> s; else -> "" }
+      // A turbofish call `f::<..>(args)` has an FETypeApp callee — unwrap it to the inner free-fn name so an
+      // `@mono` overload set (incl. a `vararg`) routes through the same overload/vararg logic as a bare call.
+      // Kept separate from `nm` so the secondary-ctor path below (keyed on `nm`) is byte-unchanged.
+      val tnm = when (f) { FEIdent(s) -> s; FETypeApp(inner, t) -> when (inner) { FEIdent(s2) -> s2; else -> "" }; else -> "" }
       // A secondary-constructor call `Owner(args)` whose arity matches a `__ctor_<arity>` factory (not the
       // primary field list) is accepted with the owner type — bypassing the primary-ctor arity check.
       if (cmIsType(env.mtab, nm) && hasSecondaryCtor(env, nm, args.len())) { inferArgList(env, args); TNamed(nm, intBuf()) }
-      else { if (nm != "" && funOverloadCount(env, nm) > 1) {
+      else { if (tnm != "" && funOverloadCount(env, tnm) > 1) {
         // OVERLOADED free function: arity-first + arg-type selection against the overload set (lenient tie).
-        resolveOverloadRet(env, nm, args)
+        resolveOverloadRet(env, tnm, args)
       }
       else {
         // VARARG free function (single definition): accept >= fixed args, check fixed vs params and
         // trailing vs element type E — no strict arity error (the lowerer collects the tail into Array<E>).
-        val vf = if (nm != "") { funVarargFixed(env, nm) } else { 0 - 1 }
-        if (vf >= 0) { checkVarargCall(env, nm, args, vf) }
+        val vf = if (tnm != "") { funVarargFixed(env, tnm) } else { 0 - 1 }
+        if (vf >= 0) { checkVarargCall(env, tnm, args, vf) }
         else {
         val tf = infer(env, f)
         inferArgList(env, args)
@@ -1876,7 +1940,7 @@ fun inferList(env: TEnv, es: IntBuf): Ty {
   var acc = TUnknown
   var i = 0
   while (i < es.len()) { val x: FExpr = es.get(i); acc = joinTy(env.prim, acc, infer(env, x)); i = i + 1 }
-  return TNamed("Vec", cons1(acc))
+  return TNamed(cmSeqDefault(env.mtab), cons1(acc))
 }
 
 // Phase-8 literal FLIP: a `[k:v]` map literal is a first-class `HashMap<K,V>` (was the erased RawMap). K is
@@ -1890,15 +1954,15 @@ fun inferMap(env: TEnv, ents: IntBuf): Ty {
   var i = 0
   while (i < ents.len()) { val en: FMapEnt = ents.get(i); kacc = joinTy(env.prim, kacc, infer(env, en.k)); vacc = joinTy(env.prim, vacc, infer(env, en.v)); i = i + 1 }
   val l = intBuf(); l.push(kacc); l.push(vacc)
-  return TNamed("HashMap", l)
+  return TNamed(cmMapDefault(env.mtab), l)
 }
 
 // the static type of `a[ix]`: `Option<V>` when `a` is a `HashMap<K,V>` (Kotlin `map[k]: V?`), so an
 // unhandled miss surfaces at the type level; every other receiver (RawMap/IntBuf/Vec/String/…) stays the
 // lenient `TUnknown` — the pre-flip index behavior, so RawMap's raw-value indexing is unchanged.
-fun indexResTy(at: Ty): Ty {
+fun indexResTy(mt: CMTab, at: Ty): Ty {
   return when (at) {
-    TNamed(n, args) -> if (n == "HashMap" && args.len() >= 2) { TNamed("Option", cons1(args.get(1))) } else { TUnknown }
+    TNamed(n, args) -> if (n == cmMapDefault(mt) && args.len() >= 2) { TNamed("Option", cons1(args.get(1))) } else { TUnknown }
     else -> TUnknown
   }
 }
@@ -1990,6 +2054,7 @@ fun infer(env: TEnv, e: FExpr): Ty {
     FECont -> TPrim("Nothing")
     FERet(x) -> TPrim("Nothing")
     FEIdent(s) -> inferIdent(env, s)
+    FEFnRef(nm) -> inferFnRef(env, nm)
     FEUnary(op, a) -> inferUnary(env, op, a)
     FEBin(op, a, b) -> inferBinary(env, op, a, b)
     FEElvis(a, b) -> { infer(env, a); infer(env, b) }
@@ -2001,7 +2066,7 @@ fun infer(env: TEnv, e: FExpr): Ty {
     FECast(a, ty) -> inferCast(env, a, ty)
     FEQuestion(a) -> { infer(env, a); TUnknown }
     FECall(f, args) -> inferCall(env, f, args)
-    FEIndex(a, ix) -> { val at = infer(env, a); infer(env, ix); indexResTy(at) }
+    FEIndex(a, ix) -> { val at = infer(env, a); infer(env, ix); indexResTy(env.mtab, at) }
     FEList(es) -> inferList(env, es)
     FEMap(ents) -> inferMap(env, ents)
     FELambda(params, body) -> inferLambda(env, params, body)
@@ -2009,6 +2074,31 @@ fun infer(env: TEnv, e: FExpr): Ty {
     FEWhen(hasSubj, bind, subj, arms) -> inferWhen(env, hasSubj, bind, subj, arms)
     FEBlock(stmts, res) -> inferBlock(env, stmts, res)
     else -> TUnknown
+  }
+}
+
+// the type ARGUMENTS of a named type (`Vec<Int>` -> [Int], `HashMap<K,V>` -> [K,V]); empty for a bare type.
+fun tyArgsOf(t: Ty): IntBuf { return when (t) { TNamed(n, a) -> a; else -> intBuf() } }
+// erased-generic arg compatibility (mirrors compatNamedR's rule): compatible when either side omits its
+// type args, else element-wise compatible.
+fun protoArgsOk(reg: PReg, litArgs: IntBuf, annoArgs: IntBuf): Bool {
+  if (litArgs.len() == 0) { return true }
+  if (annoArgs.len() == 0) { return true }
+  return compatList(reg, litArgs, annoArgs)
+}
+// EXPECTED-TYPE opt-in: a `[..]`/`[k:v]` literal (inferred `it` = Vec<E> / HashMap<K,V>) is assignable to a
+// protocol-implementor annotation `dt` even though its base name differs — this is what lets `val xs:
+// MyList<Int> = [1,2,3]` type-check. The element types are still checked (protoArgsOk), so a wrong-element
+// literal (`MyList<Int> = ["a"]`) is still rejected. Vec/HashMap annotations already pass via plain compat;
+// this only ADDS the user opt-in, so no existing program's diagnostics change.
+fun collectionLitCompat(env: TEnv, init: FExpr, it: Ty, dt: Ty): Bool {
+  return when (dt) {
+    TNamed(n, a) -> when (init) {
+      FEList(es) -> cmIsSeqProto(env.mtab, n) && protoArgsOk(env.prim, tyArgsOf(it), a)
+      FEMap(ents) -> cmIsMapProto(env.mtab, n) && protoArgsOk(env.prim, tyArgsOf(it), a)
+      else -> false
+    }
+    else -> false
   }
 }
 
@@ -2020,6 +2110,9 @@ fun checkLet(env: TEnv, name: String, ty: String, init: FExpr): Int {
   // check, instead of the generic compat test (which would reject Int vs U16 under the tightened rule).
   if (adoptBareIntLit(env, init, dt)) { tBind(env, name, dt); return 0 }
   val it = infer(env, init)
+  // A collection literal bound to an opt-in protocol implementor (`val xs: MyList<Int> = [1,2,3]`) is
+  // accepted before the base-name compat test (which would reject Vec<Int> vs MyList<Int>).
+  if (collectionLitCompat(env, init, it, dt)) { tBind(env, name, dt); return 0 }
   if (compat(env.prim, it, dt) == false) { tErr(env, "cannot assign " + (showTy(it) + (" to " + (showTy(dt) + (" " + name))))) }
   tBind(env, name, dt)
   return 0
@@ -2027,7 +2120,9 @@ fun checkLet(env: TEnv, name: String, ty: String, init: FExpr): Int {
 
 fun checkReturnV(env: TEnv, e: FExpr): Int {
   val t = infer(env, e)
-  if (env.hasRet == 1 && compat(env.prim, t, env.curRet) == false) { if (subtypeOk(env, t, env.curRet) == false) { tErr(env, "return type " + (showTy(t) + (" is not compatible with " + showTy(env.curRet)))) } }
+  // `return [..]`/`[k:v]` from a function whose return type is a protocol implementor (Vec/HashMap or a user
+  // opt-in type) is accepted the same way the `val` binding is.
+  if (env.hasRet == 1 && compat(env.prim, t, env.curRet) == false) { if (collectionLitCompat(env, e, t, env.curRet) == false) { if (subtypeOk(env, t, env.curRet) == false) { tErr(env, "return type " + (showTy(t) + (" is not compatible with " + showTy(env.curRet)))) } } }
   return 0
 }
 
@@ -2073,7 +2168,11 @@ fun checkFun(env: TEnv, fd: FFunc): Int {
   reservedTyErr(env, env.curRet)
   env.hasRet = 1
   val bt = infer(env, fd.body)
-  if (shouldCheckBody(fd.body) && fd.ret != "" && compat(env.prim, bt, env.curRet) == false && tyEqPrim(bt, "Nothing") == false) {
+  // A collection-literal EXPR-BODY (`fun f(): MySeq<Int> = [1,2,3]`) against a protocol-implementor return
+  // type is accepted the same way `checkReturnV` accepts a block-body `return [..]` — element-type compat is
+  // still enforced by collectionLitCompat (a wrong-element literal, or a roleless annotation, still fails),
+  // so this only ADDS the opt-in expr-body form; it never opens a compiles-then-crashes path.
+  if (shouldCheckBody(fd.body) && fd.ret != "" && compat(env.prim, bt, env.curRet) == false && tyEqPrim(bt, "Nothing") == false && collectionLitCompat(env, fd.body, bt, env.curRet) == false) {
     tErr(env, "function " + (fd.name + (" body has type " + (showTy(bt) + (", expected " + showTy(env.curRet))))))
   }
   env.curRet = prevRet
@@ -2188,8 +2287,8 @@ fun shadowDiags(toks: IntBuf): IntBuf {
 
 // checkDiags is the reusable entry: parse a token stream, run name-resolution + type-check, return the
 // combined diagnostics list (empty = clean). No `main` here — kcheck is a LIBRARY now, so it can be
-// quoted-included into kitec.kite alongside klower (which owns `main`). The standalone `kitec check`
-// tool lives in kcheck_main.kite.
+// quoted-included into kitec.kite alongside klower (which owns `main`). The `kitec check` verb (klower's
+// checkOnly) is the entry point that drives it.
 fun checkDiags(toks: IntBuf, skipDup: Int): IntBuf {
   val lines = intBuf()
   val decls = parseProgramLn(toks, lines)

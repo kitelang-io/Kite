@@ -48,10 +48,17 @@ class String(val n: Int, val data: Int) {
   @lang("str.get")
   fun charAt(self, i: Int): Int { return __rawLoadByte(self.data, i) }
 
+  // @lang("str.len"): the for-in bound over a String's bytes resolves here (emitted String_len), the
+  // symmetric partner of str.get so `for (c in s)` is single-sourced from HERE, not a hardcoded name.
+  @lang("str.len")
   fun len(self): Int { return self.n }
 
   // `length` is the getter alias of `len`: a nullary method, so `s.length` (no parens) resolves here.
   fun length(self): Int { return self.n }
+
+  // `s.isEmpty()` — true for the zero-length string. `self.n` is the stored byte count, so `"".isEmpty()`
+  // is true and `"a\x00b".isEmpty()` is false (embedded NUL counts, matching len()).
+  fun isEmpty(self): Bool { return self.n == 0 }
 
   // `s.byteAt(i)`: the core-tier byte accessor (§2c — the T0 self-host iteration primitive, distinct from a
   // future `chars()` that decodes UTF-8). Same load as charAt, named per the design.

@@ -34,7 +34,11 @@ class TreeSet<T>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var e
     else { val nr = self.addAt(__rawLoad(self.right, node * 8), x) __rawStore(self.right, node * 8, nr) }
     return node
   }
-  fun add(self, x: consuming T): Int { self.root = self.addAt(self.root, x) return 0 }
+  // add -> Bool matching HashSet.add: true when x was newly inserted, false when it was already present.
+  // addAt already SHORT-CIRCUITS on a duplicate (`if (x == nx) { return node }`) without calling newNode,
+  // and newNode is the only place self.n grows, so a change in the live count is exactly the newly-inserted
+  // signal threaded up — no extra tree walk.
+  fun add(self, x: consuming T): Bool { val before = self.n self.root = self.addAt(self.root, x) return self.n != before }
   fun contains(self, x: T): Bool {
     var node = self.root
     while (node >= 0) {
@@ -67,19 +71,19 @@ class TreeSet<T>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var e
     self.n = self.n - 1
     return true
   }
-  fun min(self): Option {
+  fun min(self): Option<T> {
     if (self.root < 0) { return None }
     var node = self.root
     while (__rawLoad(self.left, node * 8) >= 0) { node = __rawLoad(self.left, node * 8) }
     return Some(__packedGet::<T>(self.elems, node))
   }
-  fun max(self): Option {
+  fun max(self): Option<T> {
     if (self.root < 0) { return None }
     var node = self.root
     while (__rawLoad(self.right, node * 8) >= 0) { node = __rawLoad(self.right, node * 8) }
     return Some(__packedGet::<T>(self.elems, node))
   }
-  fun floor(self, x: T): Option {
+  fun floor(self, x: T): Option<T> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
@@ -89,7 +93,7 @@ class TreeSet<T>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var e
     if (best < 0) { return None }
     return Some(__packedGet::<T>(self.elems, best))
   }
-  fun ceil(self, x: T): Option {
+  fun ceil(self, x: T): Option<T> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
@@ -99,7 +103,7 @@ class TreeSet<T>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var e
     if (best < 0) { return None }
     return Some(__packedGet::<T>(self.elems, best))
   }
-  fun higher(self, x: T): Option {
+  fun higher(self, x: T): Option<T> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
@@ -109,7 +113,7 @@ class TreeSet<T>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var e
     if (best < 0) { return None }
     return Some(__packedGet::<T>(self.elems, best))
   }
-  fun lower(self, x: T): Option {
+  fun lower(self, x: T): Option<T> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {

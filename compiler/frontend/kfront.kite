@@ -1,17 +1,11 @@
-// compiler/kfront.kite — full-language front-end (lexer + surface AST + parser), F-prefixed.
-
-// stage1/kparse.kite — the Kite parser, written in Kite (Phase B.2 of self-host).
+// compiler/frontend/kfront.kite — full-language front-end (lexer + surface AST + parser), F-prefixed.
 //
-//   source String -> lex -> IntBuf<Tok> -> parse -> AST -> print (printer.ml format)
+//   source String -> lex -> IntBuf<Tok> -> parse -> surface AST (F* nodes)
 //
-// Pretty-prints the parse tree in EXACTLY lib/printer.ml's indented form so it can
-// be diffed against `kitec parse`. Covers: fun declarations (typed params + return
-// type), struct + enum declarations, val/var/return/while/for/assignment/expr
-// statements, if/else expressions, block result-expressions, and the full
-// precedence ladder (|| && ==/!= rel .. +/- */% unary, postfix call/field/::static,
-// primaries int/float/string/bool/null/this/ident/paren/if). Plain bootstrap
-// subset. Not yet: when, trait/impl/class, lambdas, list/map/index, ?:/?./!!,
-// named-payload enum variants, struct bodies (deinit/methods), annotations.
+// Assembled into compiler/kitec.kite (the single build root) and reused as a library by the standalone
+// front-end tools (kprint.kite AST-printer driver, tools/kfmt.kite formatter). Covers the full surface
+// language: fun/val/var/return/while/for/when/if-else, struct/enum/class/trait/impl, lambdas, list/map
+// literals + indexing, ?:/?./!!, named-payload enum variants, annotations, and the full precedence ladder.
 
 struct Tok(val kind: Int, val text: String, val line: Int)
 
@@ -208,7 +202,7 @@ fun readNum(lx: Lx, toks: IntBuf): Int {
 // --- comment RECOGNIZERS (shared single source of truth) --------------------
 // Advance the cursor over one comment body, assuming cur is at its opening. These are the ONLY place
 // comment boundaries are decided: skipTrivia (below) calls them to DISCARD comments, and the standalone
-// formatter (compiler/driver/kfmt.kite) calls the SAME functions to CAPTURE each comment verbatim, so
+// formatter (compiler/tools/kfmt.kite) calls the SAME functions to CAPTURE each comment verbatim, so
 // the two never drift. A `//` line comment stops AT the terminating newline (not consuming it); a
 // `/* */` block comment consumes its matching (nesting-aware) close, or bails at EOF.
 fun scanLineComment(lx: Lx): Int {
@@ -424,6 +418,7 @@ fun lexOp(lx: Lx, toks: IntBuf): Int {
 enum FExpr {
   FEInt(String); FEFloat(String); FEChar(String); FEStr(String, Int); FEBool(String); FENull; FEThis;
   FEIdent(String);
+  FEFnRef(String); // `::name` — an explicit reference to the unique visible free function `name`, immune to val shadowing
   FEUnary(String, FExpr); FEBin(String, FExpr, FExpr);
   FEField(FExpr, String); FEStatic(FExpr, String); FECall(FExpr, IntBuf);
   FESafeField(FExpr, String); FENotNull(FExpr); FEElvis(FExpr, FExpr); FEIndex(FExpr, FExpr); FETypeApp(FExpr, String);
@@ -942,6 +937,7 @@ fun parsePrimary(p: P): FExpr {
   if (k == 7) { eat(p); return FENull }
   if (k == 8) { eat(p); return FEThis }
   if (k == 69) { eat(p); return FEThis } // self (prints "this")
+  if (k == 26) { eat(p); val fn = ptext(p); eat(p); return FEFnRef(fn) } // leading `::name` — explicit fn reference
   val ln = pline(p)
   val name = ptext(p); eat(p)
   val pkd = panicKind(name)
@@ -1374,15 +1370,22 @@ fun parseImport(p: P): String {
   return s
 }
 
-// use mod::name  ->  aliases bare `name` to the module-mangled item in the importing scope
-struct FUse(val mod: String, val name: String)
+// use mod::name [as Alias]  ->  aliases a bare name (default `name`, or the explicit `Alias`) to the
+// module-mangled item `mod__name` in the importing scope. Works for BOTH free functions and TYPES
+// (struct/enum/trait/const) — the target `mod__name` is computed the same way regardless of item kind.
+// The `as`-rename form is unambiguous here: inside a `use` statement, after the item name, `as` can only
+// mean rename (there is no expression to cast), so it never collides with the `e as T` numeric cast
+// (parsed by parseCast in expression position, untouched by this).
+struct FUse(val mod: String, val name: String, val alias: String)
 
 fun parseUse(p: P): FUse {
   eat(p) // 'use'
   val m = ptext(p); eat(p) // module ident
   eat(p) // '::' (token 26)
   val nm = ptext(p); eat(p) // item ident
-  return FUse(m, nm)
+  var alias = nm
+  if (pk(p) == 85) { eat(p); alias = ptext(p); eat(p) } // optional `as Alias` (token 85 = `as`)
+  return FUse(m, nm, alias)
 }
 
 // const val NAME [: Ty] = <constant expression> — the ONE constant syntax (M5). Bare `const` is rejected.
@@ -1714,6 +1717,7 @@ fun printExpr(ind: Int, e: FExpr): Int {
     FENull -> line(ind, "null")
     FEThis -> line(ind, "this")
     FEIdent(nm) -> line(ind, "ident " + nm)
+    FEFnRef(nm) -> line(ind, "fnref ::" + nm)
     FEUnary(o, x) -> lineThen1(ind, "unary " + o, x)
     FEBin(o, l, r) -> printBin(ind, o, l, r)
     FEField(x, nm) -> lineThen1(ind, "field ." + nm, x)

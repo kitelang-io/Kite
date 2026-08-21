@@ -43,7 +43,7 @@ class TreeMap<K, V>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, va
     return node
   }
   fun set(self, k: consuming K, v: consuming V): Int { self.root = self.insertAt(self.root, k, v) return 0 }
-  fun get(self, k: K): Option {
+  fun get(self, k: K): Option<V> {
     var node = self.root
     while (node >= 0) {
       val nk: K = __packedGet::<K>(self.keys, node)
@@ -80,26 +80,26 @@ class TreeMap<K, V>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, va
     __rawStore(self.right, node * 8, nr2)
     return node
   }
-  fun remove(self, k: K): Option {
+  fun remove(self, k: K): Option<V> {
     val g = self.get(k)
     if (g.isNone()) { return None }
     self.root = self.removeAt(self.root, k)
     self.n = self.n - 1
     return g
   }
-  fun min(self): Option {
+  fun min(self): Option<K> {
     if (self.root < 0) { return None }
     var node = self.root
     while (__rawLoad(self.left, node * 8) >= 0) { node = __rawLoad(self.left, node * 8) }
     return Some(__packedGet::<K>(self.keys, node))
   }
-  fun max(self): Option {
+  fun max(self): Option<K> {
     if (self.root < 0) { return None }
     var node = self.root
     while (__rawLoad(self.right, node * 8) >= 0) { node = __rawLoad(self.right, node * 8) }
     return Some(__packedGet::<K>(self.keys, node))
   }
-  fun floor(self, k: K): Option {
+  fun floor(self, k: K): Option<K> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
@@ -110,7 +110,7 @@ class TreeMap<K, V>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, va
     if (best < 0) { return None }
     return Some(__packedGet::<K>(self.keys, best))
   }
-  fun ceil(self, k: K): Option {
+  fun ceil(self, k: K): Option<K> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
@@ -121,7 +121,7 @@ class TreeMap<K, V>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, va
     if (best < 0) { return None }
     return Some(__packedGet::<K>(self.keys, best))
   }
-  fun higher(self, k: K): Option {
+  fun higher(self, k: K): Option<K> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
@@ -132,7 +132,7 @@ class TreeMap<K, V>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, va
     if (best < 0) { return None }
     return Some(__packedGet::<K>(self.keys, best))
   }
-  fun lower(self, k: K): Option {
+  fun lower(self, k: K): Option<K> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {

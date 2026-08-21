@@ -46,6 +46,7 @@ class IntBuf(var n: Int, var cap: Int, var data: USize) {
   @lang("intbuf.len")
   fun len(self): Int { return self.n }
   fun length(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
 
   // Generic higher-order operations — one machine word per element, closures supported. These were the
   // free rangeList/mapList/filterList/foldList/findList/sumList of kite::alloc::collections; folded in as
@@ -63,6 +64,25 @@ class IntBuf(var n: Int, var cap: Int, var data: USize) {
 
 @lang("intbuf.new")
 fun intBuf(): IntBuf { return IntBuf(0, 4, __rawAlloc(4 * 8)) }
+
+// intBuf(xs..) — element-initialized construction sugar: `intBuf(1, 2, 3)` builds a populated IntBuf, a
+// convenient equivalent of the `[..]` literal. This OVERLOADS the 0-arg `@lang("intbuf.new") fun intBuf()`
+// above: an EXACT fixed-arity overload wins over a vararg one (Kotlin semantics), so a bare `intBuf()`
+// still binds the 0-arg constructor and the `@lang` role stays on it (the compiler's own ~388 zero-arg
+// `intBuf()` calls all resolve to the 0-arg version). The vararg tail is collected into a fresh
+// `Array<Int>` — its `Array<T>` template is a sibling prelude module (kite::alloc::collections::array), so
+// it is in scope here with no explicit import. Now a PRELUDE overload: `intBuf(1, 2, 3)` needs no import.
+// This is safe because the committed seed now carries the overload-aware return-tag inference (klower
+// `freeCallRetSym`) that tags an overloaded `intBuf()` result as IntBuf. Moving it here (from the former
+// non-prelude kite::alloc::collections::factory module) legitimately grows the self-host fixpoint by
+// emitting this function into the compiler binary; the invariant is self-reproduction (kcc2==kcc3), not a
+// fixed byte size.
+fun intBuf(vararg xs: Int): IntBuf {
+  val out: IntBuf = intBuf()
+  var i = 0
+  while (i < xs.len()) { out.push(xs.get(i)) i = i + 1 }
+  return out
+}
 
 // rangeList(n) — the list [0, 1, .., n-1]. A top-level IntBuf factory (no receiver), sibling to intBuf().
 fun rangeList(n: Int): IntBuf { val out = intBuf() var i = 0 while (i < n) { out.push(i) i = i + 1 } return out }

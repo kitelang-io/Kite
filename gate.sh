@@ -158,5 +158,32 @@ rm -f "$T/ms_out"
 grep -q "not a valid identifier" "$T/ms_err" || fail "mangled-surface diagnostic not on stderr"
 echo "  String_len(s) --no-check -> exit $rc, no binary, diagnostic on stderr ✓"
 
+echo "=== [robustness] index store x[i]=v on a set-less nominal hard-aborts, no silent raw store (item D) ==="
+IS=compiler/tests/bugs/index-store-no-set-must-abort.kite
+# --no-check exercises the guard this fixture NAMES — klower's lowerIndexStore. A nominal type with `get`
+# but no `set` must NOT fall through to the erased `intbuf.set` role (a __rawStore through the wrong layout,
+# silent corruption); it must lowFail. Asserts non-zero exit + no binary + a stderr diagnostic.
+rm -f "$T/is_out"
+"$T/k2" --no-check "$IS" "$T/is_out" >"$T/is_stdout" 2>"$T/is_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on x[i]=v for a set-less nominal — lowerIndexStore silent-misroute regressed"
+[ -f "$T/is_out" ] && fail "compiler wrote a binary despite x[i]=v on a type with no \`set\` method"
+grep -q "defines no \`set\` method" "$T/is_err" || fail "index-store-no-set diagnostic not on stderr"
+echo "  Bag[0]=9 (no set) --no-check -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] out-of-bounds subscript on a sized-byte array hard-aborts at RUNTIME, no silent heap read (item 6) ==="
+BO=compiler/tests/bugs/bytes-oob-must-abort.kite
+# Unlike the compile-time *-must-abort fixtures above, a bytes OOB is a RUNTIME check: the program COMPILES
+# to a binary (the raw width intrinsics have no static bounds info), and RUNNING it must panic+abort at the
+# out-of-range subscript instead of silently reading heap past the buffer.
+rm -f "$T/bo_out"
+"$T/k2" "$BO" "$T/bo_out" >/dev/null 2>&1
+[ -f "$T/bo_out" ] || fail "compiler failed to build the bytes-OOB fixture (a runtime check — it should compile)"
+chmod +x "$T/bo_out"
+"$T/bo_out" >"$T/bo_stdout" 2>"$T/bo_err"; rc=$?
+[ "$rc" -eq 139 ] && fail "bytes-OOB subscript SEGFAULTED (139) — bytes.kite bounds guard missing (silent heap read)"
+[ "$rc" -eq 0 ] && fail "bytes-OOB subscript returned 0 — no bounds guard on the sized-byte arrays (silent OOB read)"
+grep -q "out of bounds" "$T/bo_err" || fail "bytes-OOB panic diagnostic not on stderr"
+echo "  a[5] on a len-2 U8Array -> exit $rc (abort), 'out of bounds' on stderr ✓"
+
 echo "✅ GATE PASSED (no OCaml, no shared /tmp) — suite green, kcc2==kcc3, robust to malformed input"
 rm -rf "$T"

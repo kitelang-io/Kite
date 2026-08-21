@@ -38,7 +38,7 @@ ULOG="$TMPD/shadow-units.log"
 : > "$ULOG"
 UNITS=(
   compiler/kitec.kite            # the whole self-hosted compiler (includes kfront/kcheck/codegen/backend/klower)
-  compiler/tools/kitefmt.kite    # the kitefmt tool root (includes kfront + driver/kfmt.kite)
+  compiler/tools/kitefmt.kite    # the kitefmt tool root (includes kfront + tools/kfmt.kite)
   compiler/tests/programs/member-table-whitelist.kite  # Phase M2 whitelist fixture (one per selector kind)
 )
 # every lib/ module is self-contained relative to the prelude, so each is a complete unit on its own

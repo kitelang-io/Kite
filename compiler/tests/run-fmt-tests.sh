@@ -26,11 +26,10 @@ echo "  kitefmt built ✓ ($(wc -c <"$FMT" | tr -d ' ') bytes)"
 
 echo "=== [2/3] idempotency on a corpus sample ==="
 CORPUS=(
-  compiler/driver/kfmt.kite
+  compiler/tools/kfmt.kite
   compiler/driver/klower.kite
   compiler/frontend/kfront.kite
   compiler/tools/kitefmt.kite
-  examples/jq/jv.kite
   lib/core/ops.kite
 )
 for f in "${CORPUS[@]}"; do

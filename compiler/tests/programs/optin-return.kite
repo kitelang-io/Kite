@@ -1,0 +1,108 @@
+// optin-return.kite — RETURN-POSITION routing of `[..]`/`[k:v]` collection literals onto a USER opt-in
+// protocol type. Regression for the silent return-position miscompile: a block-body `return [..]` used to
+// build the layout-coincident default Vec/HashMap (ignoring the declared return type), and an expr-body
+// `= [..]` was rejected by the checker. Both must now build the REAL declared return type through the @lang
+// roles — proven by a DISCRIMINATOR: the user mutators store a TRANSFORMED value (seq: x+100, map: v+1000),
+// so a wrong (default-container) build is OBSERVABLE — a Vec build reads back the raw element, the real type
+// reads back the transformed one. The user MAP type (Tally) appears ONLY as a return type (never a `val`
+// annotation), so it proves return-annotation mono seeding instantiates the type on its own. Also guards the
+// built-in DEFAULT Vec/HashMap returns against regression. Exit code = count of passed assertions (23).
+
+@mono
+@arc(manual)
+class Stack<T>(var n: Int, var cap: Int, var buf: RawBuf) {
+  @lang("seq.new")  fun mk(): Stack<T> = Stack::<T>(0, 0, RawBuf(0))
+  @lang("seq.push") fun shove(self, x: Int): Int {
+    if (self.n == self.cap) { if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.buf.data = __rawRealloc(self.buf.data, self.cap * sizeOf::<Int>()) }
+    __packedSet::<Int>(self.buf.data, self.n, x + 100); self.n = self.n + 1; return 0 }
+  fun peek(self, i: Int): Int { return __packedGet::<Int>(self.buf.data, i) }
+  fun depth(self): Int { return self.n }
+}
+
+@mono
+@arc(manual)
+class Tally<K, V>(var n: Int, var cap: Int, var ks: RawBuf, var vs: RawBuf) {
+  @lang("map.new") fun fresh(): Tally<K, V> = Tally::<K, V>(0, 0, RawBuf(0), RawBuf(0))
+  @lang("map.set") fun bump(self, k: K, v: V): Int {
+    if (self.n == self.cap) { if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.ks.data = __rawRealloc(self.ks.data, self.cap * sizeOf::<K>())
+      self.vs.data = __rawRealloc(self.vs.data, self.cap * sizeOf::<V>()) }
+    __packedSet::<K>(self.ks.data, self.n, k)
+    __packedSet::<V>(self.vs.data, self.n, v + 1000)
+    self.n = self.n + 1; return 0 }
+  fun lookup(self, k: K): V {
+    var i = 0
+    while (i < self.n) { if (__packedGet::<K>(self.ks.data, i) == k) { return __packedGet::<V>(self.vs.data, i) } i = i + 1 }
+    return 0 }
+  fun size(self): Int { return self.n }
+}
+
+// USER SEQ returns (block-body, expr-body, empty).
+fun stackBlock(): Stack<Int> { return [5, 6, 7] }
+fun stackExpr(): Stack<Int> = [5, 6, 7]
+fun stackEmptyBlock(): Stack<Int> { return [] }
+
+// USER MAP returns — Tally appears ONLY here, so this exercises return-annotation mono seeding.
+fun tallyBlock(): Tally<Int, Int> { return [1: 10, 2: 20] }
+fun tallyExpr(): Tally<Int, Int> = [1: 10, 2: 20]
+
+// DEFAULT returns — must still build a real Vec / HashMap.
+fun vecBlock(): Vec<Int> { return [10, 20, 30] }
+fun vecExpr(): Vec<Int> = [10, 20, 30]
+fun vecEmpty(): Vec<Int> { return [] }
+fun mapBlock(): HashMap<String, Int> { return ["a": 1, "b": 2] }
+fun mapExpr(): HashMap<String, Int> = ["a": 1, "b": 2]
+
+fun main(): Int {
+  var acc = 0
+
+  // ---- USER SEQ: block-body return builds the REAL Stack (peek reads x+100, not the raw x a Vec would) ----
+  val sb = stackBlock()                               // inferred type: dispatch proves the return table typed it Stack$Int
+  if (sb.depth() == 3) { acc = acc + 1 }             // 1
+  if (sb.peek(0) == 105) { acc = acc + 1 }           // 2  (105 => real Stack; 5 => miscompiled Vec)
+  if (sb.peek(2) == 107) { acc = acc + 1 }           // 3
+
+  // ---- USER SEQ: expr-body return, same discriminator ----
+  val se = stackExpr()
+  if (se.depth() == 3) { acc = acc + 1 }             // 4
+  if (se.peek(0) == 105) { acc = acc + 1 }           // 5
+  if (se.peek(1) == 106) { acc = acc + 1 }           // 6
+
+  // ---- USER SEQ: empty `return []` builds a fresh empty Stack, then grows through its own mutator ----
+  val sz = stackEmptyBlock()
+  if (sz.depth() == 0) { acc = acc + 1 }             // 7
+  sz.shove(9)
+  if (sz.depth() == 1 && sz.peek(0) == 109) { acc = acc + 1 } // 8
+
+  // ---- USER MAP: block-body + expr-body return build the REAL Tally (lookup reads v+1000) ----
+  val tb = tallyBlock()
+  if (tb.size() == 2) { acc = acc + 1 }              // 9
+  if (tb.lookup(1) == 1010) { acc = acc + 1 }        // 10 (1010 => real Tally; 10 => miscompiled HashMap)
+  if (tb.lookup(2) == 1020) { acc = acc + 1 }        // 11
+  val te = tallyExpr()
+  if (te.lookup(1) == 1010) { acc = acc + 1 }        // 12
+
+  // ---- DEFAULT Vec return preserved (block + expr + empty): Vec-only methods still work ----
+  val vb = vecBlock()
+  if (vb.len() == 3) { acc = acc + 1 }               // 13
+  if (vb.get(0) == 10) { acc = acc + 1 }             // 14 (raw value => a real Vec, no transform)
+  if (vb.getOr(9, 77) == 77) { acc = acc + 1 }       // 15 (Vec-only method proves it is a Vec)
+  if (vb.contains(20)) { acc = acc + 1 }             // 16
+  val ve = vecExpr()
+  if (ve.len() == 3 && ve.get(2) == 30) { acc = acc + 1 } // 17
+  val vz = vecEmpty()
+  if (vz.len() == 0) { acc = acc + 1 }               // 18
+  vz.push(5)
+  if (vz.len() == 1 && vz.get(0) == 5) { acc = acc + 1 } // 19
+
+  // ---- DEFAULT HashMap return preserved (block + expr): HashMap-only methods still work ----
+  val mb = mapBlock()
+  if (mb.size() == 2) { acc = acc + 1 }              // 20
+  if (mb.getOr("a", 99) == 1) { acc = acc + 1 }      // 21 (raw value => a real HashMap)
+  if (mb.has("b")) { acc = acc + 1 }                 // 22
+  val me = mapExpr()
+  if (me.getOr("b", 99) == 2) { acc = acc + 1 }      // 23
+
+  return acc                                          // 23
+}

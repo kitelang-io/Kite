@@ -11,6 +11,12 @@
 //
 // Storage note: `data` points at a raw malloc buffer; element i lives at byte offset i*stride. The sized
 // intrinsics compute the address and issue the width-specific load/store, so packing is exact (no *8 waste).
+//
+// BOUNDS: get/set are the `arr[i]` index-sugar targets, and the raw width intrinsics read/write arbitrary
+// heap on a bad index (silent corruption). So every get/set guards `[0, n)` with the shared `panicOOB`
+// funnel first — matching Vec/Array — turning an out-of-range subscript into a HARD abort, never UB. The
+// check is a compare against the already-tracked `n`, so it costs nothing beyond a branch.
+import kite::core::panic
 
 // ---- U8Array: packed unsigned bytes (stride 1), zero-extended on load ----
 @arc(manual)
@@ -24,9 +30,10 @@ class U8Array(var n: Int, var cap: Int, var data: USize) {
     self.n = self.n + 1
     return 0
   }
-  fun get(self, i: Int): Int { return __rawLoadByte(self.data, i) }
-  fun set(self, i: Int, x: consuming Int): Int { __rawStoreByte(self.data, i, x & 0xff) return 0 }
+  fun get(self, i: Int): Int { if (i < 0 || i >= self.n) { panicOOB("U8Array.get", i, self.n) } return __rawLoadByte(self.data, i) }
+  fun set(self, i: Int, x: consuming Int): Int { if (i < 0 || i >= self.n) { panicOOB("U8Array.set", i, self.n) } __rawStoreByte(self.data, i, x & 0xff) return 0 }
   fun len(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
 }
 
 fun u8Array(): U8Array { return U8Array(0, 4, __rawAlloc(4)) }
@@ -43,9 +50,10 @@ class U16Array(var n: Int, var cap: Int, var data: USize) {
     self.n = self.n + 1
     return 0
   }
-  fun get(self, i: Int): Int { return __rawLoad16(self.data, i * 2) }
-  fun set(self, i: Int, x: consuming Int): Int { __rawStore16(self.data, i * 2, x & 0xffff) return 0 }
+  fun get(self, i: Int): Int { if (i < 0 || i >= self.n) { panicOOB("U16Array.get", i, self.n) } return __rawLoad16(self.data, i * 2) }
+  fun set(self, i: Int, x: consuming Int): Int { if (i < 0 || i >= self.n) { panicOOB("U16Array.set", i, self.n) } __rawStore16(self.data, i * 2, x & 0xffff) return 0 }
   fun len(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
 }
 
 fun u16Array(): U16Array { return U16Array(0, 4, __rawAlloc(4 * 2)) }
@@ -62,9 +70,10 @@ class U32Array(var n: Int, var cap: Int, var data: USize) {
     self.n = self.n + 1
     return 0
   }
-  fun get(self, i: Int): Int { return __rawLoad32(self.data, i * 4) }
-  fun set(self, i: Int, x: consuming Int): Int { __rawStore32(self.data, i * 4, x & 0xffffffff) return 0 }
+  fun get(self, i: Int): Int { if (i < 0 || i >= self.n) { panicOOB("U32Array.get", i, self.n) } return __rawLoad32(self.data, i * 4) }
+  fun set(self, i: Int, x: consuming Int): Int { if (i < 0 || i >= self.n) { panicOOB("U32Array.set", i, self.n) } __rawStore32(self.data, i * 4, x & 0xffffffff) return 0 }
   fun len(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
 }
 
 fun u32Array(): U32Array { return U32Array(0, 4, __rawAlloc(4 * 4)) }
@@ -81,9 +90,10 @@ class I8Array(var n: Int, var cap: Int, var data: USize) {
     self.n = self.n + 1
     return 0
   }
-  fun get(self, i: Int): Int { return __rawLoad8S(self.data, i) }
-  fun set(self, i: Int, x: consuming Int): Int { __rawStoreByte(self.data, i, x & 0xff) return 0 }
+  fun get(self, i: Int): Int { if (i < 0 || i >= self.n) { panicOOB("I8Array.get", i, self.n) } return __rawLoad8S(self.data, i) }
+  fun set(self, i: Int, x: consuming Int): Int { if (i < 0 || i >= self.n) { panicOOB("I8Array.set", i, self.n) } __rawStoreByte(self.data, i, x & 0xff) return 0 }
   fun len(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
 }
 
 fun i8Array(): I8Array { return I8Array(0, 4, __rawAlloc(4)) }
@@ -100,9 +110,10 @@ class I16Array(var n: Int, var cap: Int, var data: USize) {
     self.n = self.n + 1
     return 0
   }
-  fun get(self, i: Int): Int { return __rawLoad16S(self.data, i * 2) }
-  fun set(self, i: Int, x: consuming Int): Int { __rawStore16(self.data, i * 2, x & 0xffff) return 0 }
+  fun get(self, i: Int): Int { if (i < 0 || i >= self.n) { panicOOB("I16Array.get", i, self.n) } return __rawLoad16S(self.data, i * 2) }
+  fun set(self, i: Int, x: consuming Int): Int { if (i < 0 || i >= self.n) { panicOOB("I16Array.set", i, self.n) } __rawStore16(self.data, i * 2, x & 0xffff) return 0 }
   fun len(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
 }
 
 fun i16Array(): I16Array { return I16Array(0, 4, __rawAlloc(4 * 2)) }
@@ -119,9 +130,10 @@ class I32Array(var n: Int, var cap: Int, var data: USize) {
     self.n = self.n + 1
     return 0
   }
-  fun get(self, i: Int): Int { return __rawLoad32S(self.data, i * 4) }
-  fun set(self, i: Int, x: consuming Int): Int { __rawStore32(self.data, i * 4, x & 0xffffffff) return 0 }
+  fun get(self, i: Int): Int { if (i < 0 || i >= self.n) { panicOOB("I32Array.get", i, self.n) } return __rawLoad32S(self.data, i * 4) }
+  fun set(self, i: Int, x: consuming Int): Int { if (i < 0 || i >= self.n) { panicOOB("I32Array.set", i, self.n) } __rawStore32(self.data, i * 4, x & 0xffffffff) return 0 }
   fun len(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
 }
 
 fun i32Array(): I32Array { return I32Array(0, 4, __rawAlloc(4 * 4)) }

@@ -1,0 +1,9 @@
+// namespace-TYPES test fixture: module A. Declares a `Foo` type + a `mk`/`greet` free fn whose names
+// deliberately COLLIDE with modb.kite, to prove per-module TYPE namespacing (moda__Foo vs modb__Foo).
+struct Foo(val tag: Int) {
+  fun who(self): Int { return self.tag }
+}
+
+fun mk(n: Int): Foo { return Foo(n) }
+
+fun greet(): Int { return 1 }

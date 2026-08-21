@@ -1,0 +1,15 @@
+// A packed sized-byte array (kite::alloc::collections::bytes) is an `arr[i]` index-sugar target whose raw
+// width intrinsics read/write ARBITRARY heap on a bad index. Before the bounds guard an out-of-range
+// subscript silently corrupted memory (unlike Vec/Array, which panic). This fixture asserts that guard: the
+// program COMPILES to a binary, and RUNNING it hard-aborts (exit 134, "out of bounds" on stderr) at the
+// out-of-range subscript instead of silently loading past the end. Wired into gate.sh as a runtime-abort
+// check (contrast the compile-time *-must-abort fixtures, where the compiler refuses to emit a binary).
+import kite::alloc::collections::bytes
+fun main(): Int {
+  val a = u8Array()
+  a.push(10)
+  a.push(20)
+  // OUT OF BOUNDS (n == 2): must panic+abort, not silently read heap past the buffer.
+  println("${a[5]}")
+  return 0
+}

@@ -36,6 +36,7 @@ class StrBuilder(var n: Int, var cap: Int, var data: USize) {
   fun pushInt(self, v: Int): StrBuilder { self.pushStr(v.toStr()) return self }
   fun byteAt(self, i: Int): Int { return __rawLoadByte(self.data, i) }
   fun size(self): Int { return self.n }
+  fun isEmpty(self): Bool { return self.n == 0 }
   // seal: NUL-terminate, hand the buffer to a fresh String box, and null out `data` so the builder's deinit
   // frees nothing (the String now owns the buffer — no copy, no double free).
   @lang("str.build.finish")

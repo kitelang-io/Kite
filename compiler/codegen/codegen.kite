@@ -479,27 +479,70 @@ fun genVariantNew(ctx: Ctx, variant: String, args: IntBuf): Int {
   return emit(ctx, IPop(0))
 }
 
-fun genCtorPat(ctx: Ctx, v: String, subs: IntBuf, fail: String): Int {
+// The SINGLE type argument of a generic type string ("Option<Box>" -> "Box"); "" when the string has no
+// `<...>`, is unbalanced, or carries MORE than one top-level argument (a top-level comma). Only a lone
+// type arg is unambiguous, so this recovers the payload type of an `Option<T>`-typed `when` subject.
+fun soleTypeArg(ty: String): String {
+  val n = ty.len()
+  var lt = 0 - 1
+  var i = 0
+  while (i < n) { if (ty.charAt(i) == 60) { lt = i; i = n } else { i = i + 1 } }
+  if (lt < 0) { return "" }
+  var depth = 0
+  var comma = 0
+  var gt = 0 - 1
+  var j = lt
+  while (j < n) {
+    val c = ty.charAt(j)
+    if (c == 60) { depth = depth + 1 }
+    else { if (c == 62) { depth = depth - 1; if (depth == 0) { gt = j; j = n } }
+      else { if (c == 44 && depth == 1) { comma = 1 } } }
+    j = j + 1
+  }
+  if (gt < 0 || comma == 1) { return "" }
+  var a = lt + 1
+  while (a < gt && ty.charAt(a) == 32) { a = a + 1 }
+  var b = gt
+  while (b > a && ty.charAt(b - 1) == 32) { b = b - 1 }
+  return ty.substr(a, b - a)
+}
+
+// Choose a payload variable's static type. The enum-level payload type (`Some(v)`'s `v` is erased, so ""; a
+// generic variant's is a bare type-param) can't name a concrete struct — so when the `when` SUBJECT is typed
+// `Option<Box>` (`override` = "Box", a real struct/class), adopt it so `Some(x) -> x.field` resolves the right
+// offset. A DECLARED concrete-struct payload (`JArr(IntBuf)`) wins, and a non-struct override (Option<Int>)
+// is ignored — so only the field-offset-relevant class-payload case is touched (self-host byte-unaffected:
+// the compiler's own `when` subjects are bare enum types with no `<...>`, so override is always "").
+fun payTyChoose(gen: Gen, declTy: String, override: String): String {
+  if (override == "") { return declTy }
+  if (isStructName(gen, override) == false) { return declTy }
+  if (isStructName(gen, declTy)) { return declTy }
+  return override
+}
+
+fun genCtorPat(ctx: Ctx, v: String, subs: IntBuf, fail: String, payTy: String): Int {
   emit(ctx, ILoadTop(0)); emit(ctx, ILoadOff(1, 0, 0)); loadImm(ctx, 2, variantTag(ctx.gen, v))
   emit(ctx, ICmp(1, 2)); emit(ctx, IJmpCondL("ne", fail))
   var j = 0
   while (j < subs.len()) {
     val sp: Pat = subs.get(j)
     // bind the payload slot AND record its static type, so field access on it resolves the right offset
-    // (without this, an enum-payload struct var had type "" → fieldOff fell back to offset 0).
-    when (sp) { PBindP(name) -> { emit(ctx, ILoadOff(1, 0, 8 + j * 8)); stFp(ctx, 1, slotOf(ctx, name)); val ptys = variantTysOf(ctx.gen, v); if (j < ptys.len()) { setLty(ctx, name, ptys.get(j)) }; 0 } else -> 0 }
+    // (without this, an enum-payload struct var had type "" → fieldOff fell back to offset 0). For a single
+    // payload whose enum-level type is erased/generic, the concrete `payTy` recovered from the subject's
+    // `Option<T>` type wins (payTyChoose), so `Some(x) -> x.field` off `m.get(k)`/`m[k]` reads the right field.
+    when (sp) { PBindP(name) -> { emit(ctx, ILoadOff(1, 0, 8 + j * 8)); stFp(ctx, 1, slotOf(ctx, name)); val ptys = variantTysOf(ctx.gen, v); val declTy = if (j < ptys.len()) { ptys.get(j) } else { "" }; val useTy = if (j == 0) { payTyChoose(ctx.gen, declTy, payTy) } else { declTy }; if (useTy != "") { setLty(ctx, name, useTy) }; 0 } else -> 0 }
     j = j + 1
   }
   return 0
 }
 
-fun testAndBind(ctx: Ctx, pat: Pat, fail: String): Int {
+fun testAndBind(ctx: Ctx, pat: Pat, fail: String, payTy: String): Int {
   return when (pat) {
     PWild -> 0
     PBindP(name) -> { emit(ctx, ILoadTop(0)); stFp(ctx, 0, slotOf(ctx, name)) }
     PIntP(t) -> { emit(ctx, ILoadTop(0)); loadImm(ctx, 1, parseIntK(t)); emit(ctx, ICmp(0, 1)); emit(ctx, IJmpCondL("ne", fail)) }
     PVarP(v) -> { emit(ctx, ILoadTop(0)); emit(ctx, ILoadOff(0, 0, 0)); loadImm(ctx, 1, variantTag(ctx.gen, v)); emit(ctx, ICmp(0, 1)); emit(ctx, IJmpCondL("ne", fail)) }
-    PCtorP(v, subs) -> genCtorPat(ctx, v, subs, fail)
+    PCtorP(v, subs) -> genCtorPat(ctx, v, subs, fail, payTy)
     else -> 0
   }
 }
@@ -508,11 +551,15 @@ fun genWhenE(ctx: Ctx, subj: Expr, arms: IntBuf): Int {
   val l = fresh(ctx)
   val lend = "Lwend_" + l.toStr()
   genExpr(ctx, subj); emit(ctx, IPush(0))
+  // Recover the concrete payload type from the subject's static type: `m.get(k)`/`m[k]` is typed
+  // `Option<Box>` (the @mono method return type now carries its substituted arg), so a `Some(x)` arm binds
+  // `x: Box`. "" for a bare/erased subject — the payload then keeps its enum-declared type (unchanged).
+  val payTy = soleTypeArg(typeNameOf(ctx, subj))
   var i = 0
   while (i < arms.len()) {
     val arm: Arm = arms.get(i)
     val lnext = "Lwn_" + (l.toStr() + ("_" + i.toStr()))
-    if (arm.isElse == 0) { testAndBind(ctx, arm.pat, lnext) }
+    if (arm.isElse == 0) { testAndBind(ctx, arm.pat, lnext, payTy) }
     emit(ctx, IStackFree(16)); genExpr(ctx, arm.body); emit(ctx, ICallL(lend)); emit(ctx, ILabel(lnext))
     i = i + 1
   }
@@ -651,6 +698,44 @@ fun genPrintFloat(ctx: Ctx, e: Expr, fmtLab: String): Int {
   emit(ctx, IStackAlloc(16)); emit(ctx, IFStoreD(0, 31, 0))
   emit(ctx, ISymHi(0, fmtLab)); emit(ctx, ISymLo(0, 0, fmtLab)); emit(ctx, ICallSym("_printf"))
   emit(ctx, IStackFree(16)); return emit(ctx, IZero(0))
+}
+
+// floatToStr(d): render a boxed Double to an owned boxed String, matching the "%g" (precision-6) rendering
+// that println/print use for a float (Lfmt_print_f) — so `"$d"` interpolation agrees with `println(d)`.
+// snprintf("%g", d) into a 32-byte stack scratch buffer, then ___mkStr(buf, strlen(buf)) copies it to an
+// owned heap String. Stack layout under a 48-byte frame: [sp+0]=the variadic double (Apple varargs read
+// the first stack vararg from sp, exactly as genPrintFloat does), [sp+16..47]=the output buffer. snprintf's
+// three FIXED args (str,size,fmt) go in x0/x1/x2; its one %g vararg (the double) is read from [sp+0].
+fun genFloatToStr(ctx: Ctx, e: Expr): Int {
+  genExpr(ctx, e); emit(ctx, IFLoadD(0, 0, 0))       // x0 = box ptr -> d0 = *box (the double)
+  emit(ctx, IStackAlloc(48)); emit(ctx, IFStoreD(0, 31, 0)) // reserve frame; store the vararg double at [sp+0]
+  emit(ctx, IAddImm(0, 31, 16))                      // x0 = str  = sp+16 (output buffer)
+  loadImm(ctx, 1, 32)                                // x1 = size = 32
+  emit(ctx, ISymHi(2, "Lfmt_print_f")); emit(ctx, ISymLo(2, 2, "Lfmt_print_f")) // x2 = fmt = "%g"
+  emit(ctx, ICallSym("_snprintf"))
+  emit(ctx, IAddImm(0, 31, 16))                      // x0 = buf again (sp restored by the call)
+  emit(ctx, IPush(0))                                // save buf ptr (x0 stays live for strlen)
+  emit(ctx, ICallSym("_strlen")); emit(ctx, IMov(1, 0)) // x1 = strlen(buf)
+  emit(ctx, IPop(0))                                 // x0 = buf ptr
+  emit(ctx, ICallSym("___mkStr"))                    // x0 = owned boxed String
+  emit(ctx, IStackFree(48)); return 0
+}
+
+// boolToStr(b): render a Bool (0/1 word) to the Kotlin literal "false"/"true" as an owned boxed String —
+// the interpolation renderer for a Bool tag (`"$b"` -> "true"/"false", not the integers "1"/"0"). Branches
+// on the word (mirrors genIf) and materializes the matching String literal via genStrLit (___mkStr).
+fun genBoolToStr(ctx: Ctx, e: Expr): Int {
+  val l = fresh(ctx)
+  val lfalse = "Lbf_" + l.toStr()
+  val lend = "Lbe_" + l.toStr()
+  genExpr(ctx, e)                       // x0 = 0 (false) / nonzero (true)
+  emit(ctx, IJmpZeroL(0, lfalse))
+  genStrLit(ctx, "true")                // true branch -> boxed "true"
+  emit(ctx, ICallL(lend))
+  emit(ctx, ILabel(lfalse))
+  genStrLit(ctx, "false")               // false branch -> boxed "false"
+  emit(ctx, ILabel(lend))
+  return 0
 }
 
 fun isStrExpr(ctx: Ctx, e: Expr): Bool {
@@ -977,18 +1062,19 @@ fun genFreeObj(ctx: Ctx, p: Expr): Int {
 // word-lists whose elements can't be retained (and the compiler nests containers, so a naive deep-release
 // would double-free), and String is an immutable literal-or-heap word we never ref-count. BOTH ARC sites
 // consult this ONE predicate — klower's isClassTag (auto retain/release) via isBuiltinNominal, and codegen's
-// isRelField (deep-release) — so the exempt set is defined in exactly one place. Listing String here is a
-// no-op for isRelField (String is never a registered struct, so isStructName is already false); it just
-// keeps the two former copies from diverging. The exempt set is now SOURCED FROM lib/: types tagged
-// `@arc(manual)` in the prelude are collected during injectHelpers into the arcE list, threaded to both
-// ARC sites (klower's isBuiltinNominal/isClassTag via lo.arcE, codegen's isRelField via gen.arcE). The
-// hardcoded isArcExemptLit below survives ONLY as a never-hit fallback for an EMPTY arcE (e.g. the
-// standalone genProgram entry that builds a Gen with no tables) — the populated set is byte-identical
-// to {IntBuf, RawMap, String}, so emission is unchanged (kcc2==kcc3 holds).
-fun isArcExemptLit(t: String): Bool { return t == "IntBuf" || t == "RawMap" || t == "String" }
-
+// isRelField (deep-release) — so the exempt set is defined in exactly one place. The exempt set is SOURCED
+// FROM lib/: types tagged `@arc(manual)` in the prelude are collected during injectHelpers into the arcE
+// list, threaded to both ARC sites (klower's isBuiltinNominal/isClassTag via lo.arcE, codegen's isRelField
+// via gen.arcE). lib today tags ~15 types @arc(manual) (RawBuf, IntBuf, RawMap, String, the Vec/Array/Deque/
+// HashMap/… value containers, …) — so the exempt set is NO LONGER the old {IntBuf, RawMap, String} triple;
+// the former hardcoded `isArcExemptLit` copy (which named only those three) was DELETED because it had
+// silently drifted from the lib-sourced set and would misclassify the other ~12 if ever consulted.
+// An EMPTY arcE reaching this predicate is therefore a decouple DESYNC (a field was deep-release-classified
+// before the @arc(manual) set was collected), never a valid state, so we hard-abort rather than fall back
+// to a stale guess. The standalone genProgram entry (empty tables) never reaches here: isRelField short-
+// circuits on its empty struct table first, so isArcExemptIn is not called at all.
 fun isArcExemptIn(arcE: IntBuf, t: String): Bool {
-  if (arcE.len() == 0) { return isArcExemptLit(t) }
+  if (arcE.len() == 0) { eprintln("codegen: ARC-exemption set empty (@arc(manual) decouple desync) — cannot classify deep-release"); __abort() }
   var i = 0
   while (i < arcE.len()) { if (arcE.get(i) == t) { return true }; i = i + 1 }
   return false
@@ -1044,6 +1130,7 @@ fun intrinsicFloor(): IntBuf {
   f.push("__rawLoad8S"); f.push("__rawLoad16S"); f.push("__rawLoad32S")
   f.push("__funcAddr"); f.push("__closGet"); f.push("__closNew"); f.push("__closCall")
   f.push("println"); f.push("print"); f.push("printlnF"); f.push("printF")
+  f.push("floatToStr"); f.push("boolToStr")
   f.push("eprintln"); f.push("eprint")
   f.push("readFile"); f.push("writeFile"); f.push("fopenW"); f.push("fputByte"); f.push("fcloseF")
   return f
@@ -1065,6 +1152,8 @@ fun floorRetTag(nm: String): String {
   if (nm == "toFloat") { return "Float" }
   if (nm == "writeFile" || nm == "fopenW" || nm == "fputByte" || nm == "fcloseF" || nm == "toInt") { return "Int" }
   if (nm == "String_eq" || nm == "__isUnique") { return "Bool" }
+  if (nm == "floatToStr") { return "String" } // Double -> owned String (interpolation renderer, %g)
+  if (nm == "boolToStr") { return "String" }  // Bool -> owned String (interpolation renderer, "true"/"false")
   return ""
 }
 
@@ -1103,6 +1192,8 @@ fun genCall(ctx: Ctx, name: String, args: IntBuf): Int {
   if (name == "print" && args.len() == 1) { genPrintln(ctx, aAt(args, 0), "Lfmt_print_s", "Lfmt_print"); return 0 }
   if (name == "printlnF" && args.len() == 1) { return genPrintFloat(ctx, aAt(args, 0), "Lfmt_println_f") }
   if (name == "printF" && args.len() == 1) { return genPrintFloat(ctx, aAt(args, 0), "Lfmt_print_f") }
+  if (name == "floatToStr" && args.len() == 1) { return genFloatToStr(ctx, aAt(args, 0)) }
+  if (name == "boolToStr" && args.len() == 1) { return genBoolToStr(ctx, aAt(args, 0)) }
   if (name == "eprintln" && args.len() == 1) { return genEStderr(ctx, aAt(args, 0), 1) }
   if (name == "eprint" && args.len() == 1) { return genEStderr(ctx, aAt(args, 0), 0) }
   // IntBuf/string ops (listNew/listPush/listGet/listSet/listLen, strLen/charAt/strEq/concat/substr/
@@ -1351,11 +1442,27 @@ fun buildRelRoutine(gen: Gen, name: String): Func {
   return Func("__rel_" + name, ps, pts, EBlock(body, ENoRes))
 }
 
-fun genRelRoutines(gen: Gen): Int {
+// set of ACTUALLY-LOWERED function names (from the emitted Func list). A @mono TEMPLATE's methods carry
+// signatures in gen.funN but are DROPPED before lowering (only the specialized `Vec$T_*` bodies exist), so
+// a template struct that has a `deinit` (e.g. Vec) would otherwise make hasDeinit() true and trigger a
+// ___rel_<template> that CALLS the dropped `<template>_deinit` — a dangling symbol (dyld abort). Gating
+// rel-routine generation on "the deinit body was really lowered" excludes exactly those template structs
+// while keeping every real type (including each `Vec$Box` instantiation) unchanged.
+fun loweredNames(funcs: IntBuf): IntBuf {
+  val out = intBuf()
+  var i = 0
+  while (i < funcs.len()) { val f: Func = funcs.get(i); out.push(f.name); i = i + 1 }
+  return out
+}
+
+fun genRelRoutines(gen: Gen, lowered: IntBuf): Int {
   var i = 0
   while (i < gen.structN.len()) {
     val nm: String = gen.structN.get(i)
-    if (structNeedsRel(gen, nm)) { genFun(gen, buildRelRoutine(gen, nm)) }
+    // A struct needs a rel routine if it has a releasable ref field, OR it has a deinit whose body was
+    // actually lowered (skips the dropped @mono-template deinit that would dangle ___rel_<template>).
+    val needs = structHasRefField(gen, nm) || (hasDeinit(gen, nm) && containsStr(lowered, nm + "_deinit"))
+    if (needs) { genFun(gen, buildRelRoutine(gen, nm)) }
     i = i + 1
   }
   return 0
@@ -1365,7 +1472,7 @@ fun genProgramG(funcs: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBu
   val gen = Gen(intBuf(), 0, intBuf(), intBuf(), 0, structN, structF, structFT, variantN, variantTag, variantTys, funN, funRet, arcE)
   var i = 0
   while (i < funcs.len()) { val f: Func = funcs.get(i); genFun(gen, f); i = i + 1 }
-  genRelRoutines(gen)
+  genRelRoutines(gen, loweredNames(funcs))
   return gen
 }
 

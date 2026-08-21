@@ -1,0 +1,170 @@
+// LOOP-SCOPED ARC: a class local declared INSIDE a loop body is released at the END OF EACH ITERATION
+// (natural fall-through, `continue`, and `break`), not accumulated until the enclosing function returns.
+//
+// Before this tier, such a local was released only at function-scope exit — its slot overwritten each
+// iteration — so aliasing/constructing a class value in a loop leaked +1 per cycle (rc grew unboundedly).
+//
+// PROOF METHOD:
+//   (a) rc BALANCE — a helper runs a loop whose dead body-local aliases a Box PARAMETER (each iteration
+//       retains it); after the helper returns, __refcount(box) must equal its pre-call value. A per-cycle
+//       leak would GROW the count; a double-free would CRASH or corrupt it. Stress loops (50x100) amplify.
+//   (b) EXACTLY-ONCE FREE — a helper constructs a FRESH Tracked each iteration (never referenced). Each is
+//       released at the back-edge -> rc 0 -> its deinit bumps a shared counter. After n iterations the
+//       counter is EXACTLY n: < n would be a leak, > n a double-free.
+//   (c) break / continue paths release too (counter still exact).
+//   (d) ESCAPE — a body-local that IS referenced (returned / read) is conservatively LEFT function-scoped:
+//       it must remain VALID after the loop (no per-iteration release -> no use-after-free).
+// Exit code = the number of passing assertions.
+
+class Box(var v: Int) { }
+
+class Tracked(var v: Int, var log: IntBuf) {
+  deinit { self.log.set(0, self.log.get(0) + 1) }
+}
+
+// while: dead body-local aliases the parameter -> retained each iteration, released at the back-edge.
+fun whileAlias(b: Box, n: Int): Int {
+  var i = 0
+  while (i < n) { val a = b i = i + 1 }
+  return 0
+}
+
+// for-range: dead body-local alias over a counted loop.
+fun forRangeAlias(b: Box, n: Int): Int {
+  var acc = 0
+  for (k in 0..<n) { val a = b acc = acc + 1 }
+  return acc
+}
+
+// continue: after the first few iterations the tail is skipped via `continue`; the dead local created this
+// iteration must still be released on that path.
+fun contAlias(b: Box, n: Int): Int {
+  var i = 0
+  while (i < n) {
+    val a = b
+    i = i + 1
+    if (i > 5) { continue }
+  }
+  return 0
+}
+
+// break: the dead local created in the breaking iteration must be released on the break path.
+fun breakAlias(b: Box, n: Int): Int {
+  var i = 0
+  while (i < n) {
+    val a = b
+    i = i + 1
+    if (i > 5) { break }
+  }
+  return 0
+}
+
+// fresh construction: a brand-new Tracked each iteration (never referenced) -> freed at the back-edge, so
+// its deinit runs exactly once per iteration.
+fun freshLoop(log: IntBuf, n: Int): Int {
+  var i = 0
+  while (i < n) { val t = Tracked(i, log) i = i + 1 }
+  return 0
+}
+
+// fresh construction with `continue` past the tail.
+fun freshCont(log: IntBuf, n: Int): Int {
+  var i = 0
+  while (i < n) {
+    val t = Tracked(i, log)
+    i = i + 1
+    if (i > 3) { continue }
+  }
+  return 0
+}
+
+// fresh construction with `break`.
+fun freshBreak(log: IntBuf, n: Int): Int {
+  var i = 0
+  while (i < n) {
+    val t = Tracked(i, log)
+    i = i + 1
+    if (i > 3) { break }
+  }
+  return 0
+}
+
+// ESCAPE: the body-local is READ (a.v) and its value returned. It is referenced, so it is conservatively
+// left function-scoped (never per-iteration released) and MUST stay valid through the return — no UAF.
+fun escapeReturn(b: Box, lim: Int): Int {
+  var i = 0
+  while (i < 100) {
+    val a = b
+    i = i + 1
+    if (i >= lim) { return a.v }
+  }
+  return 0 - 1
+}
+
+fun main(): Int {
+  var acc = 0
+  val b = Box(42)
+  if (__refcount(b) == 1) { acc = acc + 1 } // 1: fresh
+
+  // ---- while: dead body-local released per iteration ----
+  whileAlias(b, 100)
+  if (__refcount(b) == 1) { acc = acc + 1 } // 2: back to baseline (was +100/call)
+  var t = 0
+  while (t < 50) { whileAlias(b, 100) t = t + 1 }
+  if (__refcount(b) == 1) { acc = acc + 1 } // 3: 50x100 iters — no accumulation, no double-free
+  if (b.v == 42) { acc = acc + 1 } // 4: alive, uncorrupted
+
+  // ---- for-range ----
+  forRangeAlias(b, 99)
+  if (__refcount(b) == 1) { acc = acc + 1 } // 5
+  if (b.v == 42) { acc = acc + 1 } // 6
+
+  // ---- continue ----
+  contAlias(b, 100)
+  if (__refcount(b) == 1) { acc = acc + 1 } // 7
+  var c = 0
+  while (c < 50) { contAlias(b, 100) c = c + 1 }
+  if (__refcount(b) == 1) { acc = acc + 1 } // 8: continue path balanced under stress
+  if (b.v == 42) { acc = acc + 1 } // 9
+
+  // ---- break ----
+  breakAlias(b, 100)
+  if (__refcount(b) == 1) { acc = acc + 1 } // 10
+  var k = 0
+  while (k < 50) { breakAlias(b, 100) k = k + 1 }
+  if (__refcount(b) == 1) { acc = acc + 1 } // 11: break path balanced under stress
+  if (b.v == 42) { acc = acc + 1 } // 12
+
+  // ---- fresh construction: deinit runs EXACTLY once per iteration ----
+  val log = intBuf()
+  log.push(0)
+  freshLoop(log, 100)
+  if (log.get(0) == 100) { acc = acc + 1 } // 13: exactly 100 frees (no leak, no double-free)
+  freshLoop(log, 100)
+  if (log.get(0) == 200) { acc = acc + 1 } // 14: exactly 100 more
+
+  // fresh + continue: iterations 1..n each construct one Tracked, all freed (continue path too)
+  val log2 = intBuf()
+  log2.push(0)
+  freshCont(log2, 100)
+  if (log2.get(0) == 100) { acc = acc + 1 } // 15
+
+  // fresh + break: iterations run until i>3 (i reaches 4), so 4 constructions, all freed
+  val log3 = intBuf()
+  log3.push(0)
+  freshBreak(log3, 100)
+  if (log3.get(0) == 4) { acc = acc + 1 } // 16: 4 constructed & freed on the break path
+  var f = 0
+  while (f < 50) { freshBreak(log3, 100) f = f + 1 }
+  if (log3.get(0) == 204) { acc = acc + 1 } // 17: 4 + 50*4 = 204, exactly-once under stress
+
+  // ---- ESCAPE: referenced body-local stays valid (function-scoped, no per-iteration release) ----
+  val r = escapeReturn(b, 10)
+  if (r == 42) { acc = acc + 1 } // 18: escaping value read correctly (no UAF)
+  if (b.v == 42) { acc = acc + 1 } // 19: still alive
+  var e = 0
+  while (e < 50) { escapeReturn(b, 10) e = e + 1 }
+  if (b.v == 42) { acc = acc + 1 } // 20: no corruption under stress
+
+  return acc
+}

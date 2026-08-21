@@ -1,0 +1,117 @@
+// optin-literal.kite — the `[..]` / `[k:v]` collection-literal PROTOCOL (opt-in for USER types).
+//
+// A USER type opts a `[a, b, c]` (resp. `[k: v]`) literal onto itself with @lang roles — NO compiler
+// knowledge of the type name. It declares an ASSOCIATED empty-constructor tagged @lang("seq.new") (resp.
+// @lang("map.new")) that the desugar calls, plus a mutator tagged @lang("seq.push") (resp @lang("map.set"))
+// that the desugar appends each element/entry through. In an EXPECTED-`MyType` context (an annotation /
+// return type) a literal then routes to THAT type:
+//   val xs: MyList<Int> = [1, 2, 3]  ==>  { val _t = MyList$Int_new(); _t.add(1); _t.add(2); _t.add(3); _t }
+// This test proves: (1) a USER `[..]` type builds + reads back correctly, (2) a USER `[k:v]` map type does
+// too, (3) the built value is REALLY the user type (a marker method Vec/HashMap do not have), and (4) the
+// built-in DEFAULTS still work: a bare `[1,2,3]` is a Vec<Int>, a bare `["a":1]` is a HashMap<String,Int>.
+// Exit code = count of passed assertions.
+
+// A user growable list. Deliberately named methods `new`/`add`/`at`/`count` (NOT empty/push/get/len) so the
+// routing is proven to follow the @lang ROLES, not a hardcoded selector name. @arc(manual): the handle
+// leaks at scope exit (process teardown reclaims it) — keeps the test's ARC trivial, like HashMap.
+@mono
+@arc(manual)
+class MyList<T>(var n: Int, var cap: Int, var buf: RawBuf) {
+  @lang("seq.new")
+  fun new(): MyList<T> = MyList::<T>(0, 0, RawBuf(0))
+  @lang("seq.push")
+  fun add(self, x: T): Int {
+    if (self.n == self.cap) {
+      if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.buf.data = __rawRealloc(self.buf.data, self.cap * sizeOf::<T>())
+    }
+    __packedSet::<T>(self.buf.data, self.n, x)
+    self.n = self.n + 1
+    return 0
+  }
+  fun at(self, i: Int): T { return __packedGet::<T>(self.buf.data, i) }
+  fun count(self): Int { return self.n }
+  fun marker(self): Int { return 424242 }   // proves the value is a MyList, not a Vec
+}
+
+// A user two-column map (parallel arrays, linear scan — tiny, correctness only). Named `create`/`put`/
+// `lookup`/`size` to again prove the role binding, not a name convention. @mono over (K, V) exercises the
+// MULTI-PARAM turbofish self-construction in the @lang("map.new") ctor (`MyMap::<K, V>(..)`).
+@mono
+@arc(manual)
+class MyMap<K, V>(var n: Int, var cap: Int, var ks: RawBuf, var vs: RawBuf) {
+  @lang("map.new")
+  fun create(): MyMap<K, V> = MyMap::<K, V>(0, 0, RawBuf(0), RawBuf(0))
+  @lang("map.set")
+  fun put(self, k: K, v: V): Int {
+    if (self.n == self.cap) {
+      if (self.cap == 0) { self.cap = 4 } else { self.cap = self.cap * 2 }
+      self.ks.data = __rawRealloc(self.ks.data, self.cap * sizeOf::<K>())
+      self.vs.data = __rawRealloc(self.vs.data, self.cap * sizeOf::<V>())
+    }
+    __packedSet::<K>(self.ks.data, self.n, k)
+    __packedSet::<V>(self.vs.data, self.n, v)
+    self.n = self.n + 1
+    return 0
+  }
+  fun lookup(self, k: K): V {
+    var i = 0
+    while (i < self.n) { if (__packedGet::<K>(self.ks.data, i) == k) { return __packedGet::<V>(self.vs.data, i) } i = i + 1 }
+    return __packedGet::<V>(self.vs.data, 0)
+  }
+  fun size(self): Int { return self.n }
+  fun marker(self): Int { return 999 }   // proves the value is a MyMap, not a HashMap
+}
+
+fun main(): Int {
+  var acc = 0
+
+  // (1) USER `[..]` type via an expected annotation -> MyList<Int>, built through the @lang roles.
+  val xs: MyList<Int> = [1, 2, 3]
+  if (xs.count() == 3) { acc = acc + 1 }               // 1
+  if (xs.at(0) == 1) { acc = acc + 1 }                 // 2
+  if (xs.at(2) == 3) { acc = acc + 1 }                 // 3
+  if (xs.marker() == 424242) { acc = acc + 1 }         // 4  (really a MyList, not a Vec)
+  xs.add(4)
+  if (xs.count() == 4 && xs.at(3) == 4) { acc = acc + 1 } // 5
+
+  // read-back loop over the user seq (its own at/count surface).
+  var s = 0
+  var i = 0
+  while (i < xs.count()) { s = s + xs.at(i) i = i + 1 } // 1+2+3+4 = 10
+  if (s == 10) { acc = acc + 1 }                       // 6
+
+  // a USER seq of a DIFFERENT element type (String) — a second monomorphization.
+  val ws: MyList<String> = ["ab", "cde"]
+  if (ws.count() == 2) { acc = acc + 1 }               // 7
+  if (ws.at(1).len() == 3) { acc = acc + 1 }           // 8
+
+  // empty `[]` bound to the user type -> a fresh empty MyList (zero pushes), then grown.
+  val es: MyList<Int> = []
+  if (es.count() == 0) { acc = acc + 1 }               // 9
+  es.add(7)
+  if (es.count() == 1 && es.at(0) == 7) { acc = acc + 1 } // 10
+
+  // (2) USER `[k:v]` map type via an expected annotation -> MyMap<String,Int>, via the @lang roles.
+  val m: MyMap<String, Int> = ["a": 1, "b": 2, "c": 3]
+  if (m.size() == 3) { acc = acc + 1 }                 // 11
+  if (m.lookup("a") == 1) { acc = acc + 1 }            // 12
+  if (m.lookup("c") == 3) { acc = acc + 1 }            // 13
+  if (m.marker() == 999) { acc = acc + 1 }             // 14  (really a MyMap, not a HashMap)
+  m.put("d", 4)
+  if (m.size() == 4 && m.lookup("d") == 4) { acc = acc + 1 } // 15
+
+  // (3) DEFAULT preserved: a bare `[1,2,3]` (no expected user type) is still a Vec<Int>.
+  val dv = [10, 20, 30]
+  if (dv.len() == 3) { acc = acc + 1 }                 // 16
+  if (dv.getOr(9, 77) == 77) { acc = acc + 1 }         // 17  (Vec-only method: proves it's a Vec)
+  if (dv.contains(20)) { acc = acc + 1 }               // 18
+
+  // (4) DEFAULT preserved: a bare `["a":1]` is still a HashMap<String,Int>.
+  val dm = ["a": 1, "b": 2]
+  if (dm.size() == 2) { acc = acc + 1 }                // 19
+  if (dm.getOr("a", 99) == 1) { acc = acc + 1 }        // 20  (HashMap-only: proves it's a HashMap)
+  if (dm.has("b")) { acc = acc + 1 }                   // 21
+
+  return acc
+}

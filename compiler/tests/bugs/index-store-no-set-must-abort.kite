@@ -1,0 +1,19 @@
+// DECOUPLE AUDIT item D regression: `x[i] = v` on a NON-default nominal type that defines NO `set` method
+// must HARD-FAIL the build, never silently __rawStore through the erased IntBuf layout.
+//
+// Before the fix, klower's lowerIndexStore fell through to the `intbuf.set` role for any tag it did not
+// recognize — so a user type (here `Bag`, which has `get` but no `set`) had `b[0] = 9` lowered to a raw
+// store through the WRONG layout: silent memory corruption (exactly the Deque `dq[i]=v` bug that was fixed
+// by giving Deque a `set`). Now lowerIndexStore requires a real `set` (the by-name `<T>_set` method or a
+// `@lang("map.set")` selector) on any non-default nominal, and lowFail-aborts otherwise: non-zero exit, no
+// binary, a stderr diagnostic. The genuine erased IntBuf kernel ("" / "?" / "IntBuf") still uses intbuf.set.
+class Bag(var n: Int) {
+  fun get(self, i: Int): Int { return self.n + i }
+}
+
+fun main(): Int {
+  val b = Bag(5)
+  b[0] = 9
+  println(b.get(0))
+  return 0
+}

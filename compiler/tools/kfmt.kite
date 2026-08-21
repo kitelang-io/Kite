@@ -1,4 +1,5 @@
-// compiler/driver/kfmt.kite — `kitec fmt`: a token-based, trivia-preserving Kite source formatter.
+// compiler/tools/kfmt.kite — the trivia-preserving Kite source formatter core (driven by the standalone
+// `kitefmt` tool, compiler/tools/kitefmt.kite). A no-main library, kept OUT of the self-hosting kitec.
 //
 // Design: this is NOT an AST pretty-printer. It re-lexes the source into a flat stream of PIECES
 // (tokens + comments), each carrying its EXACT source spelling and the number of newlines that

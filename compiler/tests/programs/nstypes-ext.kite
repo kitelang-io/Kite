@@ -1,0 +1,14 @@
+// Namespace TYPES + EXTENSION functions on a module's OWN type. `mode` declares `struct Bar` and an
+// extension `fun Bar.doubled(self)`. Both the type (mode::Bar) and the extension method must namespace
+// together (decl -> mode__Bar, ext fn -> mode__Bar_doubled) so `x.doubled()` on an `x: mode::Bar` receiver
+// dispatches correctly across the module boundary. Prints 42; exit = passed count.
+import compiler::tests::programs::nstypes_ext::mode
+
+fun main(): Int {
+  var passed = 0
+  val x = mode::Bar(21)
+  println(x.doubled()) // 42
+  if (x.doubled() == 42) { passed = passed + 1 }
+  println(passed) // 1
+  return passed
+}
