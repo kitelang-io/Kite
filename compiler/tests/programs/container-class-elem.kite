@@ -15,13 +15,13 @@ class Box(val v: Int) {}
 
 // vararg with a CLASS element collects into an `Array<Box>` internally (build + set + get).
 fun firstBox(vararg xs: Box): Int {
-  if (xs.len() == 0) { return 0 }
+  if (xs.size() == 0) { return 0 }
   return xs.get(0).v
 }
 fun sumBoxes(vararg xs: Box): Int {
   var acc = 0
   var i = 0
-  while (i < xs.len()) { acc = acc + xs.get(i).v i = i + 1 }
+  while (i < xs.size()) { acc = acc + xs.get(i).v i = i + 1 }
   return acc
 }
 
@@ -36,7 +36,7 @@ fun main(): Int {
   if (a.get(0).v == 10) { acc = acc + 1 }    // 1
   if (a.get(1).v == 20) { acc = acc + 1 }    // 2
   if (a.get(2).v == 30) { acc = acc + 1 }    // 3
-  if (a.len() == 3) { acc = acc + 1 }        // 4
+  if (a.size() == 3) { acc = acc + 1 }        // 4
 
   // repeated get of the SAME index — the element must never drop to rc0.
   if (a.get(1).v == 20) { acc = acc + 1 }    // 5
@@ -54,7 +54,7 @@ fun main(): Int {
   v.push(Box(100))
   v.push(Box(200))
   v.push(Box(300))
-  if (v.len() == 3) { acc = acc + 1 }        // 11
+  if (v.size() == 3) { acc = acc + 1 }        // 11
   if (v.get(0).v == 100) { acc = acc + 1 }   // 12
   if (v.get(1).v == 200) { acc = acc + 1 }   // 13
   if (v.get(2).v == 300) { acc = acc + 1 }   // 14
@@ -65,7 +65,7 @@ fun main(): Int {
   // push past capacity -> realloc moves the packed pointer array; elements survive.
   v.push(Box(400))
   v.push(Box(500))
-  if (v.len() == 5) { acc = acc + 1 }        // 17
+  if (v.size() == 5) { acc = acc + 1 }        // 17
   if (v.get(0).v == 100) { acc = acc + 1 }   // 18
   if (v.get(4).v == 500) { acc = acc + 1 }   // 19
 

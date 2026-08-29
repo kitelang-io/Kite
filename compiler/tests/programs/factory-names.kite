@@ -13,7 +13,7 @@ fun main(): Int {
   // intBuf() — empty IntBuf; push / len / get / sum
   val xs = intBuf()
   xs.push(10) xs.push(20) xs.push(30)
-  if (xs.len() == 3) { acc = acc + 1 }
+  if (xs.size() == 3) { acc = acc + 1 }
   if (xs.get(1) == 20) { acc = acc + 1 }
   if (xs.sum() == 60) { acc = acc + 1 }
 
@@ -22,11 +22,11 @@ fun main(): Int {
   m.set("a", 1) m.set("b", 2)
   if (m.size() == 2) { acc = acc + 1 }
   if (m.get("a") == 1) { acc = acc + 1 }
-  if (m.has("b")) { acc = acc + 1 }
-  if (!m.has("z")) { acc = acc + 1 }
+  if (m.containsKey("b")) { acc = acc + 1 }
+  if (!m.containsKey("z")) { acc = acc + 1 }
 
   // HashMap<Int,Int> — direct turbofish construction
-  val h = HashMap::<Int, Int>(0, 0, 0, 0, 0, 0)
+  val h = HashMap::<Int, Int>(0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
   h.set(10, 100) h.set(20, 200)
   if (h.size() == 2) { acc = acc + 1 }
   if (h.getOr(10, 0) == 100) { acc = acc + 1 }

@@ -1,0 +1,58 @@
+// Regression (Phase 3b step-3 increment 2): STRUCT-headed POSITIONAL `when` destructure now DESUGARS.
+// `when (p) { Pt(a, b) -> ... }` where Pt is a STRUCT (not an enum variant) has NO header tag and its
+// fields sit at 8*j (not the boxed 8+8j of a variant payload). ctorCond emits `true` (no tag test) and
+// ctorBindsG reads field j at 8*j, typed positionally (structFieldTyAt) so `a`/`b` get their static types.
+// Exercises: (1) a two-field positional bind (a+b), (2) a wildcard sub that skips a field, (3) a THREE-field
+// struct, (4) a positional literal test with sibling fall-through, (5) a nested struct-positional inside a
+// variant payload, and (6) a struct field whose type drives method dispatch on the bound var.
+// Exit code 66 == every check passed; any other code identifies the first failing check.
+
+struct Pt(val x: Int, val y: Int)
+struct Tri(val a: Int, val b: Int, val c: Int)
+struct Wrapper(val n: Int)
+enum Opt3 { OThree(w: Wrapper); ONil }
+
+fun sum(p: Pt): Int { return when (p) { Pt(a, b) -> a + b } }
+fun firstOnly(p: Pt): Int { return when (p) { Pt(a, _) -> a } }
+fun tri(t: Tri): Int { return when (t) { Tri(a, b, c) -> a * 100 + b * 10 + c } }
+fun cls(p: Pt): Int {
+  return when (p) {
+    Pt(0, 0) -> 1
+    Pt(0, b) -> 2 + b
+    Pt(a, b) -> 3 + a + b
+  }
+}
+fun nestedInVariant(o: Opt3): Int {
+  return when (o) {
+    OThree(Wrapper(n)) -> n
+    ONil -> 0 - 1
+  }
+}
+
+fun main(): Int {
+  val s = sum(Pt(9, 7))            // 16
+  println(s)
+  if (s != 16) { return 1 }
+  val f = firstOnly(Pt(42, 99))    // 42 (wildcard skips y)
+  println(f)
+  if (f != 42) { return 2 }
+  val t = tri(Tri(1, 2, 3))        // 123
+  println(t)
+  if (t != 123) { return 3 }
+  val c0 = cls(Pt(0, 0))           // 1
+  println(c0)
+  if (c0 != 1) { return 4 }
+  val c1 = cls(Pt(0, 5))           // 7 (first arm fails on y=0, second binds b=5)
+  println(c1)
+  if (c1 != 7) { return 5 }
+  val c2 = cls(Pt(4, 6))           // 13 (both literal arms fail, catch-all a=4,b=6)
+  println(c2)
+  if (c2 != 13) { return 6 }
+  val nv = nestedInVariant(OThree(Wrapper(88)))  // 88 (struct-positional inside a variant payload)
+  println(nv)
+  if (nv != 88) { return 7 }
+  val nn = nestedInVariant(ONil)   // -1 (sibling)
+  println(nn)
+  if (nn != 0 - 1) { return 8 }
+  return 66
+}

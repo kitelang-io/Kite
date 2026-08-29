@@ -44,13 +44,13 @@ struct ZfScope(var typeBody: Int, var lines: Int)
 // push/overwrite the scope at `idx`; depth grows one at a time so idx is either == len (append) or < len
 // (reuse a popped slot). No real pop is needed — a closed level is just overwritten on the next open.
 fun zfScopeSet(scopes: IntBuf, idx: Int, sc: ZfScope): Int {
-  if (idx < scopes.len()) { scopes.set(idx, sc) } else { scopes.push(sc) }
+  if (idx < scopes.size()) { scopes.set(idx, sc) } else { scopes.push(sc) }
   return 0
 }
 
 // strip trailing spaces/tabs from a line/comment.
 fun zfRstrip(s: String): String {
-  var e = s.len()
+  var e = s.length()
   var go = 1
   while (go == 1 && e > 0) {
     val c = s.charAt(e - 1)
@@ -62,8 +62,8 @@ fun zfRstrip(s: String): String {
 // kind of the token kfront's lexer just pushed onto a throwaway list (99 = it pushed nothing, e.g. an
 // unrecognized single char that lexOp advanced over without emitting — emitted verbatim by the caller).
 fun zfLastKind(toks: IntBuf): Int {
-  if (toks.len() == 0) { return 99 }
-  val t: Tok = toks.get(toks.len() - 1)
+  if (toks.size() == 0) { return 99 }
+  val t: Tok = toks.get(toks.size() - 1)
   return t.kind
 }
 
@@ -112,7 +112,7 @@ fun zfLexToken(l: Lx, pieces: IntBuf, nl: Int): Int {
 // trivia the compiler throws away), and every real token is delegated to kfront's lexer via zfLexToken.
 fun zfLex(src: String): IntBuf {
   val pieces = intBuf()
-  val l = Lx(src, src.len(), 0, 1)
+  val l = Lx(src, src.length(), 0, 1)
   var pendingNl = 0
   var go = 1
   while (go == 1) {
@@ -142,7 +142,7 @@ fun zfValueEnding(k: Int): Bool {
 
 // mark prefix-unary `-`/`+`/`!` (glue to their operand). `!` is always prefix here.
 fun zfMarkUnary(pieces: IntBuf): IntBuf {
-  val m = pieces.len()
+  val m = pieces.size()
   val res = intBuf()
   var prevSig = 0
   var i = 0
@@ -172,7 +172,7 @@ fun zfPieceKind(pieces: IntBuf, i: Int): Int { val p: ZfPiece = pieces.get(i); r
 // closed a generic) AND a forward scan over generic-legal tokens on the same line reaches a matching
 // `>` at depth 0. Otherwise both `<` and `>` stay comparisons.
 fun zfMarkAngles(pieces: IntBuf): IntBuf {
-  val m = pieces.len()
+  val m = pieces.size()
   val res = intBuf()
   var t = 0
   while (t < m) { res.push(0); t = t + 1 }
@@ -270,7 +270,7 @@ fun zfWouldMerge(a: Int, b: Int): Bool {
 // alone misses because it only sees the trailing `.`.
 fun zfMergeHazard(pk: Int, pt: String, b: Int): Bool {
   if (pk == 28 && b == 60) { return true } // ..  +  <  -> ..<
-  val pn = pt.len()
+  val pn = pt.length()
   if (pn == 0) { return false }
   return zfWouldMerge(pt.charAt(pn - 1), b)
 }
@@ -290,19 +290,19 @@ fun zfIsDeclStart(k: Int): Bool {
 // balanced O(n log n) join of the chunk list (avoids O(n^2) left-fold concat).
 fun zfJoin(cs: IntBuf): String {
   var work = cs
-  while (work.len() > 1) {
+  while (work.size() > 1) {
     val nxt = intBuf()
     var i = 0
-    while (i + 1 < work.len()) {
+    while (i + 1 < work.size()) {
       val a: String = work.get(i)
       val b: String = work.get(i + 1)
       nxt.push(a + b)
       i = i + 2
     }
-    if (i < work.len()) { val a: String = work.get(i); nxt.push(a) }
+    if (i < work.size()) { val a: String = work.get(i); nxt.push(a) }
     work = nxt
   }
-  if (work.len() == 0) { return "" }
+  if (work.size() == 0) { return "" }
   val r: String = work.get(0)
   return r
 }
@@ -310,7 +310,7 @@ fun zfJoin(cs: IntBuf): String {
 // the core: re-emit the piece stream with consistent indentation, spacing, and blank lines.
 fun zfFormat(src: String): String {
   val pieces = zfLex(src)
-  val m = pieces.len()
+  val m = pieces.size()
   if (m == 0) { return "" }
   val angle = zfMarkAngles(pieces)
   val unary = zfMarkUnary(pieces)
@@ -367,7 +367,7 @@ fun zfFormat(src: String): String {
       if (depth >= 1) { val scC: ZfScope = scopes.get(depth - 1); scC.lines = scC.lines + 1 }
     } else {
       var sp = zfSpace(prevKind, prevAngle, prevUnary, k, ca, cu)
-      if (sp == 0 && !zfIsComment(k) && p.text.len() > 0) {
+      if (sp == 0 && !zfIsComment(k) && p.text.length() > 0) {
         if (zfMergeHazard(prevKind, prevText, p.text.charAt(0))) { sp = 1 }
       }
       if (sp == 1) { out.push(" ") }

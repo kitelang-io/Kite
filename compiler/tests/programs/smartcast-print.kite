@@ -1,0 +1,37 @@
+// Smart-cast Phase 2 REGRESSION: MULTIPLE narrowing sites in one function, each USING the narrowed value
+// inside `println` string interpolation. This is the class that a slot-allocation bug missed: an `is` test
+// in an `if`/`&&` condition lowers to a temp-binding EBlock, and the codegen local collector did not walk
+// conditions (nor EBin/ECall operands), so the temp got no stack slot and its store corrupted the frame —
+// a layout-dependent crash that only surfaced when several such sites were combined. The exit code sums the
+// narrowed reads (also printed) so the harness verifies the values, not just that it ran.
+
+trait Animal { fun kind(self): Int }
+
+struct Dog(val n: Int) { fun bark(self): Int { return self.n } }
+
+impl Animal for Dog { fun kind(self): Int { return 1 } }
+
+struct Box(val v: Int)
+
+// early-return guard, narrowed value printed in interpolation
+fun afterGuard(x: Animal): Int {
+  if (x !is Dog) { return 0 }
+  println("  guard bark=${x.bark()}")
+  return x.bark()
+}
+
+fun main(): Int {
+  val x: Animal = Dog(42)
+  val b: Box? = Box(9)
+  var s = 0
+  // site 1 — then-branch narrowing, narrowed value in println interpolation
+  if (x is Dog) { println("  then bark=${x.bark()}") s = s + x.bark() } // 42
+  // site 2 — early-return narrowing in a called function (also prints)
+  s = s + afterGuard(Dog(7)) // 7
+  // site 3 — && short-circuit narrowing in the condition AND the body's interpolation
+  if (x is Dog && x.bark() > 5) { println("  and bark=${x.bark()}") s = s + x.bark() } // 42
+  // site 4 — nullable narrowing, narrowed field read in interpolation
+  if (b != null) { println("  nn field=${b.v}") s = s + b.v } // 9
+  println("total=${s}")
+  return s // 42+7+42+9 = 100
+}

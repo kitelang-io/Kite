@@ -2,14 +2,14 @@ import "lib/alloc/collections/hashmap.kite"
 fun main(): Int {
   var acc = 0
   // Int -> Int map
-  val m = HashMap::<Int, Int>(0, 0, 0, 0, 0, 0)
+  val m = HashMap::<Int, Int>(0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
   m.set(10, 100) m.set(20, 200) m.set(30, 300)
   m.set(20, 222)                       // update in place, order preserved
   if (m.size() == 3) { acc = acc + 1 }
   when (m.get(20)) { Some(v) -> { if (v == 222) { acc = acc + 1 } }; None -> 0 }
   when (m.get(99)) { Some(v) -> 0; None -> { acc = acc + 1 } }
   if (m.getOr(30, 0) == 300) { acc = acc + 1 }
-  if (m.has(10)) { acc = acc + 1 }
+  if (m.containsKey(10)) { acc = acc + 1 }
   if (m.keyAt(0) == 10) { acc = acc + 1 }   // insertion order
   if (m.keyAt(1) == 20) { acc = acc + 1 }
   if (m.valAt(1) == 222) { acc = acc + 1 }

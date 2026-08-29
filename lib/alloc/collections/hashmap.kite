@@ -10,31 +10,73 @@
 // `get` returns Option (miss = None, ending the silent-0), `getOr` the non-optional read. `remove`
 // compacts the entry vector (keeping order dense) and rebuilds the buckets, so iteration never sees a hole.
 //
+// `@value` gives it VALUE SEMANTICS via CoW-over-ARC (STDLIB-REDESIGN §124), the SAME model as Vec/Deque:
+// the three packed buffers (keys/vals/buckets) each live in a distinct `RawBuf` ARC object whose refcount is
+// the uniqueness signal. Binding one takes a value COPY (its `copy` method deep-retains the shared RawBufs),
+// and every mutator calls `ensureUnique` first — cloning all three buffers when they are co-owned — so
+// mutating a bound copy copy-on-writes and never corrupts the original (`val b = a; b.set(k,v)` leaves `a`
+// untouched, and a growth-realloc through a stale alias can no longer UAF). A `deinit` drops the three
+// RawBufs at scope exit so the buffers are reclaimed. (CLASS keys/values are not element-retained on the CoW
+// clone — same type-erasure bound Vec documents; Int/String keys+values, the tested cases, are exact.)
+//
 // Importable via `import kite::alloc::collections::hashmap` (the module pipeline runs the @mono instantiation pass).
-// Construct empty: `HashMap::<Int, String>(0, 0, 0, 0, 0, 0)`.
+// Construct empty: `HashMap::<Int, String>(0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))`.
 import kite::core::panic
 import kite::core::hashable
+import kite::alloc::collections::internal::rawbuf
 // the variadic `hashMap(vararg entries: Pair<K,V>)` factory below collects its trailing args into an
 // `Array<Pair<K,V>>`, so the monomorphized Array<T> carrier must be in scope wherever hashMap is used.
 import kite::alloc::collections::array
 import kite::core::pair
 
 // Storage words: n live entries; ecap entry-vector capacity; bcap bucket count (power of two, 0 until first
-// set); keys/vals packed entry buffers; buckets a word array of (entryIndex+1), 0 = empty slot.
+// set); keys/vals packed entry buffers; buckets a word array of (entryIndex+1), 0 = empty slot. keys/vals/
+// buckets are each a shared-CoW `RawBuf` (`.data` is the raw byte pointer, 0 until first alloc).
 @mono
-@arc(manual)
-class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var vals: Int, var buckets: Int) {
-  // rebuild the bucket array from the current dense entry vector (0..n). Called after a grow or a remove.
+@value
+class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: RawBuf, var vals: RawBuf, var buckets: RawBuf) {
+  // CoW: clone one backing buffer (`bytes` copied verbatim) into a fresh uniquely-owned RawBuf. A 0-byte
+  // (never-allocated) buffer clones to a null RawBuf(0). The caller drops the old co-ownership afterwards.
+  fun cloneBuf(self, old: RawBuf, bytes: Int): RawBuf {
+    val nd = if (bytes == 0) { 0 } else { __rawAlloc(bytes) }
+    var i = 0
+    while (i < bytes) { __rawStoreByte(nd, i, __rawLoadByte(old.data, i)) i = i + 1 }
+    return RawBuf(nd)
+  }
+  // CoW: clone all three buffers away from other owners before an in-place write. A no-op when uniquely
+  // owned (the common path), so mutation stays zero-overhead beyond a single refcount read. The three
+  // RawBufs always move in lockstep (copy retains all, ensureUnique clones all, deinit drops all), so any
+  // one's refcount is the shared uniqueness signal.
+  fun ensureUnique(self): Int {
+    if (__refcount(self.keys) > 1) {
+      val ok = self.keys val ov = self.vals val ob = self.buckets
+      self.keys = self.cloneBuf(ok, self.ecap * sizeOf::<K>())
+      self.vals = self.cloneBuf(ov, self.ecap * sizeOf::<V>())
+      self.buckets = self.cloneBuf(ob, self.bcap * 8)
+      ok.drop() ov.drop() ob.drop()
+    }
+    return 0
+  }
+  // value COPY on bind: share the three buffers (+1 each) so a later write on either side copy-on-writes.
+  fun copy(self): HashMap<K, V> {
+    __retain(self.keys) __retain(self.vals) __retain(self.buckets)
+    return HashMap::<K, V>(self.n, self.ecap, self.bcap, self.keys, self.vals, self.buckets)
+  }
+  // scope-exit drop: release this handle's co-ownership of each buffer; the last owner frees the byte
+  // buffer + the RawBuf shell (RawBuf.drop). Runs via the generated ___rel_HashMap$K_V on last release.
+  deinit { self.keys.drop() self.vals.drop() self.buckets.drop() }
+  // rebuild the bucket array from the current dense entry vector (0..n). Called after a grow or a remove
+  // (both from mutators that already ensureUnique, so the buffers are private here).
   fun rehashAll(self): Int {
     var b = 0
-    while (b < self.bcap) { __rawStore(self.buckets, b * 8, 0) b = b + 1 }
+    while (b < self.bcap) { __rawStore(self.buckets.data, b * 8, 0) b = b + 1 }
     var e = 0
     while (e < self.n) {
-      val k: K = __packedGet::<K>(self.keys, e)
+      val k: K = __packedGet::<K>(self.keys.data, e)
       var idx = k.hash() & (self.bcap - 1)
       var go = 1
       while (go == 1) {
-        if (__rawLoad(self.buckets, idx * 8) == 0) { __rawStore(self.buckets, idx * 8, e + 1) go = 0 }
+        if (__rawLoad(self.buckets.data, idx * 8) == 0) { __rawStore(self.buckets.data, idx * 8, e + 1) go = 0 }
         else { idx = (idx + 1) & (self.bcap - 1) }
       }
       e = e + 1
@@ -48,11 +90,11 @@ class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var
     var idx = k.hash() & (self.bcap - 1)
     var go = 1
     while (go == 1) {
-      val slot = __rawLoad(self.buckets, idx * 8)
+      val slot = __rawLoad(self.buckets.data, idx * 8)
       if (slot == 0) { go = 0 }
       else {
         val e = slot - 1
-        if (__packedGet::<K>(self.keys, e) == k) { return e }
+        if (__packedGet::<K>(self.keys.data, e) == k) { return e }
         idx = (idx + 1) & (self.bcap - 1)
       }
     }
@@ -61,8 +103,8 @@ class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var
   fun ensureEntries(self): Int {
     if (self.n == self.ecap) {
       if (self.ecap == 0) { self.ecap = 8 } else { self.ecap = self.ecap * 2 }
-      self.keys = __rawRealloc(self.keys, self.ecap * sizeOf::<K>())
-      self.vals = __rawRealloc(self.vals, self.ecap * sizeOf::<V>())
+      self.keys.data = __rawRealloc(self.keys.data, self.ecap * sizeOf::<K>())
+      self.vals.data = __rawRealloc(self.vals.data, self.ecap * sizeOf::<V>())
     }
     return 0
   }
@@ -73,26 +115,27 @@ class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var
   // (no expected user type) builds — the compiler-wide default, sourced from HERE, not a hardcoded name.
   @lang("map.new")
   @lang("map.default")
-  fun empty(): HashMap<K, V> = HashMap::<K, V>(0, 0, 0, 0, 0, 0)
+  fun empty(): HashMap<K, V> = HashMap::<K, V>(0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
   @lang("map.set")
   fun set(self, k: consuming K, v: consuming V): Int {
-    if (self.bcap == 0) { self.bcap = 8 self.buckets = __rawAlloc(self.bcap * 8) self.rehashAll() }
+    self.ensureUnique()
+    if (self.bcap == 0) { self.bcap = 8 self.buckets.data = __rawAlloc(self.bcap * 8) self.rehashAll() }
     val e = self.findIdx(k)
-    if (e >= 0) { __packedSet::<V>(self.vals, e, v) return 0 }
+    if (e >= 0) { __packedSet::<V>(self.vals.data, e, v) return 0 }
     if ((self.n + 1) * 4 >= self.bcap * 3) {
       self.bcap = self.bcap * 2
-      self.buckets = __rawRealloc(self.buckets, self.bcap * 8)
+      self.buckets.data = __rawRealloc(self.buckets.data, self.bcap * 8)
       self.rehashAll()
     }
     self.ensureEntries()
     val ni = self.n
-    __packedSet::<K>(self.keys, ni, k)
-    __packedSet::<V>(self.vals, ni, v)
+    __packedSet::<K>(self.keys.data, ni, k)
+    __packedSet::<V>(self.vals.data, ni, v)
     self.n = ni + 1
     var idx = k.hash() & (self.bcap - 1)
     var go = 1
     while (go == 1) {
-      if (__rawLoad(self.buckets, idx * 8) == 0) { __rawStore(self.buckets, idx * 8, ni + 1) go = 0 }
+      if (__rawLoad(self.buckets.data, idx * 8) == 0) { __rawStore(self.buckets.data, idx * 8, ni + 1) go = 0 }
       else { idx = (idx + 1) & (self.bcap - 1) }
     }
     return 0
@@ -100,22 +143,23 @@ class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var
   fun get(self, k: K): Option<V> {
     val e = self.findIdx(k)
     if (e < 0) { return None }
-    return Some(__packedGet::<V>(self.vals, e))
+    return Some(__packedGet::<V>(self.vals.data, e))
   }
   fun getOr(self, k: K, dflt: V): V {
     val e = self.findIdx(k)
     if (e < 0) { return dflt }
-    return __packedGet::<V>(self.vals, e)
+    return __packedGet::<V>(self.vals.data, e)
   }
-  fun has(self, k: K): Bool { return self.findIdx(k) >= 0 }
+  fun containsKey(self, k: K): Bool { return self.findIdx(k) >= 0 }
   fun remove(self, k: K): Option<V> {
+    self.ensureUnique()
     val e = self.findIdx(k)
     if (e < 0) { return None }
-    val old = __packedGet::<V>(self.vals, e)
+    val old = __packedGet::<V>(self.vals.data, e)
     var i = e
     while (i < self.n - 1) {
-      __packedSet::<K>(self.keys, i, __packedGet::<K>(self.keys, i + 1))
-      __packedSet::<V>(self.vals, i, __packedGet::<V>(self.vals, i + 1))
+      __packedSet::<K>(self.keys.data, i, __packedGet::<K>(self.keys.data, i + 1))
+      __packedSet::<V>(self.vals.data, i, __packedGet::<V>(self.vals.data, i + 1))
       i = i + 1
     }
     self.n = self.n - 1
@@ -125,27 +169,28 @@ class HashMap<K, V>(var n: Int, var ecap: Int, var bcap: Int, var keys: Int, var
   fun size(self): Int { return self.n }
   fun isEmpty(self): Bool { return self.n == 0 }
   fun clear(self): Int {
+    self.ensureUnique()
     self.n = 0
     var b = 0
-    while (b < self.bcap) { __rawStore(self.buckets, b * 8, 0) b = b + 1 }
+    while (b < self.bcap) { __rawStore(self.buckets.data, b * 8, 0) b = b + 1 }
     return 0
   }
   fun keyAt(self, i: Int): K {
     if (i < 0 || i >= self.n) { panicOOB("HashMap.keyAt", i, self.n) }
-    return __packedGet::<K>(self.keys, i)
+    return __packedGet::<K>(self.keys.data, i)
   }
   fun valAt(self, i: Int): V {
     if (i < 0 || i >= self.n) { panicOOB("HashMap.valAt", i, self.n) }
-    return __packedGet::<V>(self.vals, i)
+    return __packedGet::<V>(self.vals.data, i)
   }
 }
 
 // Empty-HashMap factory. `@mono` makes it a generic FUNCTION template: each `hashMap::<A,B>()` call specializes
 // the body's `HashMap::<A,B>` construction (which then cascades through the @mono TYPE pass to `HashMap$A_B`),
-// so `val m = hashMap::<Int, String>()` builds the concrete map with no explicit six-zero constructor at the
+// so `val m = hashMap::<Int, String>()` builds the concrete map with no explicit six-arg constructor at the
 // use site. Requires a turbofish — the type args cannot be inferred from an empty construction.
 @mono
-fun hashMap<K, V>(): HashMap<K, V> = HashMap::<K, V>(0, 0, 0, 0, 0, 0)
+fun hashMap<K, V>(): HashMap<K, V> = HashMap::<K, V>(0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
 
 // Populated-HashMap factory: `hashMap::<A,B>(k1 to v1, k2 to v2, ...)` builds a map from `Pair` entries — the
 // variadic analogue of the `[..]`/`{..}` literals for an insertion-ordered hashed map. This is a SECOND @mono
@@ -155,8 +200,8 @@ fun hashMap<K, V>(): HashMap<K, V> = HashMap::<K, V>(0, 0, 0, 0, 0, 0)
 // Requires a turbofish when the element types can't be inferred from the entries.
 @mono
 fun hashMap<K, V>(vararg entries: Pair<K, V>): HashMap<K, V> {
-  val m = HashMap::<K, V>(0, 0, 0, 0, 0, 0)
+  val m = HashMap::<K, V>(0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
   var i = 0
-  while (i < entries.len()) { val e: Pair<K, V> = entries.get(i) m.set(e.first, e.second) i = i + 1 }
+  while (i < entries.size()) { val e: Pair<K, V> = entries.get(i) m.set(e.first, e.second) i = i + 1 }
   return m
 }

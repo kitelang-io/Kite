@@ -11,7 +11,7 @@
 //
 // with a `deinit` that frees `data`. Following Kotlin, its convention methods live WITH the type: the
 // intrinsic queries/transforms are real MEMBER METHODS inside the `class String { ... }` body —
-// `s.charAt(i)`, `s.len()`/`s.length`, `s.byteAt(i)`, `s.toStr()`, `s.substr(...)`, `s.repeat(...)` — while
+// `s.charAt(i)`, `s.length()`/`s.length`, `s.byteAt(i)`, `s.toStr()`, `s.substr(...)`, `s.repeat(...)` — while
 // the operators are impl blocks: `a + b` -> `impl Add for String`, `a == b` -> `impl Eq for String`,
 // `a < b` -> `impl Ord for String`, and `n.toStr()` stays an `Int` extension. Byte access
 // is `__rawLoadByte(self.data, i)` (not on the box word), and a result is built into a fresh owned buffer then
@@ -19,11 +19,11 @@
 // str.concat / str.show) so the desugar sites resolve exactly the method these operators name.
 //
 // A string LITERAL is emitted (codegen genStrLit) as a call to __mkStr, which heap-copies the interned bytes
-// into an owned buffer so an embedded \x00 is preserved (`"a\x00b".len()` == 3). print/%s and readFile/__argv
+// into an owned buffer so an embedded \x00 is preserved (`"a\x00b".length()` == 3). print/%s and readFile/__argv
 // load / box `.data` in codegen (genPrintStrBox / genBoxCstr / genStrPtr).
 //
-// The count field is named `n` (NOT `len`) so it does not collide with the `String.len()` method (a `.len`
-// field + a `len()` getter would cross the getter-routing path). `data` is the 2nd field — codegen hardcodes
+// The count field is named `n` (NOT `length`) so it does not collide with the `String.length()` method (a
+// `.length` field + a `length()` getter would cross the getter-routing path). `data` is the 2nd field — codegen hardcodes
 // offset 8 for `.data` (genPrintStrBox / genStrPtr), so the field ORDER (n@0, data@8) is load-bearing.
 
 // @arc(manual): the boxed String is ARC-EXEMPT (leak-managed, like the C-string it replaced). WHY, and why
@@ -42,22 +42,21 @@ class String(val n: Int, val data: Int) {
   deinit { __rawFree(self.data) }
 
   // Non-allocating queries, now real MEMBER methods (Kotlin-style): they mangle to `String_charAt` /
-  // `String_len` / … identically to the former `fun String.charAt(...)` extension form, so this is
-  // byte-neutral. `.len()` is the stored byte count (a field load, so an embedded NUL counts); charAt /
+  // `String_length` / … identically to the former `fun String.charAt(...)` extension form, so this is
+  // byte-neutral. `.length()` is the stored byte count (a field load, so an embedded NUL counts); charAt /
   // byteAt load one byte out of the owned buffer. @lang("str.get") makes charAt the landing point for `s[i]`.
   @lang("str.get")
   fun charAt(self, i: Int): Int { return __rawLoadByte(self.data, i) }
 
-  // @lang("str.len"): the for-in bound over a String's bytes resolves here (emitted String_len), the
+  // @lang("str.length"): the for-in bound over a String's bytes resolves here (emitted String_length), the
   // symmetric partner of str.get so `for (c in s)` is single-sourced from HERE, not a hardcoded name.
-  @lang("str.len")
-  fun len(self): Int { return self.n }
-
-  // `length` is the getter alias of `len`: a nullary method, so `s.length` (no parens) resolves here.
+  // Kotlin names a String's element count `length` (sequences use `size`); a nullary method, so `s.length`
+  // (no parens) also resolves here as a getter.
+  @lang("str.length")
   fun length(self): Int { return self.n }
 
   // `s.isEmpty()` — true for the zero-length string. `self.n` is the stored byte count, so `"".isEmpty()`
-  // is true and `"a\x00b".isEmpty()` is false (embedded NUL counts, matching len()).
+  // is true and `"a\x00b".isEmpty()` is false (embedded NUL counts, matching length()).
   fun isEmpty(self): Bool { return self.n == 0 }
 
   // `s.byteAt(i)`: the core-tier byte accessor (§2c — the T0 self-host iteration primitive, distinct from a

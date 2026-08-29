@@ -58,7 +58,7 @@ fun emitDiag(d: Diagnostic): Int { eprintln(renderDiag(d)); return 0 }
 // Render + emit a whole collected sink (e.g. the checker's accumulated diagnostics), in order, to stderr.
 fun emitDiags(ds: IntBuf): Int {
   var i = 0
-  while (i < ds.len()) { val d: Diagnostic = ds.get(i); emitDiag(d); i = i + 1 }
+  while (i < ds.size()) { val d: Diagnostic = ds.get(i); emitDiag(d); i = i + 1 }
   return 0
 }
 
@@ -115,7 +115,7 @@ fun isIntSuffixW(w: String): Bool {
 // unrecognized trailing word lexes as its own identifier, exactly as before — purely additive).
 fun readIntSuffix(lx: Lx): String {
   val w = peekAlnum(lx)
-  if (isIntSuffixW(w)) { var k = 0; while (k < w.len()) { adv(lx); k = k + 1 }; return w }
+  if (isIntSuffixW(w)) { var k = 0; while (k < w.length()) { adv(lx); k = k + 1 }; return w }
   return ""
 }
 
@@ -123,14 +123,14 @@ fun readIntSuffix(lx: Lx): String {
 // Value is pure decimal (optional leading '-'), so the first non-digit begins the suffix.
 fun litNum(s: String): String {
   var i = 0
-  if (s.len() >= 1 && s.charAt(0) == 45) { i = 1 } // leading '-'
-  while (i < s.len() && isDigit(s.charAt(i))) { i = i + 1 }
+  if (s.length() >= 1 && s.charAt(0) == 45) { i = 1 } // leading '-'
+  while (i < s.length() && isDigit(s.charAt(i))) { i = i + 1 }
   return s.substr(0, i)
 }
 
 fun litSuf(s: String): String {
-  val n = litNum(s).len()
-  return s.substr(n, s.len() - n)
+  val n = litNum(s).length()
+  return s.substr(n, s.length() - n)
 }
 
 // map an integer suffix to its checker primitive-type name ("" -> no suffix).
@@ -282,7 +282,7 @@ fun push2(lx: Lx, toks: IntBuf, kind: Int, text: String): Int { toks.push(Tok(ki
 
 fun lex(src: String): IntBuf {
   val toks = intBuf()
-  val lx = Lx(src, src.len(), 0, 1)
+  val lx = Lx(src, src.length(), 0, 1)
   var go = 1
   while (go == 1) {
     skipTrivia(lx)
@@ -426,7 +426,10 @@ enum FExpr {
   FEBlock(IntBuf, FExpr); FEIf(FExpr, FExpr, FExpr); FEWhen(Int, String, FExpr, IntBuf);
   FECast(FExpr, String); // `e as T` — numeric width/sign conversion (Phase 3)
   FEQuestion(FExpr); // `e?` — Result/Option early-return propagation (Phase 8, desugared in klower)
-  FERet(FExpr); FEBrk; FECont; FENoRes
+  FERet(FExpr); FEBrk; FECont; FENoRes;
+  // Smart-cast Phase 1: first-class boolean tests. APPENDED at the END so existing FExpr tags don't shift.
+  FEIs(FExpr, String, Int); // `e is T` (neg 0) / `e !is T` (neg 1) — RHS is a TYPE string
+  FEIn(FExpr, FExpr, Int) // `e in c` (neg 0) / `e !in c` (neg 1) — desugars to `c.contains(e)`
 }
 
 enum FIPart { FILit(String); FIExpr(FExpr) }
@@ -485,12 +488,17 @@ struct FImplDecl(val annos: IntBuf, val gen: String, val traitName: String, val 
 // `infix`; the set lets the expression parser (parseInfix) treat an identifier in operator position as an
 // infix operator ONLY when it names a declared infix fun. An identifier NOT in the set ends the expression
 // exactly as before, so adjacent statements never wrongly merge. Empty set => byte-identical to pre-infix.
-struct P(val toks: IntBuf, var pos: Int, val infixNames: IntBuf)
+// `armBody` = 1 while parsing a `when`-arm BODY expression. In that context a top-level `is`/`in`
+// (first-class infix ops since b08d7bd) that is immediately followed by `->` is NOT a continuation of the
+// body but the START of the NEXT arm (`is T ->` / `in c ->`); parseIsCheck stops there so the arms don't
+// glue. It is 0 everywhere else (guards/conds/subjects are followed by `->`/`)` and must keep consuming
+// their own `is`/`in`), so `is`/`in` as expressions are untouched outside the arm-body boundary.
+struct P(val toks: IntBuf, var pos: Int, val infixNames: IntBuf, var armBody: Int)
 
 // membership check for the infix-name set (a small deduped IntBuf<String>).
 fun infixSetHas(names: IntBuf, nm: String): Bool {
   var i = 0
-  while (i < names.len()) { val x: String = names.get(i); if (x == nm) { return true }; i = i + 1 }
+  while (i < names.size()) { val x: String = names.get(i); if (x == nm) { return true }; i = i + 1 }
   return false
 }
 
@@ -502,13 +510,13 @@ fun infixSetHas(names: IntBuf, nm: String): Bool {
 // stays standalone (kitefmt / kparse include kfront but not kcheck/klower).
 fun scanInfixNames(toks: IntBuf, out: IntBuf): Int {
   var i = 0
-  while (i < toks.len()) {
+  while (i < toks.size()) {
     val t: Tok = toks.get(i)
     if (t.kind == 88) { // `infix`
       var j = i + 1
       var last = ""
       var go = 1
-      while (go == 1 && j < toks.len()) {
+      while (go == 1 && j < toks.size()) {
         val u: Tok = toks.get(j)
         if (u.kind == 20 || u.kind == 0) { go = 0 } // `(` opens the param list, or EOF
         else { if (u.kind == 1) { last = u.text }; j = j + 1 }
@@ -525,9 +533,9 @@ fun scanInfixNames(toks: IntBuf, out: IntBuf): Int {
 fun mkPSeed(toks: IntBuf, seed: IntBuf): P {
   val names = intBuf()
   var i = 0
-  while (i < seed.len()) { val s: String = seed.get(i); if (infixSetHas(names, s) == false) { names.push(s) }; i = i + 1 }
+  while (i < seed.size()) { val s: String = seed.get(i); if (infixSetHas(names, s) == false) { names.push(s) }; i = i + 1 }
   scanInfixNames(toks, names)
-  return P(toks, 0, names)
+  return P(toks, 0, names, 0)
 }
 
 // build a parser over `toks` whose infix set is only the infix funs declared inside `toks`.
@@ -539,19 +547,19 @@ fun mkP(toks: IntBuf): P { return mkPSeed(toks, intBuf()) }
 // lookahead helpers use (kind 0 / text ""), so the grammar sees "end of input" and fails its match
 // cleanly rather than crashing. For well-formed input pos never exceeds the token count, so these
 // guards never fire and codegen is byte-identical (self-host fixpoint unaffected).
-fun pk(p: P): Int { if (p.pos < p.toks.len()) { val t: Tok = p.toks.get(p.pos); return t.kind } return 0 }
+fun pk(p: P): Int { if (p.pos < p.toks.size()) { val t: Tok = p.toks.get(p.pos); return t.kind } return 0 }
 
-fun ptext(p: P): String { if (p.pos < p.toks.len()) { val t: Tok = p.toks.get(p.pos); return t.text } return "" }
+fun ptext(p: P): String { if (p.pos < p.toks.size()) { val t: Tok = p.toks.get(p.pos); return t.text } return "" }
 
 // 1-based source line of the current token — used to attribute diagnostics to a source position.
-fun pline(p: P): Int { if (p.pos < p.toks.len()) { val t: Tok = p.toks.get(p.pos); return t.line } return 0 }
+fun pline(p: P): Int { if (p.pos < p.toks.size()) { val t: Tok = p.toks.get(p.pos); return t.line } return 0 }
 
 fun eat(p: P): Int { p.pos = p.pos + 1; return 0 }
 
 // bounded lookahead (kind 0 / text "" past end) — needed by the full grammar
 fun kindAt(p: P, n: Int): Int {
   val i = p.pos + n
-  if (i < p.toks.len()) { val t: Tok = p.toks.get(i); return t.kind }
+  if (i < p.toks.size()) { val t: Tok = p.toks.get(i); return t.kind }
   return 0
 }
 
@@ -559,7 +567,7 @@ fun pk1(p: P): Int { return kindAt(p, 1) }
 
 fun textAt(p: P, n: Int): String {
   val i = p.pos + n
-  if (i < p.toks.len()) { val t: Tok = p.toks.get(i); return t.text }
+  if (i < p.toks.size()) { val t: Tok = p.toks.get(i); return t.text }
   return ""
 }
 
@@ -690,13 +698,13 @@ fun parseIf(p: P): FExpr {
 }
 
 fun isUpper(s: String): Bool {
-  if (s.len() == 0) { return false }
+  if (s.length() == 0) { return false }
   val c = s.charAt(0)
   return c >= 65 && c <= 90
 }
 
 fun isLower(s: String): Bool {
-  if (s.len() == 0) { return false }
+  if (s.length() == 0) { return false }
   val c = s.charAt(0); return c >= 97 && c <= 122
 }
 
@@ -718,11 +726,14 @@ fun parsePattern(p: P): FPat {
   if (k == 6) { eat(p); return FPBoolP("false") }
   if (k == 7) { eat(p); return FPNullP }
   if (k == 59) { eat(p); return FPIsP(parseTy(p), 0) } // is T
-  if (k == 53) { eat(p); return FPInP(parseExpr(p), 0) } // in e
+  // `in e` / `!in e` operand parses at the relational rung (parseRel, same as the `in` EXPRESSION form),
+  // NOT parseExpr: this stops before `|` (kind 61), which is the when-arm PATTERN-ALTERNATION separator, so
+  // `in a | in b -> ...` splits into two patterns instead of the operand swallowing `| in b` as bitwise-or.
+  if (k == 53) { eat(p); return FPInP(parseRel(p), 0) } // in e
   if (k == 44) { // !is / !in
     eat(p)
     if (pk(p) == 59) { eat(p); return FPIsP(parseTy(p), 1) }
-    eat(p); return FPInP(parseExpr(p), 1)
+    eat(p); return FPInP(parseRel(p), 1)
   }
   val name = ptext(p); eat(p)
   if (name == "_") { return FPWild }
@@ -756,25 +767,41 @@ fun parseCtorPat(p: P, path: String): FPat {
   var hasRest = 0
   var hasNamed = 0
   var i = 0
-  while (i < raws.len()) { val r: FRawArg = raws.get(i)
+  while (i < raws.size()) { val r: FRawArg = raws.get(i)
     if (r.tag == 2) { hasRest = 1 }; if (r.tag == 1) { hasNamed = 1 }; i = i + 1 }
   if (hasRest == 0 && hasNamed == 0) { // positional
     val pats = intBuf()
     var j = 0
-    while (j < raws.len()) { val r: FRawArg = raws.get(j); pats.push(r.pat); j = j + 1 }
+    while (j < raws.size()) { val r: FRawArg = raws.get(j); pats.push(r.pat); j = j + 1 }
     return FPCtor(path, pats)
   }
   val flds = intBuf() // record
   var m = 0
-  while (m < raws.len()) { val r: FRawArg = raws.get(m)
+  while (m < raws.size()) { val r: FRawArg = raws.get(m)
     if (r.tag == 1) { flds.push(FRFld(r.name, 1, r.pat)) }
     else { if (r.tag == 0) { flds.push(FRFld(bindName(r.pat), 0, FPWild)) } }
     m = m + 1 }
   return FPRecord(path, flds, hasRest)
 }
 
+// parse a when-arm BODY: an is/in following a completed body belongs to the NEXT arm, not this body
+// (see `armBody` on struct P / armIsBoundary). Flag is toggled only around the body parse so guards/conds
+// (which legitimately end in `is T ->` / `in c ->`) keep consuming their own `is`/`in`.
+fun parseArmBody(p: P): FExpr {
+  val saved = p.armBody
+  p.armBody = 1
+  val b = parseExpr(p)
+  p.armBody = saved
+  return b
+}
+
 fun parseWhen(p: P): FExpr {
   eat(p) // 'when'
+  // Clear the arm-body flag for this when's own subject/guards/conds (all followed by `->`/`)` and must
+  // keep consuming their own `is`/`in`). parseArmBody re-arms it per body. Save/restore so a `when` nested
+  // inside another when's arm body is parsed correctly.
+  val savedAB = p.armBody
+  p.armBody = 0
   var hasSubj = 0
   var bindStr = ""
   var subj = FENoRes
@@ -795,12 +822,12 @@ fun parseWhen(p: P): FExpr {
   while (pk(p) != 23 && pk(p) != 0) {
     if (pk(p) == 51) { // else -> body
       eat(p); eat(p)
-      arms.push(FArm(1, FENoRes, intBuf(), FENoRes, parseExpr(p)))
+      arms.push(FArm(1, FENoRes, intBuf(), FENoRes, parseArmBody(p)))
     } else {
       if (hasSubj == 0) { // cond -> body
         val cond = parseExpr(p)
         eat(p)
-        arms.push(FArm(0, cond, intBuf(), FENoRes, parseExpr(p)))
+        arms.push(FArm(0, cond, intBuf(), FENoRes, parseArmBody(p)))
       } else { // pattern [| pattern]* [if guard] -> body
         val pats = intBuf()
         pats.push(parsePattern(p))
@@ -808,11 +835,12 @@ fun parseWhen(p: P): FExpr {
         var guard = FENoRes
         if (pk(p) == 50) { eat(p); guard = parseExpr(p) } // if guard
         eat(p) // '->'
-        arms.push(FArm(2, FENoRes, pats, guard, parseExpr(p)))
+        arms.push(FArm(2, FENoRes, pats, guard, parseArmBody(p)))
       }
     }
   }
   eat(p) // '}'
+  p.armBody = savedAB
   return FEWhen(hasSubj, bindStr, subj, arms)
 }
 
@@ -829,7 +857,7 @@ fun parseInterpSub(src: String): FExpr {
 
 fun interpParts(body: String, isRaw: Int): IntBuf {
   val parts = intBuf()
-  val n = body.len()
+  val n = body.length()
   var i = 0
   var lit = ""
   while (i < n) {
@@ -898,15 +926,15 @@ fun parsePanicForm(p: P, kind: Int, ln: Int): FExpr {
   val loc = "panic at line " + (ln.toStr() + ": ")
   if (kind == 1) { // assert(cond [, msg]) -> if (cond) {} else { abort }
     var cond: FExpr = FEBool("false")
-    if (args.len() > 0) { cond = args.get(0) }
+    if (args.size() > 0) { cond = args.get(0) }
     var amsg: FExpr = FEStr("assertion failed", 0)
-    if (args.len() > 1) { amsg = args.get(1) }
+    if (args.size() > 1) { amsg = args.get(1) }
     return FEIf(cond, FENoRes, buildAbort(loc, amsg))
   }
   if (kind == 2) { return buildAbort(loc, FEStr("not yet implemented", 0)) } // todo()
   if (kind == 3) { return buildAbort(loc, FEStr("entered unreachable code", 0)) } // unreachable()
   var pmsg: FExpr = FEStr("explicit panic", 0) // panic([msg])
-  if (args.len() > 0) { pmsg = args.get(0) }
+  if (args.size() > 0) { pmsg = args.get(0) }
   return buildAbort(loc, pmsg)
 }
 
@@ -1093,9 +1121,55 @@ fun parseRel(p: P): FExpr {
   return e
 }
 
-fun parseEq(p: P): FExpr {
+// `is`/`!is`/`in`/`!in` as first-class boolean tests (smart-cast Phase 1). One precedence rung between
+// equality (`== !=`, looser) and the relational operators (`< > <= >=`, tighter): so `a < b` binds first,
+// `x is T && y` parses as `(x is T) && y`, and `a == x is T` parses as `a == (x is T)`. RHS of `is`/`!is`
+// is a TYPE (parseTy); RHS of `in`/`!in` is an EXPRESSION parsed at the relational rung (so `x in a..b` and
+// `x in coll` both work). `is`/`in` do NOT chain meaningfully; the loop is harmless for well-formed input.
+// Inside a `when`-arm body (p.armBody == 1), decide whether an upcoming `is`/`!is`/`in`/`!in` at kind `k`
+// is really the START of the NEXT arm rather than an infix continuation of the current body. `is`/`in` are
+// the only expression operators that can also OPEN a pattern, so they are the only ambiguous case. A new
+// arm is a pattern-list `[if guard]` terminated by `->` (kind 60): so we tentatively parse a full arm head
+// from here — the pattern (with any `|` alternatives) plus an optional `if` guard — and if it lands exactly
+// on `->`, this is the next arm and the body must stop. The cursor (and the flag) are RESTORED afterward;
+// the real consumption happens back in parseIsCheck / parseWhen. armBody is cleared during the peek so the
+// tentative guard expression parses normally (no recursive boundary logic). Outside an arm body this is
+// always false, so `is`/`in` expressions elsewhere are byte-unchanged.
+fun armIsBoundary(p: P, k: Int): Bool {
+  if (p.armBody != 1) { return false }
+  var opens = false
+  if (k == 59 || k == 53) { opens = true } // is / in
+  if (k == 44 && (pk1(p) == 59 || pk1(p) == 53)) { opens = true } // !is / !in
+  if (opens == false) { return false }
+  val saved = p.pos
+  p.armBody = 0
+  parsePattern(p)
+  while (pk(p) == 61) { eat(p); parsePattern(p) } // `|` alternatives
+  if (pk(p) == 50) { eat(p); parseExpr(p) } // optional `if` guard
+  val boundary = pk(p) == 60 // arm head landed exactly on `->` => next arm
+  p.pos = saved
+  p.armBody = 1
+  return boundary
+}
+
+fun parseIsCheck(p: P): FExpr {
   var e = parseRel(p)
-  while (pk(p) == 35 || pk(p) == 36) { val o = opStr(pk(p)); eat(p); e = FEBin(o, e, parseRel(p)) }
+  var go = 1
+  while (go == 1) {
+    val k = pk(p)
+    if (armIsBoundary(p, k)) { go = 0 } // stop before a following `is`/`in`-led when arm
+    else { if (k == 59) { eat(p); e = FEIs(e, parseTy(p), 0) } // is T
+      else { if (k == 44 && pk1(p) == 59) { eat(p); eat(p); e = FEIs(e, parseTy(p), 1) } // !is T
+        else { if (k == 53) { eat(p); e = FEIn(e, parseRel(p), 0) } // e in c
+          else { if (k == 44 && pk1(p) == 53) { eat(p); eat(p); e = FEIn(e, parseRel(p), 1) } // e !in c
+            else { go = 0 } } } } }
+  }
+  return e
+}
+
+fun parseEq(p: P): FExpr {
+  var e = parseIsCheck(p)
+  while (pk(p) == 35 || pk(p) == 36) { val o = opStr(pk(p)); eat(p); e = FEBin(o, e, parseIsCheck(p)) }
   return e
 }
 
@@ -1263,11 +1337,11 @@ fun parseParam(p: P): FParam {
 fun checkVarargParams(params: IntBuf, fname: String): Int {
   var i = 0
   var nva = 0
-  while (i < params.len()) {
+  while (i < params.size()) {
     val pp: FParam = params.get(i)
     if (pp.isVararg == 1) {
       nva = nva + 1
-      if (i != params.len() - 1) { parseFail("function `" + (fname + "`: a `vararg` parameter must be the LAST parameter")) }
+      if (i != params.size() - 1) { parseFail("function `" + (fname + "`: a `vararg` parameter must be the LAST parameter")) }
     }
     i = i + 1
   }
@@ -1286,10 +1360,10 @@ fun parseRecv(p: P): String {
 // count a function's OPERAND parameters, excluding an injected extension receiver (a first param named
 // "this"). A member `infix fun m(x)` has 1; an extension `infix fun A.m(x)` has params [this, x] -> 1.
 fun operandParamCount(params: IntBuf): Int {
-  if (params.len() == 0) { return 0 }
+  if (params.size() == 0) { return 0 }
   val p0: FParam = params.get(0)
-  if (p0.name == "this") { return params.len() - 1 }
-  return params.len()
+  if (p0.name == "this") { return params.size() - 1 }
+  return params.size()
 }
 
 // enforce the Kotlin `infix` rule: an infix fun takes EXACTLY ONE operand parameter (besides the receiver).
@@ -1422,7 +1496,7 @@ fun parseConstMember(p: P): FFunc {
 // member-table populators to classify it as kind "const" (bound with `::`, dot-access is a cross-use error).
 fun isConstValFn(annos: IntBuf): Bool {
   var i = 0
-  while (i < annos.len()) { val a: Anno = annos.get(i); if (a.name == "constval") { return true }; i = i + 1 }
+  while (i < annos.size()) { val a: Anno = annos.get(i); if (a.name == "constval") { return true }; i = i + 1 }
   return false
 }
 
@@ -1448,7 +1522,7 @@ fun parseSecondaryCtor(p: P, owner: String, fields: IntBuf): FFunc {
   eat(p) // '('
   val dargs = parseArgs(p) // consumes through ')'
   val cons = FECall(FEIdent(owner), dargs)
-  val nm = "__ctor_" + params.len().toStr()
+  val nm = "__ctor_" + params.size().toStr()
   if (pk(p) == 22) {
     val blk = parseBlock(p) // FEBlock(stmts, res) — the optional post-delegation body
     val stmts = intBuf()
@@ -1469,6 +1543,7 @@ fun parseTypeDecl(p: P, annos: IntBuf, kind: Int): FTDecl {
       while (more == 1) {
         var isPub = 0
         if (pk(p) == 56) { isPub = 1; eat(p) }
+        if (pk(p) != 11 && pk(p) != 12) { parseFail("`" + name + "`: constructor parameter `" + (ptext(p) + "` must be declared with `val` or `var`")) }
         val isVar = if (pk(p) == 12) { 1 } else { 0 }
         eat(p) // val / var
         val fn = ptext(p); eat(p)
@@ -1588,7 +1663,7 @@ fun parseImpl(p: P, annos: IntBuf): FImplDecl {
 // then re-encode. Used by FEStr, FPStr, and interpolation lit chunks.
 fun pad3(n: Int): String {
   var s = n.toStr()
-  while (s.len() < 3) { s = "0" + s }
+  while (s.length() < 3) { s = "0" + s }
   return s
 }
 
@@ -1605,7 +1680,7 @@ fun escByte(out: String, b: Int, srcChar: String): String {
 
 fun escStr(raw: String, isRaw: Int): String {
   var out = ""
-  val n = raw.len()
+  val n = raw.length()
   var i = 0
   while (i < n) {
     val c = raw.charAt(i)
@@ -1624,7 +1699,7 @@ fun escStr(raw: String, isRaw: Int): String {
 }
 
 fun stripZeros(s: String): String { // strip trailing '0' from a fractional digit string
-  var e = s.len()
+  var e = s.length()
   while (e > 0 && s.charAt(e - 1) == 48) { e = e - 1 }
   return s.substr(0, e)
 }
@@ -1632,7 +1707,7 @@ fun stripZeros(s: String): String { // strip trailing '0' from a fractional digi
 fun zeros(k: Int): String { var s = ""; var i = 0; while (i < k) { s = s + "0"; i = i + 1 }; return s }
 
 fun incDigits(s: String): String { // s all-digits; return s+1 (may grow one digit)
-  var i = s.len() - 1
+  var i = s.length() - 1
   var carry = 1
   var out = ""
   while (i >= 0) {
@@ -1650,7 +1725,7 @@ fun expStr(e: Int): String { // "e+06" / "e-05" (exponent >= 2 digits)
   var m = e
   if (e < 0) { sign = "-"; m = 0 - e }
   var ds = m.toStr()
-  if (ds.len() < 2) { ds = "0" + ds }
+  if (ds.length() < 2) { ds = "0" + ds }
   return "e" + (sign + ds)
 }
 
@@ -1660,35 +1735,35 @@ fun fmtFloat(raw: String): String {
   // Exponent lexemes (1.5e3, 2e-4, 1e9) are already normalized enough; emit them verbatim rather than
   // running them through the fixed-notation %g emulator (which assumes a plain d+.d+ lexeme).
   var xi = 0
-  while (xi < raw.len()) { val xc = raw.charAt(xi); if (xc == 101 || xc == 69) { return raw }; xi = xi + 1 }
+  while (xi < raw.length()) { val xc = raw.charAt(xi); if (xc == 101 || xc == 69) { return raw }; xi = xi + 1 }
   var dot = 0 - 1
   var i = 0
-  while (i < raw.len()) { if (raw.charAt(i) == 46) { dot = i }; i = i + 1 }
+  while (i < raw.length()) { if (raw.charAt(i) == 46) { dot = i }; i = i + 1 }
   if (dot < 0) { return raw }
   val intPart = raw.substr(0, dot)
-  val allDigits = intPart + raw.substr(dot + 1, raw.len() - dot - 1)
+  val allDigits = intPart + raw.substr(dot + 1, raw.length() - dot - 1)
   var fnz = 0
-  while (fnz < allDigits.len() && allDigits.charAt(fnz) == 48) { fnz = fnz + 1 }
-  if (fnz >= allDigits.len()) { return "0" } // value is zero
-  var e = intPart.len() - 1 - fnz
-  var sig = allDigits.substr(fnz, allDigits.len() - fnz)
+  while (fnz < allDigits.length() && allDigits.charAt(fnz) == 48) { fnz = fnz + 1 }
+  if (fnz >= allDigits.length()) { return "0" } // value is zero
+  var e = intPart.length() - 1 - fnz
+  var sig = allDigits.substr(fnz, allDigits.length() - fnz)
   val P = 6
-  if (sig.len() > P) { // round to 6 significant figures
+  if (sig.length() > P) { // round to 6 significant figures
     val nxtd = sig.charAt(P)
     var head = sig.substr(0, P)
-    if (nxtd >= 53) { head = incDigits(head); if (head.len() > P) { head = head.substr(0, P); e = e + 1 } }
+    if (nxtd >= 53) { head = incDigits(head); if (head.length() > P) { head = head.substr(0, P); e = e + 1 } }
     sig = head
   }
   if (e < 0 - 4 || e >= P) { // scientific
-    val rest = stripZeros(sig.substr(1, sig.len() - 1))
+    val rest = stripZeros(sig.substr(1, sig.length() - 1))
     if (rest == "") { return sig.substr(0, 1) + expStr(e) }
     return sig.substr(0, 1) + ("." + (rest + expStr(e)))
   }
   if (e >= 0) { // fixed, integer part present
     var ip = ""
     var fp = ""
-    if (sig.len() > e + 1) { ip = sig.substr(0, e + 1); fp = sig.substr(e + 1, sig.len() - e - 1) }
-    else { ip = sig + zeros(e + 1 - sig.len()) }
+    if (sig.length() > e + 1) { ip = sig.substr(0, e + 1); fp = sig.substr(e + 1, sig.length() - e - 1) }
+    else { ip = sig + zeros(e + 1 - sig.length()) }
     fp = stripZeros(fp)
     if (fp == "") { return ip }
     return ip + ("." + fp)
@@ -1737,6 +1812,8 @@ fun printExpr(ind: Int, e: FExpr): Int {
     FEBlock(stmts, res) -> printBlock(ind, stmts, res)
     FEIf(c, t, el) -> printIf(ind, c, t, el)
     FEWhen(hasSubj, bindStr, subj, arms) -> printWhen(ind, hasSubj, bindStr, subj, arms)
+    FEIs(x, ty, neg) -> lineThen1(ind, negMark(neg) + ("is " + ty), x)
+    FEIn(el, c, neg) -> printBin2(ind, negMark(neg) + "in", el, c)
     FERet(e) -> printRet(ind, e)
     FEBrk -> line(ind, "break")
     FECont -> line(ind, "continue")
@@ -1773,7 +1850,7 @@ fun negMark(neg: Int): String { if (neg == 1) { return "!" } return "" }
 fun printCtor(ind: Int, pth: String, subs: IntBuf): Int {
   line(ind, "ctor " + pth)
   var i = 0
-  while (i < subs.len()) { val s: FPat = subs.get(i); printPat(ind + 1, s); i = i + 1 }
+  while (i < subs.size()) { val s: FPat = subs.get(i); printPat(ind + 1, s); i = i + 1 }
   return 0
 }
 
@@ -1784,7 +1861,7 @@ fun printIn(ind: Int, mark: String, e: FExpr): Int {
 fun printRecord(ind: Int, pth: String, flds: IntBuf, hasRest: Int): Int {
   line(ind, "ctor " + pth)
   var i = 0
-  while (i < flds.len()) { val f: FRFld = flds.get(i)
+  while (i < flds.size()) { val f: FRFld = flds.get(i)
     if (f.hasPat == 1) { line(ind + 1, "field " + (f.name + " =")); printPat(ind + 2, f.pat) }
     else { line(ind + 1, "field " + (f.name + " (pun)")) }
     i = i + 1 }
@@ -1796,14 +1873,14 @@ fun printWhen(ind: Int, hasSubj: Int, bindStr: String, subj: FExpr, arms: IntBuf
   line(ind, "when")
   if (hasSubj == 1) { line(ind + 1, "subject " + bindStr); printExpr(ind + 2, subj) }
   var i = 0
-  while (i < arms.len()) {
+  while (i < arms.size()) {
     val a: FArm = arms.get(i)
     if (a.kind == 1) { line(ind + 1, "else") }
     else { if (a.kind == 0) { line(ind + 1, "cond"); printExpr(ind + 2, a.lhs) }
       else {
         line(ind + 1, "patterns")
         var j = 0
-        while (j < a.pats.len()) { val pp: FPat = a.pats.get(j); printPat(ind + 2, pp); j = j + 1 }
+        while (j < a.pats.size()) { val pp: FPat = a.pats.get(j); printPat(ind + 2, pp); j = j + 1 }
         if (isNoResF(a.guard) == false) { line(ind + 1, "guard"); printExpr(ind + 2, a.guard) }
       } }
     line(ind + 1, "->")
@@ -1824,7 +1901,7 @@ fun printInterpExpr(ind: Int, e: FExpr): Int { line(ind + 1, "expr"); printExpr(
 fun printInterp(ind: Int, parts: IntBuf, isRaw: Int): Int {
   line(ind, "interp")
   var i = 0
-  while (i < parts.len()) {
+  while (i < parts.size()) {
     val pt: FIPart = parts.get(i)
     when (pt) {
       FILit(s) -> line(ind + 1, "lit \"" + (escStr(s, isRaw) + "\""))
@@ -1845,14 +1922,14 @@ fun printLambda(ind: Int, params: String, body: FExpr): Int {
 fun printList(ind: Int, elems: IntBuf): Int {
   line(ind, "list")
   var i = 0
-  while (i < elems.len()) { val e: FExpr = elems.get(i); printExpr(ind + 1, e); i = i + 1 }
+  while (i < elems.size()) { val e: FExpr = elems.get(i); printExpr(ind + 1, e); i = i + 1 }
   return 0
 }
 
 fun printMap(ind: Int, ents: IntBuf): Int {
   line(ind, "map")
   var i = 0
-  while (i < ents.len()) {
+  while (i < ents.size()) {
     val en: FMapEnt = ents.get(i)
     line(ind + 1, "entry")
     printExpr(ind + 2, en.k)
@@ -1865,10 +1942,10 @@ fun printMap(ind: Int, ents: IntBuf): Int {
 fun printCall(ind: Int, f: FExpr, args: IntBuf): Int {
   line(ind, "call")
   printExpr(ind + 1, f)
-  if (args.len() > 0) {
+  if (args.size() > 0) {
     line(ind + 1, "args")
     var i = 0
-    while (i < args.len()) {
+    while (i < args.size()) {
       val a: FArg = args.get(i)
       if (a.name == "") { printExpr(ind + 2, a.expr) }
       else { line(ind + 2, a.name + " ="); printExpr(ind + 3, a.expr) }
@@ -1881,7 +1958,7 @@ fun printCall(ind: Int, f: FExpr, args: IntBuf): Int {
 fun printBlock(ind: Int, stmts: IntBuf, res: FExpr): Int {
   line(ind, "block")
   var i = 0
-  while (i < stmts.len()) { val s: FStmt = stmts.get(i); printStmt(ind + 1, s); i = i + 1 }
+  while (i < stmts.size()) { val s: FStmt = stmts.get(i); printStmt(ind + 1, s); i = i + 1 }
   if (isNoResF(res) == false) { line(ind + 1, "result"); printExpr(ind + 2, res) }
   return 0
 }
@@ -1931,7 +2008,7 @@ fun printLet(ind: Int, isVar: Int, name: String, ty: String, init: FExpr): Int {
 fun paramStr(params: IntBuf): String {
   var s = ""
   var i = 0
-  while (i < params.len()) {
+  while (i < params.size()) {
     val pp: FParam = params.get(i)
     val one = pp.name + (": " + pp.ty)
     if (i == 0) { s = one } else { s = s + (", " + one) }
@@ -1942,12 +2019,12 @@ fun paramStr(params: IntBuf): String {
 
 fun printAnnos(ind: Int, annos: IntBuf): Int {
   var i = 0
-  while (i < annos.len()) {
+  while (i < annos.size()) {
     val a: Anno = annos.get(i)
-    if (a.args.len() == 0) { line(ind, "@" + a.name) }
+    if (a.args.size() == 0) { line(ind, "@" + a.name) }
     else { line(ind, "@" + (a.name + "(...)"))
       var j = 0
-      while (j < a.args.len()) { val e: FExpr = a.args.get(j); printExpr(ind + 1, e); j = j + 1 } }
+      while (j < a.args.size()) { val e: FExpr = a.args.get(j); printExpr(ind + 1, e); j = j + 1 } }
     i = i + 1
   }
   return 0
@@ -1956,7 +2033,7 @@ fun printAnnos(ind: Int, annos: IntBuf): Int {
 fun funcHead(fd: FFunc): String {
   var recvp = ""
   if (fd.recv != "") {
-    if (fd.params.len() == 0) { recvp = fd.recv } else { recvp = fd.recv + ", " }
+    if (fd.params.size() == 0) { recvp = fd.recv } else { recvp = fd.recv + ", " }
   }
   var head = "fun " + (fd.name + (fd.gen + ("(" + (recvp + (paramStr(fd.params) + ")")))))
   if (fd.ret != "") { head = head + (" : " + fd.ret) }
@@ -1983,10 +2060,10 @@ fun printTDecl(td: FTDecl): Int {
   val kw = if (td.kind == 1) { "class " } else { "struct " }
   line(0, kw + (td.name + (td.gen + td.whr)))
   var i = 0
-  while (i < td.fields.len()) { val f: FFld = td.fields.get(i); line(1, fldStr(f)); i = i + 1 }
+  while (i < td.fields.size()) { val f: FFld = td.fields.get(i); line(1, fldStr(f)); i = i + 1 }
   if (isNoResF(td.dtor) == false) { line(1, "deinit"); printExpr(2, td.dtor) }
   var j = 0
-  while (j < td.methods.len()) { val m: FFunc = td.methods.get(j); printFuncAt(1, m); j = j + 1 }
+  while (j < td.methods.size()) { val m: FFunc = td.methods.get(j); printFuncAt(1, m); j = j + 1 }
   println("")
   return 0
 }
@@ -1994,7 +2071,7 @@ fun printTDecl(td: FTDecl): Int {
 fun tyList(tys: IntBuf): String {
   var s = ""
   var i = 0
-  while (i < tys.len()) {
+  while (i < tys.size()) {
     val t: String = tys.get(i)
     if (i == 0) { s = t } else { s = s + (", " + t) }
     i = i + 1
@@ -2005,7 +2082,7 @@ fun tyList(tys: IntBuf): String {
 fun fldList(flds: IntBuf): String { // "val w : Int, val h : Int"
   var s = ""
   var i = 0
-  while (i < flds.len()) { val f: FFld = flds.get(i)
+  while (i < flds.size()) { val f: FFld = flds.get(i)
     if (i == 0) { s = fldStr(f) } else { s = s + (", " + fldStr(f)) }; i = i + 1 }
   return s
 }
@@ -2020,7 +2097,7 @@ fun printEDecl(ed: FEDecl): Int {
   printAnnos(0, ed.annos)
   line(0, "enum " + (ed.name + ed.gen))
   var i = 0
-  while (i < ed.variants.len()) {
+  while (i < ed.variants.size()) {
     val v: FVariant = ed.variants.get(i)
     line(1, variantStr(v))
     i = i + 1
@@ -2031,7 +2108,7 @@ fun printEDecl(ed: FEDecl): Int {
 
 fun printAssoc(assoc: IntBuf): Int { // shared trait/impl (impl text = " = Ty")
   var i = 0
-  while (i < assoc.len()) { val a: FAssoc = assoc.get(i)
+  while (i < assoc.size()) { val a: FAssoc = assoc.get(i)
     line(1, "type " + (a.name + a.text)); i = i + 1 }
   return 0
 }
@@ -2041,7 +2118,7 @@ fun printTrait(tr: FTraitDecl): Int {
   line(0, "trait " + (tr.name + (tr.gen + (tr.supers + tr.whr))))
   printAssoc(tr.assoc)
   var j = 0
-  while (j < tr.methods.len()) { val m: FFunc = tr.methods.get(j); printFuncAt(1, m); j = j + 1 }
+  while (j < tr.methods.size()) { val m: FFunc = tr.methods.get(j); printFuncAt(1, m); j = j + 1 }
   println("")
   return 0
 }
@@ -2058,7 +2135,7 @@ fun printImpl(im: FImplDecl): Int {
   line(0, implHead(im))
   printAssoc(im.assoc)
   var j = 0
-  while (j < im.methods.len()) { val m: FFunc = im.methods.get(j); printFuncAt(1, m); j = j + 1 }
+  while (j < im.methods.size()) { val m: FFunc = im.methods.get(j); printFuncAt(1, m); j = j + 1 }
   println("")
   return 0
 }

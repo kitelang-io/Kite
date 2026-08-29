@@ -9,5 +9,5 @@ fun main(): Int {
   // "val=42" -> len 6
   val c = "x" + n + "y"
   // "x5y" -> len 3
-  return a.len() + b.len() + c.len()
+  return a.length() + b.length() + c.length()
 }

@@ -3,7 +3,7 @@ fun buildLen(n: Int): Int {
   var i = 0
   while (i < n) { xs.push(i * i)
     i = i + 1 }
-  return xs.len()
+  return xs.size()
 }
 
 fun sumBuilt(n: Int): Int {
@@ -13,7 +13,7 @@ fun sumBuilt(n: Int): Int {
     i = i + 1 }
   var s = 0
   var j = 0
-  while (j < xs.len()) { s = s + xs.get(j)
+  while (j < xs.size()) { s = s + xs.get(j)
     j = j + 1 }
   return s
 }
@@ -23,13 +23,13 @@ fun repLen(s: String, n: Int): Int {
   var i = 0
   while (i < n) { out = out + s
     i = i + 1 }
-  return out.len()
+  return out.length()
 }
 
 fun main(): Int {
   val a = comptime(buildLen(5))
   val b = comptime(sumBuilt(5))
-  val c = comptime(("ab" + "cd").len())
+  val c = comptime(("ab" + "cd").length())
   val d = comptime(repLen("xy", 3))
   return a + b + c + d
 }

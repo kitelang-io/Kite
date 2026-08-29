@@ -11,7 +11,7 @@
 // deriving must synthesize under that exact name (regression: dangling _Money_partialCmp = non-loadable).
 @derive(PartialOrd) struct Money(val cents: Int)
 
-// @derive(Hash) over a String + a Double field: the FNV mix folds INT surrogates (String -> .len(),
+// @derive(Hash) over a String + a Double field: the FNV mix folds INT surrogates (String -> .size(),
 // Double -> toInt), never the raw String/boxed-Double word into integer `*`/`+` (regression: concat-crash).
 @derive(Hash) struct Blob(val tag: String, val ratio: Double, val n: Int)
 

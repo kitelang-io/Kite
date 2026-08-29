@@ -1,0 +1,31 @@
+// Regression: `String`/`String?` compared against the `null` literal with `==`/`!=` must lower to a
+// pointer null-check for EVERY type, NOT route through String's structural equality (String_eq) — which
+// would dereference the null (0) pointer and SIGSEGV (exit 139). The old behavior crashed on every one
+// of these; a clean run to the expected exit code is the regression lock. Structural string `==` between
+// two real strings, and Int?/class? `== null`, must all stay correct.
+fun fEq(s: String?): Int { return if (s == null) { 10 } else { 1 } }
+fun fNe(s: String?): Int { return if (s != null) { 100 } else { 3 } }
+
+fun fInt(s: Int?): Int { return if (s == null) { 20 } else { 0 } }
+
+class Box(val n: Int)
+fun fBox(s: Box?): Int { return if (s == null) { 30 } else { 0 } }
+
+fun main() {
+  var t = 0
+  t = t + fEq(null)                              // 10 (String? == null, arg null)
+  t = t + fEq("x")                               // 1  (String? == null, arg non-null)
+  t = t + fNe(null)                              // 3  (String? != null, arg null)
+  t = t + fNe("x")                               // 100(String? != null, arg non-null)
+  val a: String? = null
+  t = t + (if (a == null) { 5 } else { 0 })      // 5  (local String? = null)
+  val b: String? = "hi"
+  t = t + (if (b == null) { 0 } else { 7 })      // 7  (local String? = "hi")
+  t = t + (if ("a" == null) { 0 } else { 2 })    // 2  (string literal == null)
+  t = t + (if ("ab" == "ab") { 4 } else { 0 })   // 4  (structural string == stays correct)
+  t = t + (if ("ab" == "cd") { 0 } else { 6 })   // 6  (structural string == stays correct)
+  t = t + fInt(null)                             // 20 (Int? == null stays correct)
+  t = t + fBox(null)                             // 30 (class? == null stays correct)
+  println(t.toStr())                             // prints 188 on success
+  return t                                       // exit code 188
+}

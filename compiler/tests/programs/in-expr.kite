@@ -1,0 +1,22 @@
+// Smart-cast Phase 1: `in` / `!in` as first-class boolean expressions. Desugars to `c.contains(e)`
+// (resp. its logical-not), routed through normal method-call lowering (Vec.contains here).
+
+fun bstr(b: Bool): String { if (b) { return "true" } return "false" }
+
+fun main(): Int {
+  val v = [1, 2, 3]
+  println("2 in v   = " + bstr(2 in v)) // true
+  println("5 in v   = " + bstr(5 in v)) // false
+  println("5 !in v  = " + bstr(5 !in v)) // true
+  println("2 !in v  = " + bstr(2 !in v)) // false
+  if (2 in v) { println("if (2 in v) -> matched") }
+  // precedence: `in` binds tighter than && (like `is`)
+  println("prec     = " + bstr(2 in v && 3 in v)) // true
+
+  var score = 0
+  if (2 in v) { score = score + 1 }
+  if (5 !in v) { score = score + 2 }
+  if (2 in v && 3 in v) { score = score + 4 }
+  if (5 in v) { score = score + 8 } else { score = score + 16 }
+  return score // 1+2+4+16 = 23
+}

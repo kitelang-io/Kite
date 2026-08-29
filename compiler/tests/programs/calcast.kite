@@ -13,7 +13,7 @@ enum Ast {
 }
 
 fun peek(p: P): Int {
-  if (p.pos >= p.src.len()) {
+  if (p.pos >= p.src.length()) {
     return 0
   }
   return p.src.charAt(p.pos)

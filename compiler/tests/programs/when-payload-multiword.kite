@@ -1,0 +1,45 @@
+// Regression (Phase 3b step 2): a `when`-arm payload bind in the DESUGAR must recover the payload's concrete
+// type for a MULTI-WORD value (a struct) and a multi-FIELD class, across every subject form. The desugar
+// lowered the bind to `val v = __rawLoad(_s, 8+8j)` and typed v from the subject's FULL, arg-carrying type
+// (subjFullTy -> soleTypeArg). That worked for a CALL/INDEX subject (callRetFull keeps `<...>`) but NOT for an
+// IDENT/param subject: klower stored only the coarse tag (tyTag strips `<...>`), so v was bound UNTYPED and
+// field access fell back to offset 0 -- correct for a single-field/field-0 read (Option<class> LOOKED fine)
+// but WRONG for a multi-field struct/class (v.y read offset 0, not 8). Fixed via a full-type side table read
+// by subjFullTy for ident/param subjects. Each assertion prints 1/0 and bumps acc; all 6 pass -> exit 6.
+struct Pt(val x: Int, val y: Int)
+class Box2(val a: Int, val b: Int)
+
+fun useLocalStruct(): Int {
+  val p: Option<Pt> = Some(Pt(7, 9))
+  return when (p) { Some(v) -> if (v.x == 7 && v.y == 9) { 1 } else { 0 }; None -> 0 }
+}
+fun useParamStruct(p: Option<Pt>): Int {
+  return when (p) { Some(v) -> if (v.x == 3 && v.y == 4) { 1 } else { 0 }; None -> 0 }
+}
+fun mkStruct(): Option<Pt> { return Some(Pt(5, 6)) }
+
+fun useLocalClass(): Int {
+  val o: Option<Box2> = Some(Box2(11, 22))
+  return when (o) { Some(v) -> if (v.a == 11 && v.b == 22) { 1 } else { 0 }; None -> 0 }
+}
+fun useParamClass(o: Option<Box2>): Int {
+  return when (o) { Some(v) -> if (v.a == 1 && v.b == 2) { 1 } else { 0 }; None -> 0 }
+}
+
+fun main(): Int {
+  var acc = 0
+  // ident-local subject, struct payload (the case that regressed to offset-0)
+  if (useLocalStruct() == 1) { acc = acc + 1 println(1) } else { println(0) }
+  // param subject, struct payload
+  if (useParamStruct(Some(Pt(3, 4))) == 1) { acc = acc + 1 println(1) } else { println(0) }
+  // call subject, struct payload
+  when (mkStruct()) { Some(v) -> if (v.x == 5 && v.y == 6) { acc = acc + 1 println(1) } else { println(0) }; None -> println(0) }
+  // ident-local subject, multi-field class payload
+  if (useLocalClass() == 1) { acc = acc + 1 println(1) } else { println(0) }
+  // param subject, multi-field class payload
+  if (useParamClass(Some(Box2(1, 2))) == 1) { acc = acc + 1 println(1) } else { println(0) }
+  // multiple binding sites in ONE function over an ident subject
+  val q: Option<Pt> = Some(Pt(8, 8))
+  when (q) { Some(v) -> if (v.x + v.y == 16) { acc = acc + 1 println(1) } else { println(0) }; None -> println(0) }
+  return acc
+}

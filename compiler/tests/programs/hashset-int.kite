@@ -1,7 +1,7 @@
 import "lib/alloc/collections/hashset.kite"
 fun main(): Int {
   var acc = 0
-  val s = HashSet::<Int>(0, 0, 0, 0, 0)
+  val s = HashSet::<Int>(0, 0, 0, RawBuf(0), RawBuf(0))
   if (s.add(10)) { acc = acc + 1 }
   if (s.add(20)) { acc = acc + 1 }
   if (s.add(10) == false) { acc = acc + 1 }   // dup rejected

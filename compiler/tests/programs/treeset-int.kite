@@ -1,7 +1,7 @@
 import "lib/alloc/collections/treeset.kite"
 fun main(): Int {
   var acc = 0
-  val s = TreeSet::<Int>(0 - 1, 0, 0, 0, 0, 0, 0)
+  val s = TreeSet::<Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
   s.add(50) s.add(20) s.add(80) s.add(20) s.add(10)
   if (s.size() == 4) { acc = acc + 1 }         // dup ignored
   if (s.contains(80)) { acc = acc + 1 }

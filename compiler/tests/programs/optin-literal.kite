@@ -84,7 +84,7 @@ fun main(): Int {
   // a USER seq of a DIFFERENT element type (String) — a second monomorphization.
   val ws: MyList<String> = ["ab", "cde"]
   if (ws.count() == 2) { acc = acc + 1 }               // 7
-  if (ws.at(1).len() == 3) { acc = acc + 1 }           // 8
+  if (ws.at(1).length() == 3) { acc = acc + 1 }           // 8
 
   // empty `[]` bound to the user type -> a fresh empty MyList (zero pushes), then grown.
   val es: MyList<Int> = []
@@ -103,7 +103,7 @@ fun main(): Int {
 
   // (3) DEFAULT preserved: a bare `[1,2,3]` (no expected user type) is still a Vec<Int>.
   val dv = [10, 20, 30]
-  if (dv.len() == 3) { acc = acc + 1 }                 // 16
+  if (dv.size() == 3) { acc = acc + 1 }                 // 16
   if (dv.getOr(9, 77) == 77) { acc = acc + 1 }         // 17  (Vec-only method: proves it's a Vec)
   if (dv.contains(20)) { acc = acc + 1 }               // 18
 
@@ -111,7 +111,7 @@ fun main(): Int {
   val dm = ["a": 1, "b": 2]
   if (dm.size() == 2) { acc = acc + 1 }                // 19
   if (dm.getOr("a", 99) == 1) { acc = acc + 1 }        // 20  (HashMap-only: proves it's a HashMap)
-  if (dm.has("b")) { acc = acc + 1 }                   // 21
+  if (dm.containsKey("b")) { acc = acc + 1 }                   // 21
 
   return acc
 }

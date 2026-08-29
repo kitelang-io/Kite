@@ -1,0 +1,28 @@
+// Regression: a primitive value flowing through a generic function whose declared return is a bare
+// type-parameter `T` (`fun id<T>(x: T): T`) must survive intact. Two miscompiles are guarded:
+//   (1) STRING through a generic printed as a pointer (value was intact — printing only; not exit-code
+//       observable, verified separately by stdout), but the value must still flow: id("hi").length == 2.
+//   (2) DOUBLE through a generic was VALUE-corrupted: the call's bare-type-param return was relabelled with
+//       an inert `ECast(call,"Float")`, which codegen ran as a numeric int->float conversion (scvtf) on the
+//       boxed-double POINTER, producing garbage (~1.05e14). A Double is a boxed heap word that the erased
+//       generic round-trips by pointer, so the relabel must be skipped for floats.
+// The exit code is a sum that only holds when every value survives; a pre-fix compiler returns a corrupted
+// Double (garbage-as-Int), so the sum is wrong.
+fun id<T>(x: T): T { return x }
+fun thru(x: Double): Double { return id(x) }      // generic call in a Double-return position
+fun toI(x: Double): Int { return x as Int }        // unbox a Double param to Int
+
+fun main(): Int {
+  val a: Double = id(7.5)    // bound, annotated: unbox to 7
+  val ai = a as Int
+  val b = toI(id(9.5))       // bare generic call passed to a Double param: 9
+  val c = toI(thru(4.5))     // generic call nested in a Double-returning fn: 4
+  val s = id("hi").length    // generic String return still flows: 2
+  val n = id(3)              // Int generic return still works: 3
+  val bl = id(true)          // Bool generic return still works
+  val bi = if (bl) { 1 } else { 0 }
+  println(ai.toStr())        // 7
+  println(b.toStr())         // 9
+  println(c.toStr())         // 4
+  return ai + b + c + s + n + bi   // 7 + 9 + 4 + 2 + 3 + 1 = 26
+}

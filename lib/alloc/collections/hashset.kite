@@ -4,24 +4,59 @@
 // than a HashMap<T,Unit> wrapper, because a monomorphized template cannot nest another (the instantiation
 // collector sees the inner turbofish with the OUTER param still unbound).
 //
+// `@value` gives it VALUE SEMANTICS via CoW-over-ARC (STDLIB-REDESIGN §124), the SAME model as Vec/Deque:
+// the two packed buffers (elems/buckets) each live in a distinct `RawBuf` ARC object whose refcount is the
+// uniqueness signal. Binding one takes a value COPY (`copy` deep-retains the shared RawBufs), and every
+// mutator calls `ensureUnique` first — cloning both buffers when co-owned — so mutating a bound copy
+// copy-on-writes and never corrupts the original. A `deinit` drops the two RawBufs at scope exit. (CLASS
+// elements are not element-retained on the CoW clone — same type-erasure bound Vec documents.)
+//
 // add -> Bool (true when newly inserted), contains, remove -> Bool, insertion-ordered `elemAt(i)` over
-// `0..size`. Importable via `import kite::alloc::collections::hashset`. Construct empty: `HashSet::<Int>(0, 0, 0, 0, 0)`.
+// `0..size`. Importable via `import kite::alloc::collections::hashset`.
+// Construct empty: `HashSet::<Int>(0, 0, 0, RawBuf(0), RawBuf(0))`.
 import kite::core::panic
 import kite::core::hashable
+import kite::alloc::collections::internal::rawbuf
 
 @mono
-@arc(manual)
-class HashSet<T>(var n: Int, var ecap: Int, var bcap: Int, var elems: Int, var buckets: Int) {
+@value
+class HashSet<T>(var n: Int, var ecap: Int, var bcap: Int, var elems: RawBuf, var buckets: RawBuf) {
+  // CoW: clone one backing buffer (`bytes` copied verbatim) into a fresh uniquely-owned RawBuf. A 0-byte
+  // (never-allocated) buffer clones to a null RawBuf(0). The caller drops the old co-ownership afterwards.
+  fun cloneBuf(self, old: RawBuf, bytes: Int): RawBuf {
+    val nd = if (bytes == 0) { 0 } else { __rawAlloc(bytes) }
+    var i = 0
+    while (i < bytes) { __rawStoreByte(nd, i, __rawLoadByte(old.data, i)) i = i + 1 }
+    return RawBuf(nd)
+  }
+  // CoW: clone both buffers away from other owners before an in-place write. A no-op when uniquely owned.
+  // The two RawBufs always move in lockstep, so `elems`'s refcount is the shared uniqueness signal.
+  fun ensureUnique(self): Int {
+    if (__refcount(self.elems) > 1) {
+      val oe = self.elems val ob = self.buckets
+      self.elems = self.cloneBuf(oe, self.ecap * sizeOf::<T>())
+      self.buckets = self.cloneBuf(ob, self.bcap * 8)
+      oe.drop() ob.drop()
+    }
+    return 0
+  }
+  // value COPY on bind: share both buffers (+1 each) so a later write on either side copy-on-writes.
+  fun copy(self): HashSet<T> {
+    __retain(self.elems) __retain(self.buckets)
+    return HashSet::<T>(self.n, self.ecap, self.bcap, self.elems, self.buckets)
+  }
+  // scope-exit drop: release this handle's co-ownership of each buffer (RawBuf.drop frees at the last owner).
+  deinit { self.elems.drop() self.buckets.drop() }
   fun rehashAll(self): Int {
     var b = 0
-    while (b < self.bcap) { __rawStore(self.buckets, b * 8, 0) b = b + 1 }
+    while (b < self.bcap) { __rawStore(self.buckets.data, b * 8, 0) b = b + 1 }
     var e = 0
     while (e < self.n) {
-      val x: T = __packedGet::<T>(self.elems, e)
+      val x: T = __packedGet::<T>(self.elems.data, e)
       var idx = x.hash() & (self.bcap - 1)
       var go = 1
       while (go == 1) {
-        if (__rawLoad(self.buckets, idx * 8) == 0) { __rawStore(self.buckets, idx * 8, e + 1) go = 0 }
+        if (__rawLoad(self.buckets.data, idx * 8) == 0) { __rawStore(self.buckets.data, idx * 8, e + 1) go = 0 }
         else { idx = (idx + 1) & (self.bcap - 1) }
       }
       e = e + 1
@@ -33,45 +68,47 @@ class HashSet<T>(var n: Int, var ecap: Int, var bcap: Int, var elems: Int, var b
     var idx = x.hash() & (self.bcap - 1)
     var go = 1
     while (go == 1) {
-      val slot = __rawLoad(self.buckets, idx * 8)
+      val slot = __rawLoad(self.buckets.data, idx * 8)
       if (slot == 0) { go = 0 }
       else {
         val e = slot - 1
-        if (__packedGet::<T>(self.elems, e) == x) { return e }
+        if (__packedGet::<T>(self.elems.data, e) == x) { return e }
         idx = (idx + 1) & (self.bcap - 1)
       }
     }
     return 0 - 1
   }
   fun add(self, x: consuming T): Bool {
-    if (self.bcap == 0) { self.bcap = 8 self.buckets = __rawAlloc(self.bcap * 8) self.rehashAll() }
+    self.ensureUnique()
+    if (self.bcap == 0) { self.bcap = 8 self.buckets.data = __rawAlloc(self.bcap * 8) self.rehashAll() }
     if (self.findIdx(x) >= 0) { return false }
     if ((self.n + 1) * 4 >= self.bcap * 3) {
       self.bcap = self.bcap * 2
-      self.buckets = __rawRealloc(self.buckets, self.bcap * 8)
+      self.buckets.data = __rawRealloc(self.buckets.data, self.bcap * 8)
       self.rehashAll()
     }
     if (self.n == self.ecap) {
       if (self.ecap == 0) { self.ecap = 8 } else { self.ecap = self.ecap * 2 }
-      self.elems = __rawRealloc(self.elems, self.ecap * sizeOf::<T>())
+      self.elems.data = __rawRealloc(self.elems.data, self.ecap * sizeOf::<T>())
     }
     val ni = self.n
-    __packedSet::<T>(self.elems, ni, x)
+    __packedSet::<T>(self.elems.data, ni, x)
     self.n = ni + 1
     var idx = x.hash() & (self.bcap - 1)
     var go = 1
     while (go == 1) {
-      if (__rawLoad(self.buckets, idx * 8) == 0) { __rawStore(self.buckets, idx * 8, ni + 1) go = 0 }
+      if (__rawLoad(self.buckets.data, idx * 8) == 0) { __rawStore(self.buckets.data, idx * 8, ni + 1) go = 0 }
       else { idx = (idx + 1) & (self.bcap - 1) }
     }
     return true
   }
   fun contains(self, x: T): Bool { return self.findIdx(x) >= 0 }
   fun remove(self, x: T): Bool {
+    self.ensureUnique()
     val e = self.findIdx(x)
     if (e < 0) { return false }
     var i = e
-    while (i < self.n - 1) { __packedSet::<T>(self.elems, i, __packedGet::<T>(self.elems, i + 1)) i = i + 1 }
+    while (i < self.n - 1) { __packedSet::<T>(self.elems.data, i, __packedGet::<T>(self.elems.data, i + 1)) i = i + 1 }
     self.n = self.n - 1
     self.rehashAll()
     return true
@@ -79,13 +116,14 @@ class HashSet<T>(var n: Int, var ecap: Int, var bcap: Int, var elems: Int, var b
   fun size(self): Int { return self.n }
   fun isEmpty(self): Bool { return self.n == 0 }
   fun clear(self): Int {
+    self.ensureUnique()
     self.n = 0
     var b = 0
-    while (b < self.bcap) { __rawStore(self.buckets, b * 8, 0) b = b + 1 }
+    while (b < self.bcap) { __rawStore(self.buckets.data, b * 8, 0) b = b + 1 }
     return 0
   }
   fun elemAt(self, i: Int): T {
     if (i < 0 || i >= self.n) { panicOOB("HashSet.elemAt", i, self.n) }
-    return __packedGet::<T>(self.elems, i)
+    return __packedGet::<T>(self.elems.data, i)
   }
 }

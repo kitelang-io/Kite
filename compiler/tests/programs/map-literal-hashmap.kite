@@ -13,8 +13,8 @@ fun main(): Int {
   val m = ["a": 1, "b": 2]
   if (m.size() == 2) { acc = acc + 1 }                 // 1
   if (m.getOr("a", 99) == 1) { acc = acc + 1 }         // 2  (non-optional read)
-  if (m.has("b")) { acc = acc + 1 }                    // 3
-  if (m.has("z") == false) { acc = acc + 1 }           // 4
+  if (m.containsKey("b")) { acc = acc + 1 }                    // 3
+  if (m.containsKey("z") == false) { acc = acc + 1 }           // 4
 
   // m[k] yields Option<V>: extract via when / Option.getOr / isSome.
   when (m["a"]) { Some(v) -> { if (v == 1) { acc = acc + 1 } }; None -> 0 }   // 5
@@ -34,7 +34,7 @@ fun main(): Int {
 
   // iterate the KEYS (insertion order): for (k in m) + keyAt/valAt/size surface.
   var seen = 0
-  for (k in m) { if (m.has(k)) { seen = seen + 1 } }
+  for (k in m) { if (m.containsKey(k)) { seen = seen + 1 } }
   if (seen == 3) { acc = acc + 1 }                      // 13
   if (m.keyAt(0).eq("a")) { acc = acc + 1 }             // 14  (insertion order preserved)
   var vsum = 0

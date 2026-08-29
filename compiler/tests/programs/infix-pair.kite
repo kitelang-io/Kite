@@ -20,10 +20,10 @@ fun main(argc: Int, argv: USize): Int {
   if (p.first + p.second != 8) { return 3 }
 
   // (2) `"k" to 42` -> Pair<String,Int>. The `first` field is type-erased, so it is bound through a typed
-  // local to recover its String-ness before calling String.len() (an inherent type-erasure step).
+  // local to recover its String-ness before calling String.size() (an inherent type-erasure step).
   val kv = "k" to 42
   val ks: String = kv.first
-  if (ks.len() + kv.second != 43) { return 4 }
+  if (ks.length() + kv.second != 43) { return 4 }
 
   // (3) user-defined infix fun used in infix position.
   if (7 combine 9 != 709) { return 5 }

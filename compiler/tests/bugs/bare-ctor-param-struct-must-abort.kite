@@ -1,0 +1,8 @@
+// Same landmine on a `struct`: a bare constructor parameter (no `val`/`var`) — even an UNUSED one — used to
+// desync the parser and silently emit a CORRUPT binary. It must be a hard stderr diagnostic + abort, no
+// binary. The gate asserts the non-zero exit and the "must be declared with `val` or `var`" diagnostic.
+struct Bad(x: Int, y: Int)
+
+fun main() {
+  println(42.toStr())
+}

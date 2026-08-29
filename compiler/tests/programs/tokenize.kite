@@ -12,7 +12,7 @@ struct L(val src: String, var pos: Int)
 
 // current char at the cursor, or 0 at/after end of input.
 fun cur(l: L): Int {
-  if (l.pos >= l.src.len()) {
+  if (l.pos >= l.src.length()) {
     return 0
   }
   return l.src.charAt(l.pos)
@@ -20,7 +20,7 @@ fun cur(l: L): Int {
 
 // the char one position ahead, or 0 if that would be at/after end.
 fun nxt(l: L): Int {
-  if (l.pos + 1 >= l.src.len()) {
+  if (l.pos + 1 >= l.src.length()) {
     return 0
   }
   return l.src.charAt(l.pos + 1)
@@ -58,7 +58,7 @@ fun isKeyword(s: String): Bool {
 // scan the whole source, print each token, return the token count.
 fun tokenize(src: String): Int {
   val l = L(src, 0)
-  val n = src.len()
+  val n = src.length()
   var count = 0
   while (l.pos < n) {
     val c = cur(l)

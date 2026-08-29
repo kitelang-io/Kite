@@ -1,0 +1,18 @@
+// Smart-cast Phase 2 STABILITY (soundness) rule: only a stable binding — an immutable `val` (or a value
+// parameter / `this`) — may be flow-narrowed. A `var` is reassignable between the `is` check and the use, so
+// narrowing it would be UNSOUND (it could hold a different runtime type at the use). The compiler must
+// therefore REFUSE to narrow a `var`: `x.bark()` is checked against the un-narrowed type `Animal`, which has
+// no `bark`, so this is a hard compile error with NO binary written. (The identical code with `val` instead
+// of `var` compiles and runs — see compiler/tests/programs/smartcast-if.kite.)
+
+trait Animal { fun kind(self): Int }
+
+struct Dog(val name: String) { fun bark(self): Int { return 42 } }
+
+impl Animal for Dog { fun kind(self): Int { return 1 } }
+
+fun main(): Int {
+  var x: Animal = Dog("Rex")
+  if (x is Dog) { println("bark=${x.bark()}") }
+  return 0
+}

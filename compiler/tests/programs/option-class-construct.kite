@@ -1,0 +1,43 @@
+// Regression: DIRECT construction of a generic enum over a CLASS/STRUCT payload — `Some(Box(42))`,
+// `Ok(Box(99))` — where the payload is a FRESH class-constructor temporary.
+//
+// Bug (pre-fix): the lowerer's arg-lifetime analysis (argTransfers) recognized struct/class constructors
+// and storing builtins as OWNERSHIP TRANSFERS, but NOT enum variant constructors (Some/Ok live in the
+// variant tables, not in sN). So the class-payload temp `Box(42)` was treated as a BORROW and released
+// right after the `Some(..)` call — freeing the payload the freshly-built enum box still pointed at
+// (use-after-free). Reads (`when`, `getOr`) then returned garbage, or `isSome()` crashed outright, because
+// the payload memory had been freed/reused. Int/word payloads were spared (never class temps).
+//
+// The existing option-of-class.kite only exercised payloads pulled OUT of a HashMap (`m.get(k)`), never a
+// direct `Some(<fresh ctor>)`, so this construction path was uncovered.
+//
+// Exit code = number of assertions passed (each also printed 1/0). All 7 must pass -> 7.
+class Box(val n: Int) {}
+struct Pt(val x: Int, val y: Int)
+
+fun main(): Int {
+  var acc = 0
+
+  // Option<class>: construction + tag-only match (isSome never reads the payload — used to crash).
+  val o: Option<Box> = Some(Box(42))
+  if (o.isSome()) { acc = acc + 1 println(1) } else { println(0) }
+  // payload read via `when` — must be the live 42, not freed garbage.
+  when (o) { Some(v) -> { if (v.n == 42) { acc = acc + 1 println(1) } else { println(0) } }; None -> println(0) }
+  // payload read via the `getOr` UFCS method (the path that returned garbage even when `when` happened to work).
+  if (o.getOr(Box(0)).n == 42) { acc = acc + 1 println(1) } else { println(0) }
+
+  // Option<struct>: multi-field struct payload round-trips.
+  val p: Option<Pt> = Some(Pt(7, 9))
+  when (p) { Some(v) -> { if (v.x == 7 && v.y == 9) { acc = acc + 1 println(1) } else { println(0) } }; None -> println(0) }
+
+  // None over a class payload: isNone + the None arm fire.
+  val e: Option<Box> = None
+  if (e.isNone()) { acc = acc + 1 println(1) } else { println(0) }
+  when (e) { Some(v) -> println(0); None -> { acc = acc + 1 println(1) } }
+
+  // Result<class, _>: the parallel variant constructor path.
+  val r: Result<Box, Int> = Ok(Box(99))
+  when (r) { Ok(v) -> { if (v.n == 99) { acc = acc + 1 println(1) } else { println(0) } }; Err(x) -> println(0) }
+
+  return acc
+}

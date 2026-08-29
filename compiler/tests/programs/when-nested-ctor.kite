@@ -1,0 +1,70 @@
+// Regression: NESTED constructor patterns in a `when` — `Ctor(InnerCtor(x))`.
+// Before the fix the inner constructor's tag was never tested and the inner variable bound to
+// garbage, so `OSome(WPt(p))` fired on an `OSome(WNone)` value and `p` read the wrong offset.
+// This exercises: (1) a nested bind reading MULTIPLE inner fields (p.x AND p.y), (2) sibling
+// fall-through (a nested-tag miss must reach the NEXT arm, not an inner else), (3) a THREE-level
+// nest A(B(C(x))), and (4) an Int-leaf enum-in-enum. Named-payload variants (`WPt(p: Pt)`) also
+// verify the payload's declared struct type reaches the bound var so `p.y` resolves offset 8.
+// Exit code 77 == every check passed; any other code identifies the first failing check.
+
+struct Pt(val x: Int, val y: Int)
+enum Wrap { WPt(p: Pt); WNone }
+enum OuterO { OSome(w: Wrap); ONone }
+
+fun f(o: OuterO): Int {
+  return when (o) {
+    OSome(WPt(p)) -> p.x + p.y   // nested bind, two inner fields (7 + 9 = 16)
+    OSome(WNone)  -> 55          // sibling: same outer OSome, inner WNone
+    ONone         -> 66
+  }
+}
+
+enum C3 { CV(n: Int); CNo }
+enum B3 { BV(c: C3); BNo }
+enum A3 { AV(b: B3); ANo }
+fun three(a: A3): Int {
+  return when (a) {
+    AV(BV(CV(x))) -> x
+    AV(BV(CNo))   -> 100
+    AV(BNo)       -> 200
+    ANo           -> 300
+  }
+}
+
+enum Inr { IVal(n: Int); IZero }
+enum Otr { OWrap(i: Inr); OEmpty }
+fun intleaf(o: Otr): Int {
+  return when (o) {
+    OWrap(IVal(n)) -> n
+    OWrap(IZero)   -> 42
+    OEmpty         -> 43
+  }
+}
+
+fun main(): Int {
+  val a = f(OSome(WPt(Pt(7, 9))))      // 16
+  println(a)
+  if (a != 16) { return 1 }
+  val b = f(OSome(WNone))              // 55 (sibling fall-through)
+  println(b)
+  if (b != 55) { return 2 }
+  val c = f(ONone)                     // 66
+  println(c)
+  if (c != 66) { return 3 }
+  val d = three(AV(BV(CV(88))))        // 88 (three-level nest)
+  println(d)
+  if (d != 88) { return 4 }
+  val e = three(AV(BV(CNo)))           // 100 (inner sibling)
+  println(e)
+  if (e != 100) { return 5 }
+  val g = three(AV(BNo))               // 200 (mid sibling)
+  println(g)
+  if (g != 200) { return 6 }
+  val h = intleaf(OWrap(IVal(7)))      // 7 (int-leaf nest)
+  println(h)
+  if (h != 7) { return 7 }
+  val k = intleaf(OWrap(IZero))        // 42 (int-leaf sibling)
+  println(k)
+  if (k != 42) { return 8 }
+  return 77
+}

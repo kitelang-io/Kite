@@ -1,0 +1,91 @@
+// Regression: RECORD / named-field patterns in a `when` — `Pt(x = a, y = b)`, `Pt(x = 0, y)`, puns
+// with `..` rest, and named-field patterns on enum variants. Before the fix an FPRecord pattern hit
+// `lowFail("pattern")` (unsupported construct); a positional STRUCT pattern silently never matched
+// (the `is Struct` desugar path bound the wrong offsets). This exercises: (1) a struct named-field BIND
+// of MULTIPLE fields, in and out of declaration order, (2) named-field LITERAL tests with sibling
+// FALL-THROUGH (a failed field test reaches the NEXT arm), (3) a field PUN plus a `..` rest that ignores
+// unmentioned fields, (4) a nested record whose field sub-pattern is itself a ctor / another record, (5) an
+// ENUM-VARIANT record pattern that still tag-tests and coexists with sibling arms, and (6) a record nested
+// inside a positional variant ctor. Exit code 88 == every check passed; any other code is the first failure.
+
+struct Pt(val x: Int, val y: Int)
+struct Config(val host: Int, val port: Int, val timeout: Int)
+struct Inner(val v: Int)
+struct Outer(val a: Inner, val b: Int)
+enum J { JNum(n: Int); JNull }
+enum V { VW(inr: Inner); VN }
+enum O { OS(p: Pt); ON }
+
+// (1) struct named-field bind, both orders
+fun sum(p: Pt): Int { return when (p) { Pt(x = a, y = b) -> a + b } }
+fun rev(p: Pt): Int { return when (p) { Pt(y = b, x = a) -> a * 100 + b } }
+
+// (2) named-field literal tests with sibling fall-through, and (3) pun as the catch-all
+fun cls(p: Pt): Int {
+  return when (p) {
+    Pt(x = 0, y = 0) -> 1
+    Pt(x = 0, y) -> 2
+    Pt(x, y) -> 3
+  }
+}
+
+// (3) pun + `..` rest (timeout ignored)
+fun hp(c: Config): Int { return when (c) { Config(host, port, ..) -> host + port } }
+
+// (5) enum-variant record pattern + sibling
+fun jval(j: J): Int { return when (j) { JNum(n = w) -> w; JNull -> -1 } }
+
+// (4) nested record: variant field sub-pattern is a ctor
+fun vz(v: V): Int { return when (v) { VW(inr = Inner(z)) -> z; VN -> -1 } }
+
+// (4) record inside a record
+fun nest(o: Outer): Int { return when (o) { Outer(a = Inner(v = k), b = m) -> k + m } }
+
+// (6) record nested inside a positional variant ctor
+fun opt(o: O): Int {
+  return when (o) {
+    OS(Pt(x = 0, y = b)) -> b
+    OS(Pt(x = a, y)) -> a
+    ON -> -1
+  }
+}
+
+fun main(): Int {
+  val s = sum(Pt(7, 9))          // 16
+  println(s)
+  if (s != 16) { return 1 }
+  val r = rev(Pt(3, 10))         // 310 (order-independent field resolution)
+  println(r)
+  if (r != 310) { return 2 }
+  val c0 = cls(Pt(0, 0))         // 1
+  println(c0)
+  if (c0 != 1) { return 3 }
+  val c1 = cls(Pt(0, 5))         // 2 (first arm's y=0 test fails, falls through)
+  println(c1)
+  if (c1 != 2) { return 4 }
+  val c2 = cls(Pt(7, 9))         // 3 (both literal arms fail, catch-all)
+  println(c2)
+  if (c2 != 3) { return 5 }
+  val h = hp(Config(100, 8080, 30))  // 8180 (timeout ignored via ..)
+  println(h)
+  if (h != 8180) { return 6 }
+  val j0 = jval(JNum(42))        // 42
+  println(j0)
+  if (j0 != 42) { return 7 }
+  val j1 = jval(JNull)           // -1 (sibling)
+  println(j1)
+  if (j1 != -1) { return 8 }
+  val z = vz(VW(Inner(77)))      // 77 (nested record -> ctor)
+  println(z)
+  if (z != 77) { return 9 }
+  val n = nest(Outer(Inner(88), 5))  // 93 (record inside record)
+  println(n)
+  if (n != 93) { return 10 }
+  val o0 = opt(OS(Pt(0, 42)))    // 42 (record inside positional ctor, literal arm)
+  println(o0)
+  if (o0 != 42) { return 11 }
+  val o1 = opt(OS(Pt(5, 9)))     // 5 (sibling record arm)
+  println(o1)
+  if (o1 != 5) { return 12 }
+  return 88
+}

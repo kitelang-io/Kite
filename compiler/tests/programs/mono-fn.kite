@@ -28,8 +28,8 @@ fun main(argc: Int, argv: USize): Int {
   if (mi.size() == 2) { acc = acc + 1 }
   if (mi.getOr(1, 0) == 7) { acc = acc + 1 }
   if (mi.getOr(2, 0) == 99) { acc = acc + 1 }
-  if (mi.has(2)) { acc = acc + 1 }
-  if (mi.has(5) == false) { acc = acc + 1 }
+  if (mi.containsKey(2)) { acc = acc + 1 }
+  if (mi.containsKey(5) == false) { acc = acc + 1 }
   when (mi.get(2)) { Some(v) -> { if (v == 99) { acc = acc + 1 } }; None -> 0 }
   when (mi.get(9)) { Some(v) -> 0; None -> { acc = acc + 1 } }
 
@@ -41,17 +41,17 @@ fun main(argc: Int, argv: USize): Int {
   if (ms.size() == 2) { acc = acc + 1 }
   if (ms.getOr("alpha", 0) == 11) { acc = acc + 1 }
   if (ms.getOr("beta", 0) == 2) { acc = acc + 1 }
-  if (ms.has("beta")) { acc = acc + 1 }
-  if (ms.has("gamma") == false) { acc = acc + 1 }
+  if (ms.containsKey("beta")) { acc = acc + 1 }
+  if (ms.containsKey("gamma") == false) { acc = acc + 1 }
 
   // (C) singleton::<Int> and singleton::<String> — the second @mono free function, two instantiations.
   val vi = singleton::<Int>(77)
-  if (vi.len() == 1) { acc = acc + 1 }
+  if (vi.size() == 1) { acc = acc + 1 }
   if (vi.get(0) == 77) { acc = acc + 1 }
   val vs = singleton::<String>("hi")
   val s0: String = vs.get(0)
-  if (vs.len() == 1) { acc = acc + 1 }
-  if (s0.len() == 2) { acc = acc + 1 }
+  if (vs.size() == 1) { acc = acc + 1 }
+  if (s0.length() == 2) { acc = acc + 1 }
 
   return acc
 }

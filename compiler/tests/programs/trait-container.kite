@@ -15,7 +15,7 @@ fun main(): Int {
   shapes.push(Circle(1))
   var total = 0
   var i = 0
-  while (i < shapes.len()) {
+  while (i < shapes.size()) {
     val s = shapes.get(i)
     total = total + s.area()
     i = i + 1

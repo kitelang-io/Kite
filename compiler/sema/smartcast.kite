@@ -1,0 +1,155 @@
+// compiler/sema/smartcast.kite — the flow-narrowing (smart-cast) DEPARTMENT.
+//
+// A dedicated, REUSABLE subsystem (SMARTCAST-DESIGN.md §2) split cleanly into two halves:
+//
+//   1. ANALYSIS (this module, PURE + total + side-effect-free): given a boolean condition and a `sense`
+//      (which branch we're in), compute the set of narrowing FACTS it establishes. It understands
+//      `is`/`!is` (type facts), `!= null`/`== null` (nullability facts), `&&` (facts union under sense),
+//      `||` (facts survive only on the opposite sense — De Morgan), and `!` (flip sense).
+//
+//   2. APPLICATION (per-pass, thin — lives in kcheck.kite / klower.kite): each pass takes those facts and
+//      writes them into ITS OWN scoped binding table (the checker's TEnv.locals, the lowerer's Lo.locN/locT),
+//      then restores on scope exit. That is where the STABILITY rule bites (a fact is dropped unless its
+//      target resolves to an immutable `val`/param/`this` in that pass's table — see the mut bit each pass
+//      threads). Keeping the hard part (decomposing conditions) here ONCE means a new narrowing site (a
+//      future `while (x is T)`, a `require`, a `?.let`) is a few lines of "call narrowFacts, apply, restore".
+//
+// This module is a LEAF: it depends only on FExpr (from kfront.kite, included before it) plus IntBuf. It
+// deliberately knows NOTHING about TEnv / Lo / Ctx, so all three passes can use it. It is byte-INERT for the
+// compiler's own build — the compiler's source contains no narrowable `is`/null condition, so narrowFacts
+// returns an empty fact set for every `if` it compiles.
+
+// A single narrowing fact: within the branch it belongs to, binding `name` may be treated as type `ty`.
+//   kind SC_IS      (0) : narrow `name` to the concrete/trait/variant type named by `ty`.
+//   kind SC_NONNULL (1) : `name` is proven non-null here — strip a trailing `?` from its declared type (`ty` "").
+struct Fact(val name: String, val ty: String, val kind: Int)
+
+fun scIsKind(): Int { return 0 }
+
+fun scNonNullKind(): Int { return 1 }
+
+// Is `e` the `null` literal? (`x != null` / `x == null` decompose to a NONNULL fact on the OTHER operand.)
+fun scIsNullLit(e: FExpr): Bool { return when (e) { FENull -> true; else -> false } }
+
+// The narrowable TARGET of an expression: the name of the bare, simple-path binding it refers to, or "" if
+// it is not a simple path. This is the SYNTACTIC half of the stability rule (§2.3): only a bare identifier
+// (or `this`) can ever narrow — a field/index/call subject returns "". The SEMANTIC half (the name must be
+// an immutable `val`, never a reassignable `var`) is enforced by each pass's applyFacts against its own
+// mutability table, because only the pass owns the val/var bit. So narrowTarget answers "could this ever be
+// narrowed?" and the pass answers "is it a stable val right now?".
+fun narrowTarget(e: FExpr): String {
+  return when (e) {
+    FEIdent(nm) -> nm
+    FEThis -> "this"
+    else -> ""
+  }
+}
+
+// If exactly one of (a, b) is the `null` literal, return the narrowTarget of the OTHER; else "".
+fun scNullCmpTarget(a: FExpr, b: FExpr): String {
+  if (scIsNullLit(a) && (scIsNullLit(b) == false)) { return narrowTarget(b) }
+  if (scIsNullLit(b) && (scIsNullLit(a) == false)) { return narrowTarget(a) }
+  return ""
+}
+
+// Append every fact of `src` onto `dst` (a tiny concat; IntBuf<Fact> has no ++).
+fun scAppendFacts(dst: IntBuf, src: IntBuf): Int {
+  var i = 0
+  while (i < src.size()) { dst.push(src.get(i)); i = i + 1 }
+  return 0
+}
+
+// THE PURE ANALYZER. Decompose boolean condition `cond` into the narrowing facts that HOLD on a given path:
+//   sense 1 = the THEN path (facts true when `cond` evaluates true),
+//   sense 0 = the ELSE / fall-through path (facts true when `cond` evaluates false).
+// Returns IntBuf<Fact>. Total: any condition it doesn't recognise yields no facts (an ordinary `if`).
+fun narrowFacts(cond: FExpr, sense: Int): IntBuf {
+  val out = intBuf()
+  when (cond) {
+    // `x is T` (neg 0) / `x !is T` (neg 1). The positive "x IS T" fact holds exactly when neg != sense:
+    // `is T` on the then-path (neg 0, sense 1) and `!is T` on the else-path (neg 1, sense 0). The negative
+    // side ("x is NOT T") is not a representable positive narrow, so it yields nothing.
+    FEIs(subj, ty, neg) -> {
+      if (neg != sense) { val nm = narrowTarget(subj); if (nm != "") { out.push(Fact(nm, ty, scIsKind())) } }
+      0
+    }
+    FEUnary(op, c) -> { if (op == "not !") { scAppendFacts(out, narrowFacts(c, 1 - sense)) }; 0 }
+    FEBin(op, a, b) -> {
+      if (op == "&&") {
+        // both operands must be true on the then-path -> union their then-facts; on the else-path neither is
+        // guaranteed (De Morgan: !(a&&b) = !a || !b), so no facts survive.
+        if (sense == 1) { scAppendFacts(out, narrowFacts(a, 1)); scAppendFacts(out, narrowFacts(b, 1)) }
+      } else {
+        if (op == "||") {
+          // dual of &&: nothing on the then-path; on the else-path BOTH are false -> union their else-facts.
+          if (sense == 0) { scAppendFacts(out, narrowFacts(a, 0)); scAppendFacts(out, narrowFacts(b, 0)) }
+        } else {
+          if (op == "!=") {
+            // `x != null` is TRUE => x non-null: a NONNULL fact on the then-path (sense 1) only.
+            if (sense == 1) { val nm = scNullCmpTarget(a, b); if (nm != "") { out.push(Fact(nm, "", scNonNullKind())) } }
+          } else {
+            if (op == "==") {
+              // `x == null` is FALSE => x non-null: a NONNULL fact on the else-path (sense 0) only.
+              if (sense == 0) { val nm = scNullCmpTarget(a, b); if (nm != "") { out.push(Fact(nm, "", scNonNullKind())) } }
+            }
+          }
+        }
+      }
+      0
+    }
+    else -> 0
+  }
+  return out
+}
+
+// A `then`-branch that provably DIVERGES (never falls through) lets the code AFTER a guarded `if` inherit the
+// ELSE-path facts: `if (x !is T) return; x.f` narrows the continuation. `scDivergesBody` recognises the
+// forms the compiler can prove: a `return` (with or without a value) as the last statement, or a call to a
+// diverging intrinsic (`panic`/`__abort`/`error`). Conservative — anything else is treated as falling
+// through (no continuation narrowing), which is always sound.
+fun scDivergesExpr(e: FExpr): Bool {
+  return when (e) {
+    FERet(x) -> true
+    FEBlock(stmts, res) -> scDivergesBody(stmts, res)
+    FECall(callee, args) -> scIsDivergingCallee(callee)
+    else -> false
+  }
+}
+
+fun scIsDivergingCallee(callee: FExpr): Bool {
+  return when (callee) {
+    FEIdent(nm) -> nm == "panic" || nm == "__abort" || nm == "error"
+    else -> false
+  }
+}
+
+fun scDivergesStmt(s: FStmt): Bool {
+  return when (s) {
+    FSReturnV(x) -> true
+    FSReturnU -> true
+    FSExprS(e) -> scDivergesExpr(e)
+    else -> false
+  }
+}
+
+// Does this block (its statements + optional result expr) provably diverge on every path out of it? We only
+// need the SIMPLE case the guard idiom produces: a straight-line block whose LAST element is a diverging
+// statement/expression. (A branch-balanced divergence like `if..return else..return` is not required here.)
+fun scDivergesBody(stmts: IntBuf, res: FExpr): Bool {
+  if (isNoResF(res) == false) { return scDivergesExpr(res) }
+  if (stmts.size() == 0) { return false }
+  return scDivergesStmt(stmts.get(stmts.size() - 1))
+}
+
+// The guard shape `if (cond) <diverging-then>` with NO else — the early-return idiom. When a statement is
+// exactly this, the REST of the enclosing block runs only if `cond` was FALSE, so it inherits
+// narrowFacts(cond, 0). Returns the condition FExpr of such a guard, or FENoRes if `s` is not one.
+fun scGuardCond(s: FStmt): FExpr {
+  return when (s) {
+    FSExprS(e) -> when (e) {
+      FEIf(c, t, el) -> if (isNoResF(el) && scDivergesExpr(t)) { c } else { FENoRes }
+      else -> FENoRes
+    }
+    else -> FENoRes
+  }
+}

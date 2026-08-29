@@ -1,0 +1,176 @@
+// when-unified.kite — Phase 3a `when` unification RUNTIME DIFFERENTIAL (SMARTCAST-DESIGN.md §3).
+//
+// Exercises every arm form the desugar handles: bare variant, positional-payload destructure, int/string/bool
+// literal match, `is V` smart-cast body, `if guard`, `|`-alternation, subjectless `when`, nested `when`,
+// bare-ident catch-all, `else`. Each case is asserted with println (1 = pass), so correctness is verified at
+// RUNTIME (not just the byte fixpoint). The two SILENT FOOTGUNS are proven FIXED:
+//   * GUARD honored — old code dropped `if guard`, so `n if n>10 -> 100` matched EVERYTHING (classify(5)==100);
+//     now the guard runs, so classify(5)==200.
+//   * `|`-ALTERNATION — old code kept only the FIRST alternative, so `1|2|3` matched only 1 (lowHigh(2)=="high");
+//     now every alternative matches, so lowHigh(2)=="low".
+// main returns the number of passing assertions (24). All must pass -> exit 24.
+
+enum Tok {
+  TEnd
+  TNum(Int)
+  TStr(String)
+  TList(IntBuf)
+}
+
+// smart-cast body: `is TSome -> o.value` — the subject `o` is narrowed IN PLACE to OSome, so its named
+// payload field `value` reads off the boxed variant.
+enum Opt {
+  OSome(value: Int)
+  ONone
+}
+
+// bare variant + positional-payload destructure + payload used with a method (exhaustive, no else).
+fun tokKind(t: Tok): Int {
+  return when (t) {
+    TEnd -> 0
+    TNum(n) -> n
+    TStr(s) -> s.length()
+    TList(xs) -> xs.size()
+  }
+}
+
+// `is V` smart-cast arm body reading a narrowed named payload.
+fun optVal(o: Opt): Int {
+  return when (o) {
+    is OSome -> o.value
+    ONone -> 0 - 1
+  }
+}
+
+// FOOTGUN #1 (guard): the guard references the catch-all bind `n`. Old code dropped the guard, so this arm
+// matched everything (always 100). Now the guard runs: >10 -> 100, else 200.
+fun classify(x: Int): Int {
+  return when (x) {
+    n if n > 10 -> 100
+    else -> 200
+  }
+}
+
+// FOOTGUN #2 (alternation): old code kept only `1`, so 2 and 3 fell through to "high".
+fun lowHigh(x: Int): String {
+  return when (x) {
+    1 | 2 | 3 -> "low"
+    else -> "high"
+  }
+}
+
+// subjectless `when` — was a hard lowFail; now a plain cond chain.
+fun sign(x: Int): Int {
+  return when {
+    x > 0 -> 1
+    x < 0 -> 0 - 1
+    else -> 0
+  }
+}
+
+fun greet(s: String): String {
+  return when (s) {
+    "hi" -> "hello"
+    "bye" -> "goodbye"
+    else -> "?"
+  }
+}
+
+// bool literal match (Bool is primitive, not enum -> no exhaustiveness requirement).
+fun neg(b: Bool): Bool {
+  return when (b) {
+    true -> false
+    false -> true
+  }
+}
+
+// nested `when` (inner when is the outer arm's body).
+fun nested(a: Int, b: Int): Int {
+  return when (a) {
+    0 -> when (b) { 0 -> 1; else -> 2 }
+    else -> 3
+  }
+}
+
+// bare-ident catch-all binds the subject.
+fun idOrZero(t: Tok): Int {
+  return when (t) {
+    TNum(n) -> n
+    other -> 0
+  }
+}
+
+// a guard that references a DESTRUCTURED payload: the payload is bound in the guard scope (gated behind the
+// variant match via `&&`, so it is read only after the match succeeds) AND in the arm body.
+fun bigNum(t: Tok): Int {
+  return when (t) {
+    TNum(n) if n > 5 -> n * 2
+    TNum(n) -> n
+    else -> 0 - 1
+  }
+}
+
+// `in <collection>` arm -> desugars to `xs.contains(x)` (the `in`-expression path). (`in a..b` over a RANGE
+// is a separate upstream gap — ranges have no `contains` method — and is not exercised here.)
+fun member(x: Int, xs: Vec<Int>): String {
+  return when (x) {
+    in xs -> "in"
+    else -> "out"
+  }
+}
+
+fun chk(cond: Bool): Int {
+  if (cond) { println(1) return 1 }
+  println(0)
+  return 0
+}
+
+fun main(): Int {
+  var acc = 0
+
+  // enum bare-variant + positional-payload destructure
+  acc = acc + chk(tokKind(TEnd) == 0)
+  acc = acc + chk(tokKind(TNum(42)) == 42)
+  acc = acc + chk(tokKind(TStr("abc")) == 3)
+
+  // `is V` smart-cast arm body (subject narrowed, named payload read)
+  acc = acc + chk(optVal(OSome(55)) == 55)
+  acc = acc + chk(optVal(ONone) == 0 - 1)
+
+  // FOOTGUN #1: guard honored (old: classify(5) was 100)
+  acc = acc + chk(classify(5) == 200)
+  acc = acc + chk(classify(20) == 100)
+
+  // FOOTGUN #2: every alternative matches (old: lowHigh(2)/lowHigh(3) were "high")
+  acc = acc + chk(lowHigh(1) == "low")
+  acc = acc + chk(lowHigh(2) == "low")
+  acc = acc + chk(lowHigh(3) == "low")
+  acc = acc + chk(lowHigh(9) == "high")
+
+  // subjectless when
+  acc = acc + chk(sign(7) == 1)
+  acc = acc + chk(sign(0 - 4) == 0 - 1)
+  acc = acc + chk(sign(0) == 0)
+
+  // string match + else
+  acc = acc + chk(greet("hi") == "hello")
+  acc = acc + chk(greet("nope") == "?")
+
+  // bool match, nested when, bare-ident catch-all
+  acc = acc + chk(neg(true) == false)
+  acc = acc + chk(nested(0, 0) == 1)
+  acc = acc + chk(idOrZero(TStr("z")) == 0)
+
+  // guard over a destructured payload
+  acc = acc + chk(bigNum(TNum(10)) == 20)
+  acc = acc + chk(bigNum(TNum(3)) == 3)
+  acc = acc + chk(bigNum(TEnd) == 0 - 1)
+
+  // `in <collection>` arm
+  val ys = [1, 2, 3]
+  acc = acc + chk(member(2, ys) == "in")
+  acc = acc + chk(member(9, ys) == "out")
+
+  println(acc)
+  return acc
+}

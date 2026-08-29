@@ -68,7 +68,7 @@ fun StrBuilder.encodeUtf8(cp: Int): StrBuilder {
 
 // Count the Unicode scalars in a UTF-8 byte-string (O(n), one step per lead byte).
 fun String.utf8CharCount(): Int {
-  val n = self.len()
+  val n = self.length()
   var i = 0
   var count = 0
   while (i < n) { i = i + self.byteAt(i).utf8SeqLen(); count = count + 1 }

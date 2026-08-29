@@ -25,7 +25,7 @@ class Array<T>(var n: Int, var buf: RawBuf) {
     __retain(self.buf)
     return Array::<T>(self.n, self.buf)
   }
-  fun len(self): Int { return self.n }
+  fun size(self): Int { return self.n }
   fun isEmpty(self): Bool { return self.n == 0 }
   fun get(self, i: Int): T {
     if (i < 0 || i >= self.n) { panicOOB("Array.get", i, self.n) }

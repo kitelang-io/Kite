@@ -22,7 +22,7 @@ class Box(val v: Int) {}
 // return. A balanced synthesized deinit releases the buffer's 3 refs, returning b's refcount to baseline.
 fun litBuildDrop(b: Box): Int {
   val a = [b, b, b]
-  return a.len()
+  return a.size()
 }
 
 fun main(): Int {

@@ -18,7 +18,7 @@ import kite::alloc::collections::vec
 fun vecOf<T>(vararg xs: T): Vec<T> {
   val v = Vec::<T>(0, 0, RawBuf(0))
   var i = 0
-  while (i < xs.len()) { v.push(xs.get(i)) i = i + 1 }
+  while (i < xs.size()) { v.push(xs.get(i)) i = i + 1 }
   return v
 }
 
@@ -30,8 +30,8 @@ fun main(argc: Int, argv: USize): Int {
   if (mi.size() == 2) { acc = acc + 1 }          // 1
   if (mi.getOr(1, 0) == 10) { acc = acc + 1 }    // 2
   if (mi.getOr(2, 0) == 20) { acc = acc + 1 }    // 3
-  if (mi.has(1)) { acc = acc + 1 }               // 4
-  if (mi.has(9) == false) { acc = acc + 1 }      // 5
+  if (mi.containsKey(1)) { acc = acc + 1 }               // 4
+  if (mi.containsKey(9) == false) { acc = acc + 1 }      // 5
 
   // (B) hashMap::<String,Int>(vararg) with a SINGLE entry — a different instantiation, content-keyed.
   val ms = hashMap::<String, Int>("a" to 1)
@@ -49,7 +49,7 @@ fun main(argc: Int, argv: USize): Int {
 
   // (D) vecOf::<Int>(vararg) — the second @mono vararg factory, first concrete T.
   val vi = vecOf::<Int>(3, 5, 7, 9)
-  if (vi.len() == 4) { acc = acc + 1 }           // 12
+  if (vi.size() == 4) { acc = acc + 1 }           // 12
   if (vi.get(0) == 3) { acc = acc + 1 }          // 13
   if (vi.get(3) == 9) { acc = acc + 1 }          // 14
 
@@ -57,13 +57,13 @@ fun main(argc: Int, argv: USize): Int {
   val vs = vecOf::<String>("hi", "yo")
   val s0: String = vs.get(0)
   val s1: String = vs.get(1)
-  if (vs.len() == 2) { acc = acc + 1 }           // 15
-  if (s0.len() == 2) { acc = acc + 1 }           // 16
+  if (vs.size() == 2) { acc = acc + 1 }           // 15
+  if (s0.length() == 2) { acc = acc + 1 }           // 16
   if (s1 == "yo") { acc = acc + 1 }              // 17
 
   // (F) a 0-arg vecOf::<Int>() also resolves to the vararg overload (fixed 0 <= 0 args), yielding empty.
   val ve = vecOf::<Int>()
-  if (ve.len() == 0) { acc = acc + 1 }           // 18
+  if (ve.size() == 0) { acc = acc + 1 }           // 18
 
   println(acc)
   return acc

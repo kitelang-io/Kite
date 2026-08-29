@@ -13,7 +13,7 @@ fun makeName(i: Int): String { return "kite_string_" + i.toStr() }
 fun churn(): Int {
   var i = 0
   var acc = 0
-  while (i < 2000) { val junk = "zzzzzzzzzzzz_" + i.toStr() acc = acc + junk.len() i = i + 1 }
+  while (i < 2000) { val junk = "zzzzzzzzzzzz_" + i.toStr() acc = acc + junk.length() i = i + 1 }
   return acc
 }
 
