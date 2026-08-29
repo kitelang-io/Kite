@@ -17,7 +17,7 @@ fun main(): Int {
   p.push(1) p.push(2)
   clobber(p)
   if (p.get(0) == 1) { acc = acc + 1 }         // caller element intact after callee mutation
-  if (p.len() == 2) { acc = acc + 1 }          // caller length intact after callee push
+  if (p.size() == 2) { acc = acc + 1 }          // caller length intact after callee push
 
   // Vec: copy shares the buffer until the copy writes (copy-on-write).
   val v = Vec::<Int>(0, 0, RawBuf(0))
@@ -26,9 +26,9 @@ fun main(): Int {
   vc.set(0, 999)
   vc.push(4)
   if (v.get(0) == 1) { acc = acc + 1 }        // original element untouched
-  if (v.len() == 3) { acc = acc + 1 }         // original length untouched
+  if (v.size() == 3) { acc = acc + 1 }         // original length untouched
   if (vc.get(0) == 999) { acc = acc + 1 }     // copy mutated
-  if (vc.len() == 4) { acc = acc + 1 }        // copy grew independently
+  if (vc.size() == 4) { acc = acc + 1 }        // copy grew independently
 
   // A second copy taken AFTER mutation is isolated from both prior handles.
   val vc2 = vc
@@ -50,9 +50,9 @@ fun main(): Int {
   val dc = d
   var i = 0
   while (i < 20) { dc.pushBack(100 + i) i = i + 1 }   // forces grow + relinearize on the copy
-  if (d.len() == 2) { acc = acc + 1 }          // deque original length intact
+  if (d.size() == 2) { acc = acc + 1 }          // deque original length intact
   if (d.get(1) == 2) { acc = acc + 1 }         // deque original element intact
-  if (dc.len() == 22) { acc = acc + 1 }        // copy grew
+  if (dc.size() == 22) { acc = acc + 1 }        // copy grew
   if (dc.get(0) == 1) { acc = acc + 1 }        // copy front preserved through growth
 
   return acc

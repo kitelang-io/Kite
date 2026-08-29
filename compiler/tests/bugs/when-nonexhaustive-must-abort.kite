@@ -1,0 +1,16 @@
+// EXHAUSTIVENESS (#5, Kotlin-style): a `when` over an ENUM subject that omits a variant AND has no `else`
+// must be a COMPILE ERROR — the checker rejects it with a "non-exhaustive `when`" diagnostic and writes NO
+// binary. Here `Blue` is not covered and there is no catch-all, so `name` must be rejected.
+enum Color { Red; Green; Blue }
+
+fun name(c: Color): String {
+  return when (c) {
+    Red -> "red"
+    Green -> "green"
+  }
+}
+
+fun main(): Int {
+  println(name(Red))
+  return 0
+}

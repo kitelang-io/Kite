@@ -10,7 +10,7 @@ fun main(): Int {
   // encode a scalar into a builder, then read the bytes back
   val sb = strNew()
   sb.encodeUtf8(8364) // U+20AC euro -> E2 82 AC
-  if (sb.size() == 3 && sb.byteAt(0) == 226 && sb.byteAt(1) == 130 && sb.byteAt(2) == 172) { acc = acc + 4 }
+  if (sb.length() == 3 && sb.byteAt(0) == 226 && sb.byteAt(1) == 130 && sb.byteAt(2) == 172) { acc = acc + 4 }
   val euro = sb.finish()
   // decode it back to the scalar
   if (euro.decodeUtf8At(0) == 8364) { acc = acc + 8 }

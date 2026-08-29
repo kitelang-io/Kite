@@ -1,0 +1,29 @@
+// Smart-cast Phase 2: nullable narrowing rides the same subsystem (the NONNULL fact kind). `if (y != null)`
+// narrows `T?` -> `T` for field access; `y!!` and `y ?: d` yield non-null values; `if (y == null) return`
+// narrows the fall-through. Exit code = summed field reads (also printed) so the harness verifies narrowing
+// fired. (Args are all non-null: passing a bare `null` LITERAL as an argument hits an unrelated, pre-existing
+// binary-layout bug — see smartcast-early-return for the guard-returns path exercised via non-null values.)
+
+struct Box(val v: Int)
+
+// != null narrows y from Box? to Box, so y.v is a legal field read on the then-branch
+fun nn(y: Box?): Int { if (y != null) { return y.v } return 0 }
+
+// y!! is non-null; (y!!).v reads the field
+fun bang(y: Box?): Int { return y!!.v }
+
+// (y ?: d) is non-null (either y or the default d)
+fun elvis(y: Box?): Int { val d = Box(100); return (y ?: d).v }
+
+// == null early-return: after the guard, y is non-null for the rest of the body
+fun earlyNull(y: Box?): Int { if (y == null) { return 0 } return y.v }
+
+fun main(): Int {
+  var s = 0
+  s = s + nn(Box(3)) // 3
+  s = s + bang(Box(5)) // 5
+  s = s + elvis(Box(7)) // 7
+  s = s + earlyNull(Box(11)) // 11
+  println("smartcast-null score=${s}")
+  return s // 26
+}

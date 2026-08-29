@@ -68,6 +68,7 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/panic-assert.kite:42
        compiler/tests/programs/big-frame-later-globals.kite:42
        compiler/tests/programs/untyped-param-retty.kite:5
+       compiler/tests/programs/when-isin-arm-boundary.kite:141
        compiler/tests/programs/sized-arrays.kite:12
        compiler/tests/programs/unsigned-ops.kite:7 compiler/tests/programs/cast-as.kite:11 compiler/tests/programs/to-float.kite:5 compiler/tests/programs/overflow-family.kite:16 compiler/tests/programs/convert-from.kite:10 compiler/tests/programs/width-wrap.kite:11
        compiler/tests/programs/derive.kite:18 compiler/tests/programs/derive-enum.kite:20
@@ -90,8 +91,8 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/container-elem-arc-drop.kite:32
        compiler/tests/programs/container-elem-literal-drop.kite:5
        compiler/tests/programs/loop-scope-arc.kite:20
-       compiler/tests/programs/option-of-class.kite:8
-       compiler/tests/programs/collections-cow.kite:14
+       compiler/tests/programs/option-of-class.kite:8 compiler/tests/programs/option-class-construct.kite:7
+       compiler/tests/programs/collections-cow.kite:14 compiler/tests/programs/hashtree-cow.kite:33
        compiler/tests/programs/ns-mono-vec.kite:12
        compiler/tests/programs/ns-method-sugar.kite:18
        compiler/tests/programs/alias-method-dispatch.kite:4
@@ -103,7 +104,20 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/mono-vararg.kite:18
        compiler/tests/programs/fn-ref-elements.kite:16
        compiler/tests/programs/infix-pair.kite:111
-       compiler/tests/programs/stdlib-polish.kite:23)
+       compiler/tests/programs/is-expr.kite:127 compiler/tests/programs/in-expr.kite:23
+       compiler/tests/programs/smartcast-if.kite:60 compiler/tests/programs/smartcast-null.kite:26 compiler/tests/programs/smartcast-early-return.kite:16
+       compiler/tests/programs/smartcast-print.kite:100
+       compiler/tests/programs/when-unified.kite:24
+       compiler/tests/programs/when-nested-ctor.kite:77
+       compiler/tests/programs/when-record.kite:88
+       compiler/tests/programs/when-struct-positional.kite:66
+       compiler/tests/programs/when-payload-multiword.kite:6
+       compiler/tests/programs/when-payload-arc.kite:11
+       compiler/tests/programs/nullable-eq.kite:188
+       compiler/tests/programs/stdlib-polish.kite:23
+       compiler/tests/programs/generic-return-typeparam.kite:80
+       compiler/tests/programs/generic-return-primitive.kite:26
+       compiler/tests/programs/generic-arg-alias-release.kite:76)
 for t in $TESTS; do
   if check "${t%:*}" "${t##*:}"; then pass=$((pass+1)); else fail=$((fail+1)); fi
 done

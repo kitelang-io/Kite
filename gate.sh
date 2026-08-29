@@ -28,6 +28,16 @@ zsh compiler/tests/run-fmt-tests.sh >"$T/fmt.log" 2>&1
 tail -1 "$T/fmt.log"
 grep -q "FMT TESTS PASSED" "$T/fmt.log" || fail "kitefmt tests failed ($(tail -3 "$T/fmt.log" | tr '\n' ' '))"
 
+echo "=== [parser] full-language parser AST dump matches golden snapshots ==="
+zsh compiler/tests/run-parser-tests.sh >"$T/parser.log" 2>&1
+tail -1 "$T/parser.log"
+grep -q " 0 fail ==" "$T/parser.log" || fail "parser tests failed ($(tail -3 "$T/parser.log" | tr '\n' ' '))"
+
+echo "=== [check] M2 checker diagnostics match golden snapshots ==="
+zsh compiler/tests/run-check-tests.sh >"$T/check.log" 2>&1
+tail -1 "$T/check.log"
+grep -q " 0 fail," "$T/check.log" || fail "checker tests failed ($(tail -3 "$T/check.log" | tr '\n' ' '))"
+
 echo "=== [robustness] malformed input rejected, never segfaults ==="
 BAD=compiler/tests/bugs/malformed-input-must-not-segfault.kite
 "$T/k2" check "$BAD" >/dev/null 2>&1; rc=$?
@@ -136,6 +146,45 @@ rm -f "$T/bc_out"
 grep -q "const val" "$T/bc_err" || fail "bare-const diagnostic not on stderr"
 echo "  const MAX = 100 -> exit $rc, no binary, diagnostic on stderr ✓"
 
+echo "=== [robustness] a bare CLASS constructor param (no \`val\`/\`var\`) is rejected, no silent corrupt binary ==="
+PC=compiler/tests/bugs/bare-ctor-param-class-must-abort.kite
+rm -f "$T/pc_out"
+"$T/k2" "$PC" "$T/pc_out" >"$T/pc_stdout" 2>"$T/pc_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on a bare class ctor param — bare-param rejection regressed (silent parser desync)"
+[ -f "$T/pc_out" ] && fail "compiler wrote a binary despite a bare class ctor param (silent corrupt binary)"
+grep -q "must be declared with" "$T/pc_err" || fail "bare class ctor-param diagnostic not on stderr"
+[ -s "$T/pc_stdout" ] && fail "bare class ctor-param diagnostic leaked to stdout (must be stderr-only)"
+echo "  class Box(n: Int) -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] a bare STRUCT constructor param (no \`val\`/\`var\`) is rejected, no silent corrupt binary ==="
+PS=compiler/tests/bugs/bare-ctor-param-struct-must-abort.kite
+rm -f "$T/ps_out"
+"$T/k2" "$PS" "$T/ps_out" >"$T/ps_stdout" 2>"$T/ps_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on a bare struct ctor param — bare-param rejection regressed (silent parser desync)"
+[ -f "$T/ps_out" ] && fail "compiler wrote a binary despite a bare struct ctor param (silent corrupt binary)"
+grep -q "must be declared with" "$T/ps_err" || fail "bare struct ctor-param diagnostic not on stderr"
+[ -s "$T/ps_stdout" ] && fail "bare struct ctor-param diagnostic leaked to stdout (must be stderr-only)"
+echo "  struct Bad(x: Int, y: Int) -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] \`x is <whole enum type>\` is rejected (not runtime-decidable), no silent binary (smart-cast Phase 1) ==="
+WE=compiler/tests/bugs/is-whole-enum-must-abort.kite
+rm -f "$T/we_out"
+"$T/k2" "$WE" "$T/we_out" >"$T/we_stdout" 2>"$T/we_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on \`v is Opt\` — whole-enum \`is\` rejection regressed"
+[ -f "$T/we_out" ] && fail "compiler wrote a binary despite \`is\` on a whole enum type (not runtime-decidable)"
+grep -q "whole enum type" "$T/we_err" || fail "whole-enum \`is\` diagnostic not on stderr"
+echo "  v is Opt -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] a \`var\` is NOT flow-narrowed (soundness), no silent binary (smart-cast Phase 2) ==="
+SV=compiler/tests/bugs/smartcast-var-must-abort.kite
+rm -f "$T/sv_out"
+"$T/k2" "$SV" "$T/sv_out" >"$T/sv_stdout" 2>"$T/sv_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 narrowing a \`var\` — the stability rule regressed (a var must not smart-cast)"
+[ -f "$T/sv_out" ] && fail "compiler wrote a binary despite narrowing a \`var\` (unsound smart-cast)"
+grep -q "has no member bark" "$T/sv_err" || fail "var-narrow rejection diagnostic not on stderr (should reject \`x.bark()\` on the un-narrowed Animal)"
+[ -s "$T/sv_stdout" ] && fail "var-narrow diagnostic leaked to stdout (must be stderr-only)"
+echo "  var x is Dog { x.bark() } -> exit $rc, no binary, diagnostic on stderr ✓"
+
 echo "=== [robustness] a same-signature duplicate definition is a hard error, no silent last-wins (M5) ==="
 DS=compiler/tests/bugs/duplicate-signature-must-abort.kite
 rm -f "$T/ds_out"
@@ -184,6 +233,32 @@ chmod +x "$T/bo_out"
 [ "$rc" -eq 0 ] && fail "bytes-OOB subscript returned 0 — no bounds guard on the sized-byte arrays (silent OOB read)"
 grep -q "out of bounds" "$T/bo_err" || fail "bytes-OOB panic diagnostic not on stderr"
 echo "  a[5] on a len-2 U8Array -> exit $rc (abort), 'out of bounds' on stderr ✓"
+
+echo "=== [robustness] a non-exhaustive enum \`when\` (missing variant, no else) is a compile error, no silent binary (#5) ==="
+NE=compiler/tests/bugs/when-nonexhaustive-must-abort.kite
+# EXHAUSTIVENESS (Phase 3a #5): a `when` over an enum that omits a variant AND has no `else` must be rejected
+# by the checker — cover-all-or-else. Asserts non-zero exit + no binary + a stderr "non-exhaustive" diagnostic.
+rm -f "$T/ne_out"
+"$T/k2" "$NE" "$T/ne_out" >"$T/ne_stdout" 2>"$T/ne_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on a non-exhaustive enum \`when\` — exhaustiveness check regressed"
+[ -f "$T/ne_out" ] && fail "compiler wrote a binary despite a non-exhaustive enum \`when\` (uncovered variant, no else)"
+grep -q "non-exhaustive" "$T/ne_err" || fail "non-exhaustive-when diagnostic not on stderr"
+[ -s "$T/ne_stdout" ] && fail "non-exhaustive-when diagnostic leaked to stdout (must be stderr-only)"
+echo "  when(Color){Red;Green} (no Blue/else) -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] a \`when\` binding-alternation arm is a compile error, no silent binary (Phase 3b) ==="
+BA=compiler/tests/bugs/when-binding-alternation-must-abort.kite
+# Phase 3b step-3 (final): a \`|\`-alternation where an alternative BINDS a name (A(x) | B(y)) is the one
+# shape the desugar cannot express (a var bound in one branch may be unbound in another) — the legacy when-IR
+# that used to catch it was DELETED, so the checker MUST reject it. Asserts non-zero exit + no binary + a
+# stderr "alternation" diagnostic. A bind-free alternation (1|2|3) still works (covered by when-unified.kite).
+rm -f "$T/ba_out"
+"$T/k2" "$BA" "$T/ba_out" >"$T/ba_stdout" 2>"$T/ba_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on a \`when\` binding-alternation — binding-alternation reject regressed"
+[ -f "$T/ba_out" ] && fail "compiler wrote a binary despite a \`when\` binding-alternation arm"
+grep -q "alternation" "$T/ba_err" || fail "binding-alternation diagnostic not on stderr"
+[ -s "$T/ba_stdout" ] && fail "binding-alternation diagnostic leaked to stdout (must be stderr-only)"
+echo "  when(e){A(x)|B(x)->x} -> exit $rc, no binary, diagnostic on stderr ✓"
 
 echo "✅ GATE PASSED (no OCaml, no shared /tmp) — suite green, kcc2==kcc3, robust to malformed input"
 rm -rf "$T"

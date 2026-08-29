@@ -20,7 +20,7 @@ fun isIdent(c: Int): Bool { return isAlpha(c) || isDigit(c) }
 // ---- lexer: String -> IntBuf<Tok> -------------------------------------------
 fun lex(src: String): IntBuf {
   val toks = intBuf()
-  val n = src.len()
+  val n = src.length()
   var i = 0
   while (i < n) {
     val c = src.charAt(i)
@@ -73,7 +73,7 @@ fun define(env: Env, name: String, value: Int): Int {
 fun lookup(env: Env, name: String): Int {
   var i = 0
   var found = 0
-  while (i < env.names.len()) {
+  while (i < env.names.size()) {
     val nm: String = env.names.get(i)
     if (nm == name) { found = env.vals.get(i) }
     i = i + 1
@@ -85,7 +85,7 @@ fun lookup(env: Env, name: String): Int {
 struct P(val toks: IntBuf, var pos: Int, val env: Env)
 
 fun peekKind(p: P): Int {
-  if (p.pos >= p.toks.len()) { return 7 }
+  if (p.pos >= p.toks.size()) { return 7 }
   val t: Tok = p.toks.get(p.pos)
   return t.kind
 }

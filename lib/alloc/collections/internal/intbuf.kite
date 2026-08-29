@@ -12,10 +12,11 @@
 // inner list while the outer still holds its raw pointer (UAF). So IntBuf stays leak-managed as before;
 // the class only gives it a visible layout + methods.
 // Methods live IN the class body (self-style, like Vec) — these ARE the real implementation AND the
-// desugar landing points, mangled to List_push / List_get / List_set / List_len / List_length by the
+// desugar landing points, mangled to IntBuf_push / IntBuf_get / IntBuf_set / IntBuf_size by the
 // method system. The [..] literal lowering and a[i]/for-in desugar (klower's roleSym) resolve directly
 // to these mangled methods — there are NO free-function delegates anymore (pure method-ification).
-// `push`/`get`/`set`/`len`, plus a `length` getter alias (so `xs.length` no-parens resolves here).
+// `push`/`get`/`set`/`size` (Kotlin names a sequence's element count `size`; `xs.size` no-parens also
+// resolves here as a getter).
 // @arc(manual): IntBuf is exempt from automatic ARC — its elements are type-erased words push can't
 // retain, and the compiler nests lists-in-lists, so a naive deep-release would UAF. Leak-managed.
 @arc(manual)
@@ -42,10 +43,10 @@ class IntBuf(var n: Int, var cap: Int, var data: USize) {
   // @lang("intbuf.set"): a[i] = v store resolves to this method (emitted List_set).
   @lang("intbuf.set")
   fun set(self, i: Int, x: consuming Int): Int { __rawStore(self.data, i * 8, x) return 0 }
-  // @lang("intbuf.len"): for-in bound / a[i] length resolves to this method (emitted List_len).
+  // @lang("intbuf.len"): for-in bound / a[i] length resolves to this method (emitted IntBuf_size). The role
+  // KEY stays "intbuf.len" (a stable internal identifier); the METHOD is Kotlin's sequence `size`.
   @lang("intbuf.len")
-  fun len(self): Int { return self.n }
-  fun length(self): Int { return self.n }
+  fun size(self): Int { return self.n }
   fun isEmpty(self): Bool { return self.n == 0 }
 
   // Generic higher-order operations — one machine word per element, closures supported. These were the
@@ -80,7 +81,7 @@ fun intBuf(): IntBuf { return IntBuf(0, 4, __rawAlloc(4 * 8)) }
 fun intBuf(vararg xs: Int): IntBuf {
   val out: IntBuf = intBuf()
   var i = 0
-  while (i < xs.len()) { out.push(xs.get(i)) i = i + 1 }
+  while (i < xs.size()) { out.push(xs.get(i)) i = i + 1 }
   return out
 }
 

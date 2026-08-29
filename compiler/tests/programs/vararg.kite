@@ -5,15 +5,15 @@ import "lib/alloc/collections/array.kite"
 fun sum(vararg xs: Int): Int {
   var acc = 0
   var i = 0
-  while (i < xs.len()) { acc = acc + xs.get(i) i = i + 1 }
+  while (i < xs.size()) { acc = acc + xs.get(i) i = i + 1 }
   return acc
 }
 
 // fixed prefix (name: String) then a vararg tail collected into Array<Int>.
 fun label(name: String, vararg rest: Int): Int {
-  var acc = name.len()
+  var acc = name.length()
   var i = 0
-  while (i < rest.len()) { acc = acc + rest.get(i) i = i + 1 }
+  while (i < rest.size()) { acc = acc + rest.get(i) i = i + 1 }
   return acc
 }
 
@@ -22,7 +22,7 @@ class Accum(var base: Int) {
   fun total(self, vararg xs: Int): Int {
     var acc = self.base
     var i = 0
-    while (i < xs.len()) { acc = acc + xs.get(i) i = i + 1 }
+    while (i < xs.size()) { acc = acc + xs.get(i) i = i + 1 }
     return acc
   }
 }

@@ -12,7 +12,7 @@ fun main(): Int {
   if (d.get(0) == 100) { acc = acc + 1 }
   if (d.get(1) == 20) { acc = acc + 1 }
   if (d.get(2) == 300) { acc = acc + 1 }
-  if (d.len() == 3) { acc = acc + 1 }
+  if (d.size() == 3) { acc = acc + 1 }
   // set across the ring seam (pushFront wraps head)
   var w = Deque::<Int>(0, 0, 0, RawBuf(0))
   w.pushBack(1) w.pushBack(2) w.pushFront(0) w.pushBack(3) // logical 0,1,2,3
@@ -26,12 +26,12 @@ fun main(): Int {
   var i = 0
   while (i < 20) { g.pushBack(i) i = i + 1 }
   g[0] = 9000 g[19] = 9019
-  if (g.len() == 20) { acc = acc + 1 }
+  if (g.size() == 20) { acc = acc + 1 }
   if (g.get(0) == 9000) { acc = acc + 1 }
   if (g.get(10) == 10) { acc = acc + 1 }
   if (g.get(19) == 9019) { acc = acc + 1 }
   var s = 0 var j = 0
-  while (j < g.len()) { s = s + g.get(j) j = j + 1 }
+  while (j < g.size()) { s = s + g.get(j) j = j + 1 }
   if (s == 18190) { acc = acc + 1 } // 9000 + (1..18)=171 + 9019
   // CoW: a copy's set must not corrupt the original
   var a = Deque::<Int>(0, 0, 0, RawBuf(0))

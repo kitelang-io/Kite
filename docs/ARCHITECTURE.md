@@ -87,7 +87,7 @@ the export surfaces of what it imports. So `import kite::alloc` gives you alloc'
 
 **Prelude (default availability, config-driven)**: every program has an implicit prelude — the
 first-class collection types `Vec<T>`/`HashMap<K,V>` runtime plus the built-in nominal methods
-(`xs.push(x)`, `s.len()`, `m.size()`) — so `[..]` list literals and `{..}`/`[k:v]` maps work with no
+(`xs.push(x)`, `xs.size()`, `s.length()`, `m.size()`) — so `[..]` list literals and `{..}`/`[k:v]` maps work with no
 `import`, like C/C++ default availability. Crucially this is **configuration, not compiler code**:
 `compiler/prelude.conf` is a newline list of `kite::` module names, and `injectHelpers` resolves each
 through the ordinary `kite::`→`lib/` mapping and injects its functions as globals. The compiler has **no

@@ -10,12 +10,12 @@ fun main(): Int {
   if ('\u{1F600}' == 128512) { acc = acc + 4 } // astral code point stays a 32-bit scalar
   // --- string \x (decoded in arm64.strBytesK) ---
   val s = "\x41\x42"
-  if (s.len() == 2) { acc = acc + 8 }
+  if (s.length() == 2) { acc = acc + 8 }
   if (s.charAt(0) == 65) { acc = acc + 16 }
   if (s.charAt(1) == 66) { acc = acc + 32 }
   // --- string \u multi-byte UTF-8: U+20AC (euro) -> E2 82 AC ---
   val e = "\u{20AC}"
-  if (e.len() == 3) { acc = acc + 64 }
+  if (e.length() == 3) { acc = acc + 64 }
   if (e.charAt(0) == 226 && e.charAt(1) == 130 && e.charAt(2) == 172) { acc = acc + 128 }
   return acc // 255 iff every escape decoded correctly
 }

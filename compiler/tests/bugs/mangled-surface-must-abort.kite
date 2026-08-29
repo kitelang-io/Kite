@@ -1,11 +1,11 @@
 // Phase M6 robustness fixture: a `<Type>_<member>` name is INTERNAL (codegen still computes the mangled
-// symbol), never a valid SURFACE identifier. A bare call to one — here `String_len(s)`, the internal mangle
-// of `s.len()` — must hard-abort with no binary (call it as `s.len()` / `String::len`). Guards the member-
+// symbol), never a valid SURFACE identifier. A bare call to one — here `String_length(s)`, the internal mangle
+// of `s.length()` — must hard-abort with no binary (call it as `s.length()` / `String::length`). Guards the member-
 // table surface enforcement (rejectMangledSurface) against regressing to a silent bare-symbol call. Run under
-// `--no-check` to hit that klower guard directly: with the checker on, `String_len` is now rejected a phase
+// `--no-check` to hit that klower guard directly: with the checker on, `String_length` is now rejected a phase
 // earlier as "unresolved name" (String's queries are real MEMBER methods, so the mangle is no longer a
 // top-level symbol) — still rejected, still no binary, just caught by the checker first.
 fun main(): Int {
   val s = "hi"
-  return String_len(s)
+  return String_length(s)
 }

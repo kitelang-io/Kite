@@ -1,0 +1,39 @@
+// Smart-cast Phase 2: flow-narrowing at `if`/`else`/`&&` sites. A value proven `is T` is USED as `T` with
+// no cast — method dispatch resolves against the narrowed type. Exit code is the summed narrowed results
+// (also printed) so the harness verifies the narrowing actually fired.
+
+trait Animal { fun kind(self): Int }
+
+struct Dog(val name: String) { fun bark(self): Int { return 10 } }
+
+struct Cat(val lives: Int) { fun meow(self): Int { return 20 } }
+
+impl Animal for Dog { fun kind(self): Int { return 1 } }
+
+impl Animal for Cat { fun kind(self): Int { return 2 } }
+
+// then-branch: x narrowed to Dog inside the `is` guard
+fun useThen(x: Animal): Int { if (x is Dog) { return x.bark() } return 0 }
+
+// else-branch: the else of `!is Dog` means x IS Dog (decidable) -> narrowed on the else side
+fun useElse(x: Animal): Int { if (x !is Dog) { return 0 } else { return x.bark() } }
+
+// && short-circuit: the RHS runs only when the LHS was true, so x is Dog while checking `x.bark() > 5`
+fun useAnd(x: Animal): Int { if (x is Dog && x.bark() > 5) { return x.bark() } return 0 }
+
+// a different concrete type narrows through the same machinery
+fun useCat(x: Animal): Int { if (x is Cat) { return x.meow() } return 0 }
+
+fun main(): Int {
+  // a `val x: Trait = Concrete(..)` binding narrows back to the concrete type
+  val d: Animal = Dog("z")
+  var s = 0
+  if (d is Dog) { s = s + d.bark() } // 10
+  s = s + useThen(Dog("a")) // 10
+  s = s + useElse(Dog("b")) // 10
+  s = s + useAnd(Dog("c")) // 10
+  s = s + useCat(Cat(9)) // 20
+  s = s + useThen(Cat(9)) // 0 (a Cat is not a Dog)
+  println("smartcast-if score=${s}")
+  return s // 60
+}

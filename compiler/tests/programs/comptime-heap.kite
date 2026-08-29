@@ -1,9 +1,9 @@
-const val HLEN = "hello".len()
+const val HLEN = "hello".length()
 
 fun main(): Int {
-  val a = comptime("hi".len() + "world".len())
+  val a = comptime("hi".length() + "world".length())
   val b = comptime("ABC".charAt(1))
-  val c = comptime([10, 20, 30].len())
+  val c = comptime([10, 20, 30].size())
   val d = comptime([10, 20, 30].get(2))
   return a + b + c + d + HLEN
 }

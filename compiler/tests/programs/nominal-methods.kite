@@ -1,21 +1,21 @@
 // S2 nominal-types: IntBuf/String/RawMap as nominal types with methods (type-scoped wrappers over builtins).
-// Exercises intBuf() constructor sugar, xs.push/xs.len/xs.get/xs.set, xs[i] indexing,
-// s.charAt/s.len/s.substr on String, rawMap() + m[k] raw-value indexing + m.size(). (The `[k:v]` map
+// Exercises intBuf() constructor sugar, xs.push/xs.size/xs.get/xs.set, xs[i] indexing,
+// s.charAt/s.length/s.substr on String, rawMap() + m[k] raw-value indexing + m.size(). (The `[k:v]` map
 // literal now flips to a first-class HashMap<K,V> whose m[k] yields Option<V>, so this builds a RawMap.)
 fun main(): Int {
   val xs = intBuf()
   xs.push(3)
   xs.push(5)
-  var acc = xs.len() // 2
+  var acc = xs.size() // 2
   acc = acc + xs.get(0) // + 3  = 5
   acc = acc + xs[1] // + 5  = 10
   xs.set(0, 7)
   acc = acc + xs[0] // + 7  = 17
   val str = "hello"
-  acc = acc + str.len() // + 5  = 22
+  acc = acc + str.length() // + 5  = 22
   if (str.charAt(1) == 101) { acc = acc + 1 } // 'e' = 101 -> 23
   val sub = str.substr(1, 3) // "ell", len 3
-  acc = acc + sub.len() // + 3  = 26
+  acc = acc + sub.length() // + 3  = 26
   val m = rawMap()
   m.set("a", 4) m.set("b", 6)
   acc = acc + m["a"] // + 4  = 30

@@ -66,7 +66,7 @@ fun main(): Int {
   v.push(30)
   v.push(40)
   v.push(50)                                          // triggers realloc (cap 4 -> 8)
-  if (v.len() == 5) { acc = acc + 1 }                // 20
+  if (v.size() == 5) { acc = acc + 1 }                // 20
   if (v.get(0) == 10) { acc = acc + 1 }              // 21
   if (v.get(4) == 50) { acc = acc + 1 }              // 22  (survives growth)
 

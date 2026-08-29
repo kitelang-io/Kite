@@ -1,0 +1,9 @@
+// A constructor parameter with no `val`/`var` keyword is a landmine: it used to desync the parser and
+// silently emit a CORRUPT binary. It must instead be a hard stderr diagnostic + abort, no binary. The gate
+// asserts the non-zero exit and the "must be declared with `val` or `var`" diagnostic naming the parameter.
+class Box(n: Int)
+
+fun main() {
+  val b = Box(7)
+  println(b.n.toStr())
+}

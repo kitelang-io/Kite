@@ -109,7 +109,7 @@ fun buildLabels(instrs: IntBuf): LabelMap {
   val offs = intBuf()
   var off = 0
   var i = 0
-  while (i < instrs.len()) {
+  while (i < instrs.size()) {
     val ins: Instr = instrs.get(i)
     if (isWordI(ins)) { off = off + 4 }
     else { when (ins) { ILabel(nm) -> { names.push(nm); offs.push(off); 0 } else -> 0 } }
@@ -120,7 +120,7 @@ fun buildLabels(instrs: IntBuf): LabelMap {
 
 fun findLabel(lm: LabelMap, name: String): Int {
   var i = 0
-  while (i < lm.names.len()) {
+  while (i < lm.names.size()) {
     val nm: String = lm.names.get(i)
     if (nm == name) { return lm.offs.get(i) }
     i = i + 1
@@ -145,7 +145,7 @@ fun assemble(instrs: IntBuf): IntBuf {
   val words = intBuf()
   var here = 0
   var i = 0
-  while (i < instrs.len()) {
+  while (i < instrs.size()) {
     val ins: Instr = instrs.get(i)
     if (isWordI(ins)) { words.push(encodeAt(ins, here, lm)); here = here + 4 }
     i = i + 1
@@ -155,7 +155,7 @@ fun assemble(instrs: IntBuf): IntBuf {
 
 fun hasLabel(lm: LabelMap, name: String): Bool {
   var i = 0
-  while (i < lm.names.len()) { val nm: String = lm.names.get(i); if (nm == name) { return true }; i = i + 1 }
+  while (i < lm.names.size()) { val nm: String = lm.names.get(i); if (nm == name) { return true }; i = i + 1 }
   return false
 }
 
@@ -173,7 +173,7 @@ fun assembleExe(instrs: IntBuf): IntBuf {
   val words = intBuf()
   var here = 0
   var i = 0
-  while (i < instrs.len()) {
+  while (i < instrs.size()) {
     val ins: Instr = instrs.get(i)
     if (isWordI(ins)) { words.push(encodeAtExe(ins, here, lm)); here = here + 4 }
     i = i + 1
@@ -194,7 +194,7 @@ fun assembleReloc(instrs: IntBuf): AsmR {
   val relocs = intBuf()
   var here = 0
   var i = 0
-  while (i < instrs.len()) {
+  while (i < instrs.size()) {
     val ins: Instr = instrs.get(i)
     if (isWordI(ins)) {
       when (ins) {
@@ -217,7 +217,7 @@ fun assembleReloc(instrs: IntBuf): AsmR {
 
 fun idxOfStr(l: IntBuf, s: String): Int {
   var i = 0
-  while (i < l.len()) { val e: String = l.get(i); if (e == s) { return i }; i = i + 1 }
+  while (i < l.size()) { val e: String = l.get(i); if (e == s) { return i }; i = i + 1 }
   return 0
 }
 
@@ -225,7 +225,7 @@ fun idxOfStr(l: IntBuf, s: String): Int {
 fun externalsOf(relocs: IntBuf): IntBuf {
   val out = intBuf()
   var i = 0
-  while (i < relocs.len()) {
+  while (i < relocs.size()) {
     val r: Reloc = relocs.get(i)
     if (r.kind == 0) { if (idxOfStr2(out, r.sym) < 0) { out.push(r.sym) } }
     i = i + 1
@@ -235,7 +235,7 @@ fun externalsOf(relocs: IntBuf): IntBuf {
 
 fun idxOfStr2(l: IntBuf, s: String): Int {
   var i = 0
-  while (i < l.len()) { val e: String = l.get(i); if (e == s) { return i }; i = i + 1 }
+  while (i < l.size()) { val e: String = l.get(i); if (e == s) { return i }; i = i + 1 }
   return 0 - 1
 }
 
@@ -243,9 +243,9 @@ fun idxOfStr2(l: IntBuf, s: String): Int {
 struct CstrSec(val bytes: IntBuf, val labN: IntBuf, val labOff: IntBuf)
 
 fun addC(bytes: IntBuf, labN: IntBuf, labOff: IntBuf, label: String, sb: IntBuf): Int {
-  labN.push(label); labOff.push(bytes.len())
+  labN.push(label); labOff.push(bytes.size())
   var i = 0
-  while (i < sb.len()) { bytes.push(sb.get(i)); i = i + 1 }
+  while (i < sb.size()) { bytes.push(sb.get(i)); i = i + 1 }
   bytes.push(0)
   return 0
 }
@@ -259,7 +259,7 @@ fun buildCstr(cstrN: IntBuf, cstrV: IntBuf): CstrSec {
   addC(bytes, labN, labOff, "Lfmt_println_f", strBytesK("%g\n"))
   addC(bytes, labN, labOff, "Lfmt_print_f", strBytesK("%g"))
   var i = 0
-  while (i < cstrN.len()) { addC(bytes, labN, labOff, cstrN.get(i), strBytesK(cstrV.get(i))); i = i + 1 }
+  while (i < cstrN.size()) { addC(bytes, labN, labOff, cstrN.get(i), strBytesK(cstrV.get(i))); i = i + 1 }
   return CstrSec(bytes, labN, labOff)
 }
 
@@ -286,12 +286,12 @@ fun chk(name: String, got: Int, want: String): Int {
 fun checkProg(name: String, funcs: IntBuf, want: IntBuf): Int {
   val words = assemble(genProgram(funcs))
   var fails = 0
-  if (words.len() != want.len()) {
-    println("FAIL " + (name + (" length " + (words.len().toStr() + (" want " + want.len().toStr())))))
+  if (words.size() != want.size()) {
+    println("FAIL " + (name + (" length " + (words.size().toStr() + (" want " + want.size().toStr())))))
     return 1
   }
   var i = 0
-  while (i < words.len()) {
+  while (i < words.size()) {
     val g: Int = words.get(i)
     val w: String = want.get(i)
     if (toHex8(g) != w) {
@@ -300,13 +300,13 @@ fun checkProg(name: String, funcs: IntBuf, want: IntBuf): Int {
     }
     i = i + 1
   }
-  if (fails == 0) { println("ok   " + (name + ("  " + (words.len().toStr() + " words")))) }
+  if (fails == 0) { println("ok   " + (name + ("  " + (words.size().toStr() + " words")))) }
   return fails
 }
 
 fun splitWords(s: String): IntBuf {
   val out = intBuf()
-  val n = s.len()
+  val n = s.length()
   var i = 0
   var start = 0
   while (i <= n) {
@@ -328,7 +328,7 @@ fun hexVal(c: Int): Int {
 fun parseHexK(s: String): Int {
   var v = 0
   var i = 0
-  while (i < s.len()) { v = (v << 4) | hexVal(s.charAt(i)); i = i + 1 }
+  while (i < s.length()) { v = (v << 4) | hexVal(s.charAt(i)); i = i + 1 }
   return v
 }
 
@@ -336,7 +336,7 @@ fun hexListK(s: String): IntBuf {
   val parts = splitWords(s)
   val out = intBuf()
   var i = 0
-  while (i < parts.len()) { out.push(parseHexK(parts.get(i))); i = i + 1 }
+  while (i < parts.size()) { out.push(parseHexK(parts.get(i))); i = i + 1 }
   return out
 }
 
@@ -361,14 +361,14 @@ fun sha256H(msg: IntBuf): IntBuf {
   val H = hexListK("6a09e667 bb67ae85 3c6ef372 a54ff53a 510e527f 9b05688c 1f83d9ab 5be0cd19")
   val data = intBuf()
   var i = 0
-  val len = msg.len()
+  val len = msg.size()
   while (i < len) { data.push(msg.get(i)); i = i + 1 }
   data.push(0x80)
-  while ((data.len() % 64) != 56) { data.push(0) }
+  while ((data.size() % 64) != 56) { data.push(0) }
   val bitLen = len * 8
   var j = 7
   while (j >= 0) { data.push((bitLen >> (8 * j)) & 0xff); j = j - 1 }
-  val nblocks = data.len() / 64
+  val nblocks = data.size() / 64
   var blk = 0
   while (blk < nblocks) {
     val base = blk * 64
@@ -424,16 +424,16 @@ fun be32(b: IntBuf, v: USize): Int { u8(b, v >> 24); u8(b, v >> 16); u8(b, v >> 
 
 fun be64(b: IntBuf, v: USize): Int { be32(b, (v >> 32) & 0xffffffff); be32(b, v & 0xffffffff); return 0 }
 
-fun writeStrB(b: IntBuf, s: String): Int { var i = 0; while (i < s.len()) { u8(b, s.charAt(i)); i = i + 1 }; return 0 }
+fun writeStrB(b: IntBuf, s: String): Int { var i = 0; while (i < s.length()) { u8(b, s.charAt(i)); i = i + 1 }; return 0 }
 
 fun fixedB(b: IntBuf, n: Int, s: String): Int {
   writeStrB(b, s)
-  var i = s.len()
+  var i = s.length()
   while (i < n) { u8(b, 0); i = i + 1 }
   return 0
 }
 
-fun padToB(b: IntBuf, target: USize): Int { while (b.len() < target) { u8(b, 0) }; return 0 }
+fun padToB(b: IntBuf, target: USize): Int { while (b.size() < target) { u8(b, 0) }; return 0 }
 
 // file offsets/sizes are USize (machine-word sized); the arithmetic stays in 64-bit registers.
 fun alignUp(n: USize, a: USize): USize { return ((n + a - 1) / a) * a }
@@ -473,7 +473,7 @@ fun strBytesK(s: String): IntBuf {
   // (already unescaped) has no backslash, so it passes through — both stages converge.
   val out = intBuf()
   var i = 0
-  val n = s.len()
+  val n = s.length()
   while (i < n) {
     val c = s.charAt(i)
     if (c == 92 && i + 1 < n) {
@@ -508,7 +508,7 @@ fun strBytesK(s: String): IntBuf {
 fun buildExe(words: IntBuf, entryOff: Int, symName: String, ident: String): IntBuf {
   val vmpage: USize = 0x4000
   val textBase: USize = 0x100000000
-  val nwords = words.len()
+  val nwords = words.size()
   val textSize = 4 * nwords
   val sizeofcmds: USize = 72usize + 232 + 72 + 16 + 16 + 24 + 80 + 32 + 24 + 24 + 24 + 56 + 16
   val ncmds: USize = 13
@@ -523,10 +523,10 @@ fun buildExe(words: IntBuf, entryOff: Int, symName: String, ident: String): IntB
   val expOff = cfOff + cfSize
   val symoff = expOff
   val nsyms: USize = 1
-  val strsize = alignUp(1 + symName.len() + 1, 8)
+  val strsize = alignUp(1 + symName.length() + 1, 8)
   val stroff = symoff + 16
   val sigStart = alignUp(stroff + strsize, 16)
-  val identLen = ident.len() + 1
+  val identLen = ident.length() + 1
   val codeLimit = sigStart
   val ncodeslots = (codeLimit + 4095) / 4096
   val cdHashoffset = 88 + identLen
@@ -600,19 +600,19 @@ fun buildExe(words: IntBuf, entryOff: Int, symName: String, ident: String): IntB
   be64(cd, 0); be64(cd, 0); be64(cd, textSegFilesize); be64(cd, 1)
   writeStrB(cd, ident); u8(cd, 0)
   var hi = 0
-  while (hi < hashes.len()) { cd.push(hashes.get(hi)); hi = hi + 1 }
+  while (hi < hashes.size()) { cd.push(hashes.get(hi)); hi = hi + 1 }
   be32(b, 0xfade0cc0); be32(b, superLen); be32(b, 1); be32(b, 0); be32(b, 20)
   var ci = 0
-  while (ci < cd.len()) { b.push(cd.get(ci)); ci = ci + 1 }
+  while (ci < cd.size()) { b.push(cd.get(ci)); ci = ci + 1 }
   return b
 }
 
 fun writeBytes(path: String, bytes: IntBuf): Int {
   val fp = fopenW(path)
   var i = 0
-  while (i < bytes.len()) { fputByte(bytes.get(i), fp); i = i + 1 }
+  while (i < bytes.size()) { fputByte(bytes.get(i), fp); i = i + 1 }
   fcloseF(fp)
-  return bytes.len()
+  return bytes.size()
 }
 
 // full Mach-O writer: handles cstring relocations (PAGE21/PAGEOFF12) and libc
@@ -621,9 +621,9 @@ fun writeBytes(path: String, bytes: IntBuf): Int {
 fun buildExeFull(words: IntBuf, relocs: IntBuf, cs: CstrSec, externals: IntBuf, entryOff: Int, symName: String, ident: String): IntBuf {
   val vmpage: USize = 0x4000
   val textBase: USize = 0x100000000
-  val nimp = externals.len()
+  val nimp = externals.size()
   val hasData = nimp > 0
-  val nwords = words.len()
+  val nwords = words.size()
   val userTextSize = 4 * nwords
   val textSize = userTextSize + nimp * 12
   var dc = 0
@@ -634,7 +634,7 @@ fun buildExeFull(words: IntBuf, relocs: IntBuf, cs: CstrSec, externals: IntBuf, 
   val lcEnd = 32 + sizeofcmds
   val textOff = alignUp(lcEnd, 16)
   val cstringOff = textOff + textSize
-  val cstringSize = cs.bytes.len()
+  val cstringSize = cs.bytes.size()
   val textSegFilesize = alignUp(cstringOff + cstringSize, vmpage)
   val textVmaddr = textBase + textOff
   val cstringVmaddr = textBase + cstringOff
@@ -645,7 +645,7 @@ fun buildExeFull(words: IntBuf, relocs: IntBuf, cs: CstrSec, externals: IntBuf, 
   val dataconstVmaddr = textBase + textSegFilesize
   // resolve relocations into the user words
   var ri = 0
-  while (ri < relocs.len()) {
+  while (ri < relocs.size()) {
     val r: Reloc = relocs.get(ri)
     val idx = r.off / 4
     if (r.kind == 0) {
@@ -679,7 +679,7 @@ fun buildExeFull(words: IntBuf, relocs: IntBuf, cs: CstrSec, externals: IntBuf, 
     si = si + 1
   }
   // string table
-  val strsize = alignUp(1 + symName.len() + 1, 8)
+  val strsize = alignUp(1 + symName.length() + 1, 8)
   val nsyms: USize = 1
   // chained fixups payload
   val cf = intBuf()
@@ -692,9 +692,9 @@ fun buildExeFull(words: IntBuf, relocs: IntBuf, cs: CstrSec, externals: IntBuf, 
     val poolOff = intBuf()
     var pi = 0
     while (pi < nimp) {
-      poolOff.push(pool.len())
+      poolOff.push(pool.size())
       val nb = strBytesK(externals.get(pi))
-      var k = 0; while (k < nb.len()) { pool.push(nb.get(k)); k = k + 1 }
+      var k = 0; while (k < nb.size()) { pool.push(nb.get(k)); k = k + 1 }
       pool.push(0)
       pi = pi + 1
     }
@@ -706,10 +706,10 @@ fun buildExeFull(words: IntBuf, relocs: IntBuf, cs: CstrSec, externals: IntBuf, 
     u32b(cf, 24); u16(cf, vmpage); u16(cf, 6); u64b(cf, dataconstVmaddr - textBase); u32b(cf, 0); u16(cf, 1); u16(cf, 0)
     var ii = 0
     while (ii < nimp) { u32b(cf, 1 | (poolOff.get(ii) << 9)); ii = ii + 1 }
-    var pj = 0; while (pj < pool.len()) { cf.push(pool.get(pj)); pj = pj + 1 }
-    while ((cf.len() % 8) != 0) { cf.push(0) }
+    var pj = 0; while (pj < pool.size()) { cf.push(pool.get(pj)); pj = pj + 1 }
+    while ((cf.size() % 8) != 0) { cf.push(0) }
   }
-  val cfSize = cf.len()
+  val cfSize = cf.size()
   var linkeditFileoff = textSegFilesize
   if (hasData) { linkeditFileoff = dataconstFileoff + dataconstFilesize }
   val cfOff = linkeditFileoff
@@ -717,7 +717,7 @@ fun buildExeFull(words: IntBuf, relocs: IntBuf, cs: CstrSec, externals: IntBuf, 
   val symoff = expOff
   val stroff = symoff + nsyms * 16
   val sigStart = alignUp(stroff + strsize, 16)
-  val identLen = ident.len() + 1
+  val identLen = ident.length() + 1
   val codeLimit = sigStart
   val ncodeslots = (codeLimit + 4095) / 4096
   val cdLen = 88 + identLen + ncodeslots * 32
@@ -773,9 +773,9 @@ fun buildExeFull(words: IntBuf, relocs: IntBuf, cs: CstrSec, externals: IntBuf, 
   u32b(b, 0x1d); u32b(b, 16); u32b(b, sigStart); u32b(b, superLen)
   padToB(b, textOff)
   var wi = 0
-  while (wi < words.len()) { u32b(b, words.get(wi)); wi = wi + 1 }
+  while (wi < words.size()) { u32b(b, words.get(wi)); wi = wi + 1 }
   var ci = 0
-  while (ci < cs.bytes.len()) { u8(b, cs.bytes.get(ci)); ci = ci + 1 }
+  while (ci < cs.bytes.size()) { u8(b, cs.bytes.get(ci)); ci = ci + 1 }
   if (hasData) {
     padToB(b, dataconstFileoff)
     var gi: USize = 0
@@ -788,7 +788,7 @@ fun buildExeFull(words: IntBuf, relocs: IntBuf, cs: CstrSec, externals: IntBuf, 
   }
   padToB(b, linkeditFileoff)
   var cfi = 0
-  while (cfi < cf.len()) { b.push(cf.get(cfi)); cfi = cfi + 1 }
+  while (cfi < cf.size()) { b.push(cf.get(cfi)); cfi = cfi + 1 }
   u32b(b, 1); u8(b, 0x0F); u8(b, 1); u16(b, 0); u64b(b, textVmaddr + entryOff)
   u8(b, 0); writeStrB(b, symName); u8(b, 0)
   padToB(b, stroff + strsize)
@@ -811,9 +811,9 @@ fun buildExeFull(words: IntBuf, relocs: IntBuf, cs: CstrSec, externals: IntBuf, 
   be64(cd, 0); be64(cd, 0); be64(cd, textSegFilesize); be64(cd, 1)
   writeStrB(cd, ident); u8(cd, 0)
   var hi = 0
-  while (hi < hashes.len()) { cd.push(hashes.get(hi)); hi = hi + 1 }
+  while (hi < hashes.size()) { cd.push(hashes.get(hi)); hi = hi + 1 }
   be32(b, 0xfade0cc0); be32(b, superLen); be32(b, 1); be32(b, 0); be32(b, 20)
   var cdi = 0
-  while (cdi < cd.len()) { b.push(cd.get(cdi)); cdi = cdi + 1 }
+  while (cdi < cd.size()) { b.push(cd.get(cdi)); cdi = cdi + 1 }
   return b
 }

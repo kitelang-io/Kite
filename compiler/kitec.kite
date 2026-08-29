@@ -7,6 +7,7 @@
 // `cat` produced. The order is the old cat order: frontend → codegen → backend → driver (which holds
 // main). Paths are cwd-relative to the repo root, matching how readFile resolves everything else.
 import "compiler/frontend/kfront.kite"
+import "compiler/sema/smartcast.kite"
 import "compiler/sema/kcheck.kite"
 import "compiler/codegen/codegen.kite"
 import "compiler/backend/arm64/arm64.kite"

@@ -85,22 +85,22 @@ fun main(): Int {
 
   // ---- DEFAULT Vec return preserved (block + expr + empty): Vec-only methods still work ----
   val vb = vecBlock()
-  if (vb.len() == 3) { acc = acc + 1 }               // 13
+  if (vb.size() == 3) { acc = acc + 1 }               // 13
   if (vb.get(0) == 10) { acc = acc + 1 }             // 14 (raw value => a real Vec, no transform)
   if (vb.getOr(9, 77) == 77) { acc = acc + 1 }       // 15 (Vec-only method proves it is a Vec)
   if (vb.contains(20)) { acc = acc + 1 }             // 16
   val ve = vecExpr()
-  if (ve.len() == 3 && ve.get(2) == 30) { acc = acc + 1 } // 17
+  if (ve.size() == 3 && ve.get(2) == 30) { acc = acc + 1 } // 17
   val vz = vecEmpty()
-  if (vz.len() == 0) { acc = acc + 1 }               // 18
+  if (vz.size() == 0) { acc = acc + 1 }               // 18
   vz.push(5)
-  if (vz.len() == 1 && vz.get(0) == 5) { acc = acc + 1 } // 19
+  if (vz.size() == 1 && vz.get(0) == 5) { acc = acc + 1 } // 19
 
   // ---- DEFAULT HashMap return preserved (block + expr): HashMap-only methods still work ----
   val mb = mapBlock()
   if (mb.size() == 2) { acc = acc + 1 }              // 20
   if (mb.getOr("a", 99) == 1) { acc = acc + 1 }      // 21 (raw value => a real HashMap)
-  if (mb.has("b")) { acc = acc + 1 }                 // 22
+  if (mb.containsKey("b")) { acc = acc + 1 }                 // 22
   val me = mapExpr()
   if (me.getOr("b", 99) == 2) { acc = acc + 1 }      // 23
 

@@ -1,0 +1,67 @@
+// Regression (Phase 3b step-3): a `when`-arm payload bind over an ARC-managed (CLASS) and multi-FIELD payload
+// now DESUGARS (patDesugarable: variant head + simple subs) instead of routing to the legacy when-IR. The
+// payload is bound as a raw BORROW (`val v = __rawLoad(_s, 8+8j)`, isBorrowInit -> no retain/release, exactly
+// genCtorPat's no-retain load), typed from the subject's FULL type (subjFullTy -> soleTypeArg) so a multi-
+// field class reads the RIGHT offsets (v.b at 8, v.c at 16 -- NOT offset 0) and a class payload is never
+// double-released. Covers Option<class> across local/param/call subjects, Result<class,_>, Option<Int>
+// (non-struct override ignored), a multi-word struct via a declared-return call subject, and a generic bind.
+// Each check bumps acc; all 11 pass -> exit 11.
+class Box3(val a: Int, val b: Int, val c: Int) {
+  deinit { println(0 - 1) }
+}
+struct Pair2(val x: Int, val y: Int)
+
+fun localClass(): Int {
+  val o: Option<Box3> = Some(Box3(1, 2, 3))
+  return when (o) { Some(v) -> v.a * 100 + v.b * 10 + v.c; None -> 0 }
+}
+fun paramClass(o: Option<Box3>): Int {
+  return when (o) { Some(v) -> v.a + v.b + v.c; None -> 0 }
+}
+fun mkBox(): Option<Box3> { return Some(Box3(4, 5, 6)) }
+fun getOrB(o: Option<Box3>): Int {
+  return when (o) { Some(v) -> v.b; None -> 0 - 7 }
+}
+fun resClass(): Int {
+  // Result<class,_>: the payload (first) field is read through the desugar. NOTE a 2-arg generic's payload
+  // type is not recovered (soleTypeArg gives up on the `<T, E>` comma) in EITHER the desugar OR the legacy
+  // path, so a Result<class> reads only its FIRST field reliably — asserted here (v.a), matching legacy.
+  val r: Result<Box3, Int> = Ok(Box3(7, 8, 9))
+  return when (r) { Ok(v) -> v.a; Err(e) -> 0 - e }
+}
+fun resErr(): Int {
+  val r: Result<Box3, Int> = Err(42)
+  return when (r) { Ok(v) -> v.a; Err(e) -> e }
+}
+fun optInt(o: Option<Int>): Int {
+  return when (o) { Some(n) -> n + 1000; None -> 0 }
+}
+fun mkBoxVal(): Int {
+  // call subject, multi-field class, distinct binding site
+  return when (mkBox()) { Some(v) -> v.a * 100 + v.b * 10 + v.c; None -> 0 }
+}
+fun mkStruct(): Option<Pair2> { return Some(Pair2(11, 22)) }
+fun structVal(): Int {
+  // declared-return call subject recovers <Pair2> -> y at offset 8 reads 22, not 11
+  return when (mkStruct()) { Some(p) -> p.x * 1000 + p.y; None -> 0 }
+}
+fun firstField(o: Option<Box3>): Int {
+  return when (o) { Some(v) -> v.a; None -> 0 - 1 }
+}
+
+fun main(): Int {
+  var acc = 0
+  val lc = localClass()
+  if (lc == 123) { acc = acc + 1 } // v.a=1, v.b=2 (off 8), v.c=3 (off 16) all correct
+  if (paramClass(Some(Box3(10, 20, 30))) == 60) { acc = acc + 1 }
+  if (mkBoxVal() == 456) { acc = acc + 1 } // call subject, multi-field class, distinct binding site
+  if (getOrB(Some(Box3(0, 77, 0))) == 77) { acc = acc + 1 } // v.b at offset 8, not 0
+  if (getOrB(None) == 0 - 7) { acc = acc + 1 }
+  if (resClass() == 7) { acc = acc + 1 }  // Result Ok class, first field (v.a) via desugar
+  if (resErr() == 42) { acc = acc + 1 }
+  if (optInt(Some(5)) == 1005) { acc = acc + 1 } // non-struct override ignored, payload reads fine
+  if (optInt(None) == 0) { acc = acc + 1 }
+  if (structVal() == 11022) { acc = acc + 1 } // multi-word struct, y at offset 8 reads 22, not 11
+  if (firstField(Some(Box3(88, 1, 1))) == 88) { acc = acc + 1 }
+  return acc
+}

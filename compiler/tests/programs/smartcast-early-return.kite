@@ -1,0 +1,32 @@
+// Smart-cast Phase 2: EARLY-RETURN narrowing. After a guard `if (x !is T) return` (a diverging then), the
+// code AFTER the if inherits the else-facts, so x is narrowed to T on the fall-through. Works for both `is`
+// (type) and `== null` (nullability) guards. Exit code = summed narrowed reads (also printed).
+
+trait Animal { fun kind(self): Int }
+
+struct Dog(val name: String) { fun bark(self): Int { return 7 } }
+
+impl Animal for Dog { fun kind(self): Int { return 1 } }
+
+struct Box(val v: Int)
+
+// after `if (x !is Dog) return`, x is Dog for the rest of the body
+fun guard(x: Animal): Int {
+  if (x !is Dog) { return 0 }
+  return x.bark()
+}
+
+// after `if (y == null) return`, y is non-null for the rest of the body
+fun guardNull(y: Box?): Int {
+  if (y == null) { return 0 }
+  return y.v
+}
+
+fun main(): Int {
+  var s = 0
+  s = s + guard(Dog("a")) // 7
+  s = s + guardNull(Box(9)) // 9
+  s = s + guardNull(null) // 0  (guard returns)
+  println("smartcast-early-return score=${s}")
+  return s // 16
+}

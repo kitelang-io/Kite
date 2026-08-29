@@ -117,7 +117,7 @@ class Deque<T>(var n: Int, var cap: Int, var head: Int, var buf: RawBuf) {
     if (self.n == 0) { return None }
     return Some(__packedGet::<T>(self.buf.data, (self.head + self.n - 1) % self.cap))
   }
-  fun len(self): Int { return self.n }
+  fun size(self): Int { return self.n }
   fun isEmpty(self): Bool { return self.n == 0 }
   fun clear(self): Int { self.n = 0 self.head = 0 return 0 }
 }

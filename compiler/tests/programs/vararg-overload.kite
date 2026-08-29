@@ -6,7 +6,7 @@ fun f(a: Int, b: Int): Int { return a * b }   // exact 2-arg
 fun f(vararg xs: Int): Int {                    // variadic
   var s = 0
   var i = 0
-  while (i < xs.len()) { s = s + xs.get(i) i = i + 1 }
+  while (i < xs.size()) { s = s + xs.get(i) i = i + 1 }
   return s
 }
 

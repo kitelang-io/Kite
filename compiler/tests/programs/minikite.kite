@@ -77,7 +77,7 @@ fun opKind(c: Int): Int {
 
 fun lex(src: String): IntBuf {
   val toks = intBuf()
-  val n = src.len()
+  val n = src.length()
   var i = 0
   while (i < n) {
     val c = src.charAt(i)
@@ -120,7 +120,7 @@ fun lex(src: String): IntBuf {
 struct P(val toks: IntBuf, var pos: Int)
 
 fun peekKind(p: P): Int {
-  if (p.pos >= p.toks.len()) { return 99 }
+  if (p.pos >= p.toks.size()) { return 99 }
   val t: Tok = p.toks.get(p.pos)
   return t.kind
 }
@@ -130,7 +130,7 @@ fun peekVal(p: P): Int { val t: Tok = p.toks.get(p.pos); return t.ival }
 fun peekText(p: P): String { val t: Tok = p.toks.get(p.pos); return t.text }
 
 fun peekKind2(p: P): Int {
-  if (p.pos + 1 >= p.toks.len()) { return 99 }
+  if (p.pos + 1 >= p.toks.size()) { return 99 }
   val t: Tok = p.toks.get(p.pos + 1)
   return t.kind
 }
@@ -306,7 +306,7 @@ fun define(env: Env, name: String, value: Int): Int {
 fun lookup(env: Env, name: String): Int {
   var i = 0
   var found = 0
-  while (i < env.names.len()) {
+  while (i < env.names.size()) {
     val nm: String = env.names.get(i)
     if (nm == name) { found = env.vals.get(i) }
     i = i + 1
@@ -334,7 +334,7 @@ fun combine(op: Int, a: Int, b: Int): Int {
 fun findFunc(funcs: IntBuf, name: String): Func {
   var i = 0
   var hit = 0
-  while (i < funcs.len()) {
+  while (i < funcs.size()) {
     val f: Func = funcs.get(i)
     if (f.name == name) { hit = i }
     i = i + 1
@@ -346,7 +346,7 @@ fun findFunc(funcs: IntBuf, name: String): Func {
 fun callFunc(f: Func, args: IntBuf, caller: Env, funcs: IntBuf): Int {
   val local = Env(intBuf(), intBuf())
   var i = 0
-  while (i < f.params.len()) {
+  while (i < f.params.size()) {
     val pname: String = f.params.get(i)
     val ae: Expr = args.get(i)
     define(local, pname, evalExpr(ae, caller, funcs))
@@ -396,7 +396,7 @@ fun evalStmt(s: Stmt, env: Env, funcs: IntBuf, ret: Ret): Int {
 
 fun evalStmts(stmts: IntBuf, env: Env, funcs: IntBuf, ret: Ret): Int {
   var i = 0
-  while (i < stmts.len() && ret.done == 0) {
+  while (i < stmts.size() && ret.done == 0) {
     val s: Stmt = stmts.get(i)
     evalStmt(s, env, funcs, ret)
     i = i + 1

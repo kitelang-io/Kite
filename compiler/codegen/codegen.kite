@@ -54,7 +54,7 @@ enum Expr {
   EInt(String); EIdent(String); EStr(String);
   EFLit(String); EFBin(String, Expr, Expr); // float literal ; float binary op (arith or compare)
   EUnary(String, Expr); EBin(String, Expr, Expr);
-  ECall(String, IntBuf); EField(Expr, String); EWhen(Expr, IntBuf);
+  ECall(String, IntBuf); EField(Expr, String);
   ECast(Expr, String); // `e as T` — numeric width/sign/float conversion (Phase 3)
   EBlock(IntBuf, Expr); EIf(Expr, Expr, Expr); ERet(Expr); EBrk; ECont; ENoRes
 }
@@ -66,23 +66,19 @@ enum Stmt {
 
 struct Func(val name: String, val params: IntBuf, val paramTys: IntBuf, val body: Expr) // params/paramTys = IntBuf<String>
 
-enum Pat { PWild; PBindP(String); PIntP(String); PVarP(String); PCtorP(String, IntBuf) }
-
-struct Arm(val isElse: Int, val pat: Pat, val body: Expr)
-
 fun isNoRes(e: Expr): Bool { return when (e) { ENoRes -> true; else -> false } }
 
 fun parseIntK(s: String): Int {
-  if (s.len() >= 1 && s.charAt(0) == 45) { return 0 - parseIntK(s.substr(1, s.len() - 1)) }
-  if (s.len() >= 2 && s.charAt(0) == 48 && (s.charAt(1) == 120 || s.charAt(1) == 88)) {
+  if (s.length() >= 1 && s.charAt(0) == 45) { return 0 - parseIntK(s.substr(1, s.length() - 1)) }
+  if (s.length() >= 2 && s.charAt(0) == 48 && (s.charAt(1) == 120 || s.charAt(1) == 88)) {
     var v = 0
     var i = 2
-    while (i < s.len()) { v = (v << 4) | hexVal(s.charAt(i)); i = i + 1 }
+    while (i < s.length()) { v = (v << 4) | hexVal(s.charAt(i)); i = i + 1 }
     return v
   }
   var v = 0
   var i = 0
-  while (i < s.len()) { v = v * 10 + (s.charAt(i) - 48); i = i + 1 }
+  while (i < s.length()) { v = v * 10 + (s.charAt(i) - 48); i = i + 1 }
   return v
 }
 
@@ -90,7 +86,7 @@ fun align16(x: Int): Int { return ((x + 15) / 16) * 16 }
 
 fun containsStr(l: IntBuf, s: String): Bool {
   var i = 0
-  while (i < l.len()) { val e: String = l.get(i); if (e == s) { return true }; i = i + 1 }
+  while (i < l.size()) { val e: String = l.get(i); if (e == s) { return true }; i = i + 1 }
   return false
 }
 
@@ -103,7 +99,7 @@ struct Ctx(val gen: Gen, val names: IntBuf, val offs: IntBuf, val epi: String, v
 // intern a string literal into the cstring table -> its label (Lstr_N)
 fun internStr(ctx: Ctx, s: String): String {
   var i = 0
-  while (i < ctx.gen.cstrN.len()) {
+  while (i < ctx.gen.cstrN.size()) {
     val v: String = ctx.gen.cstrV.get(i)
     if (v == s) { return ctx.gen.cstrN.get(i) }
     i = i + 1
@@ -120,7 +116,7 @@ fun fresh(ctx: Ctx): Int { ctx.gen.ctr = ctx.gen.ctr + 1; return ctx.gen.ctr }
 
 fun slotOf(ctx: Ctx, name: String): Int {
   var i = 0
-  while (i < ctx.names.len()) {
+  while (i < ctx.names.size()) {
     val nm: String = ctx.names.get(i)
     if (nm == name) { return ctx.offs.get(i) }
     i = i + 1
@@ -322,14 +318,14 @@ fun genBinary(ctx: Ctx, op: String, a: Expr, b: Expr): Int {
 // struct-lookup names are bare nominals with no `<`, so nothing is stripped and the fixpoint is untouched.
 fun structKey(name: String): String {
   var i = 0
-  while (i < name.len()) { val c = name.charAt(i); if (c == 60 || c == 63 || c == 32) { return name.substr(0, i) }; i = i + 1 }
+  while (i < name.length()) { val c = name.charAt(i); if (c == 60 || c == 63 || c == 32) { return name.substr(0, i) }; i = i + 1 }
   return name
 }
 
 fun structIdx(gen: Gen, name0: String): Int {
   val name = structKey(name0)
   var i = 0
-  while (i < gen.structN.len()) { val n: String = gen.structN.get(i); if (n == name) { return i }; i = i + 1 }
+  while (i < gen.structN.size()) { val n: String = gen.structN.get(i); if (n == name) { return i }; i = i + 1 }
   return 0 - 1
 }
 
@@ -337,7 +333,7 @@ fun isStructName(gen: Gen, name: String): Bool { return structIdx(gen, name) >= 
 
 fun funRetOf(gen: Gen, name: String): String {
   var i = 0
-  while (i < gen.funN.len()) { val n: String = gen.funN.get(i); if (n == name) { return gen.funRet.get(i) }; i = i + 1 }
+  while (i < gen.funN.size()) { val n: String = gen.funN.get(i); if (n == name) { return gen.funRet.get(i) }; i = i + 1 }
   return ""
 }
 
@@ -345,8 +341,8 @@ fun structSize(gen: Gen, name: String): Int {
   val idx = structIdx(gen, name)
   if (idx < 0) { return 8 }
   val fields: IntBuf = gen.structF.get(idx)
-  if (fields.len() <= 0) { return 8 }
-  return 8 * fields.len()
+  if (fields.size() <= 0) { return 8 }
+  return 8 * fields.size()
 }
 
 fun fieldOff(gen: Gen, name: String, field: String): Int {
@@ -354,14 +350,14 @@ fun fieldOff(gen: Gen, name: String, field: String): Int {
   if (idx < 0) { return 0 }
   val fields: IntBuf = gen.structF.get(idx)
   var i = 0
-  while (i < fields.len()) { val fn: String = fields.get(i); if (fn == field) { return 8 * i }; i = i + 1 }
+  while (i < fields.size()) { val fn: String = fields.get(i); if (fn == field) { return 8 * i }; i = i + 1 }
   return 0
 }
 
 fun setLty(ctx: Ctx, name: String, ty: String): Int { ctx.ltyN.push(name); ctx.ltyV.push(ty); return 0 }
 
 fun getLty(ctx: Ctx, name: String): String {
-  var i = ctx.ltyN.len() - 1
+  var i = ctx.ltyN.size() - 1
   while (i >= 0) { val n: String = ctx.ltyN.get(i); if (n == name) { return ctx.ltyV.get(i) }; i = i - 1 }
   return ""
 }
@@ -404,7 +400,7 @@ fun typeNameOf(ctx: Ctx, e: Expr): String {
     ECall(nm, aa) -> {
       // A class-typed binding whose RHS is an ALIAS is klower-wrapped as __retain(x); see through it so
       // the bound local keeps the operand's type (String), driving %s print selection + field offsets.
-      if (nm == "__retain" && aa.len() == 1) { typeNameOf(ctx, aAt(aa, 0)) }
+      if (nm == "__retain" && aa.size() == 1) { typeNameOf(ctx, aAt(aa, 0)) }
       else { if (isStructName(ctx.gen, nm)) { nm }
       else { val ft = floorRetTag(nm); if (ft != "") { ft } else { funRetOf(ctx.gen, nm) } } }
     }
@@ -426,14 +422,14 @@ fun fieldTypeOf(gen: Gen, st: String, field: String): String {
   val fields: IntBuf = gen.structF.get(idx)
   val ftys: IntBuf = gen.structFT.get(idx)
   var i = 0
-  while (i < fields.len()) { val fn: String = fields.get(i); if (fn == field) { return ftys.get(i) }; i = i + 1 }
+  while (i < fields.size()) { val fn: String = fields.get(i); if (fn == field) { return ftys.get(i) }; i = i + 1 }
   return ""
 }
 
 fun genStructNew(ctx: Ctx, name: String, args: IntBuf): Int {
   loadImm(ctx, 0, structSize(ctx.gen, name)); genAllocHdr(ctx, structIdx(ctx.gen, name)); emit(ctx, IPush(0))
   var i = 0
-  while (i < args.len()) {
+  while (i < args.size()) {
     val a: Expr = args.get(i)
     genExpr(ctx, a); emit(ctx, ILoadTop(1)); emit(ctx, IStoreOff(0, 1, 8 * i))
     i = i + 1
@@ -455,7 +451,7 @@ fun inferLty(ctx: Ctx, nm: String, init: Expr): Int {
 // ---- enums: boxed {tag@0, payload@8+8j} + when pattern matching ------------
 fun variantIdx(gen: Gen, name: String): Int {
   var i = 0
-  while (i < gen.variantN.len()) { val n: String = gen.variantN.get(i); if (n == name) { return i }; i = i + 1 }
+  while (i < gen.variantN.size()) { val n: String = gen.variantN.get(i); if (n == name) { return i }; i = i + 1 }
   return 0 - 1
 }
 
@@ -463,15 +459,8 @@ fun isVariantName(gen: Gen, name: String): Bool { return variantIdx(gen, name) >
 
 fun variantTag(gen: Gen, name: String): Int { return gen.variantTag.get(variantIdx(gen, name)) }
 
-// payload type-strings of a variant (parallel to its positional payloads); empty if the variant is unknown.
-fun variantTysOf(gen: Gen, name: String): IntBuf {
-  val idx = variantIdx(gen, name)
-  if (idx < 0) { return intBuf() }
-  return gen.variantTys.get(idx)
-}
-
 fun genVariantNew(ctx: Ctx, variant: String, args: IntBuf): Int {
-  val n = args.len()
+  val n = args.size()
   loadImm(ctx, 0, 8 + n * 8); genAllocHdr(ctx, 0 - 1); emit(ctx, IPush(0))
   loadImm(ctx, 0, variantTag(ctx.gen, variant)); emit(ctx, ILoadTop(1)); emit(ctx, IStoreOff(0, 1, 0))
   var j = 0
@@ -483,7 +472,7 @@ fun genVariantNew(ctx: Ctx, variant: String, args: IntBuf): Int {
 // `<...>`, is unbalanced, or carries MORE than one top-level argument (a top-level comma). Only a lone
 // type arg is unambiguous, so this recovers the payload type of an `Option<T>`-typed `when` subject.
 fun soleTypeArg(ty: String): String {
-  val n = ty.len()
+  val n = ty.length()
   var lt = 0 - 1
   var i = 0
   while (i < n) { if (ty.charAt(i) == 60) { lt = i; i = n } else { i = i + 1 } }
@@ -505,74 +494,6 @@ fun soleTypeArg(ty: String): String {
   var b = gt
   while (b > a && ty.charAt(b - 1) == 32) { b = b - 1 }
   return ty.substr(a, b - a)
-}
-
-// Choose a payload variable's static type. The enum-level payload type (`Some(v)`'s `v` is erased, so ""; a
-// generic variant's is a bare type-param) can't name a concrete struct — so when the `when` SUBJECT is typed
-// `Option<Box>` (`override` = "Box", a real struct/class), adopt it so `Some(x) -> x.field` resolves the right
-// offset. A DECLARED concrete-struct payload (`JArr(IntBuf)`) wins, and a non-struct override (Option<Int>)
-// is ignored — so only the field-offset-relevant class-payload case is touched (self-host byte-unaffected:
-// the compiler's own `when` subjects are bare enum types with no `<...>`, so override is always "").
-fun payTyChoose(gen: Gen, declTy: String, override: String): String {
-  if (override == "") { return declTy }
-  if (isStructName(gen, override) == false) { return declTy }
-  if (isStructName(gen, declTy)) { return declTy }
-  return override
-}
-
-fun genCtorPat(ctx: Ctx, v: String, subs: IntBuf, fail: String, payTy: String): Int {
-  emit(ctx, ILoadTop(0)); emit(ctx, ILoadOff(1, 0, 0)); loadImm(ctx, 2, variantTag(ctx.gen, v))
-  emit(ctx, ICmp(1, 2)); emit(ctx, IJmpCondL("ne", fail))
-  var j = 0
-  while (j < subs.len()) {
-    val sp: Pat = subs.get(j)
-    // bind the payload slot AND record its static type, so field access on it resolves the right offset
-    // (without this, an enum-payload struct var had type "" → fieldOff fell back to offset 0). For a single
-    // payload whose enum-level type is erased/generic, the concrete `payTy` recovered from the subject's
-    // `Option<T>` type wins (payTyChoose), so `Some(x) -> x.field` off `m.get(k)`/`m[k]` reads the right field.
-    when (sp) { PBindP(name) -> { emit(ctx, ILoadOff(1, 0, 8 + j * 8)); stFp(ctx, 1, slotOf(ctx, name)); val ptys = variantTysOf(ctx.gen, v); val declTy = if (j < ptys.len()) { ptys.get(j) } else { "" }; val useTy = if (j == 0) { payTyChoose(ctx.gen, declTy, payTy) } else { declTy }; if (useTy != "") { setLty(ctx, name, useTy) }; 0 } else -> 0 }
-    j = j + 1
-  }
-  return 0
-}
-
-fun testAndBind(ctx: Ctx, pat: Pat, fail: String, payTy: String): Int {
-  return when (pat) {
-    PWild -> 0
-    PBindP(name) -> { emit(ctx, ILoadTop(0)); stFp(ctx, 0, slotOf(ctx, name)) }
-    PIntP(t) -> { emit(ctx, ILoadTop(0)); loadImm(ctx, 1, parseIntK(t)); emit(ctx, ICmp(0, 1)); emit(ctx, IJmpCondL("ne", fail)) }
-    PVarP(v) -> { emit(ctx, ILoadTop(0)); emit(ctx, ILoadOff(0, 0, 0)); loadImm(ctx, 1, variantTag(ctx.gen, v)); emit(ctx, ICmp(0, 1)); emit(ctx, IJmpCondL("ne", fail)) }
-    PCtorP(v, subs) -> genCtorPat(ctx, v, subs, fail, payTy)
-    else -> 0
-  }
-}
-
-fun genWhenE(ctx: Ctx, subj: Expr, arms: IntBuf): Int {
-  val l = fresh(ctx)
-  val lend = "Lwend_" + l.toStr()
-  genExpr(ctx, subj); emit(ctx, IPush(0))
-  // Recover the concrete payload type from the subject's static type: `m.get(k)`/`m[k]` is typed
-  // `Option<Box>` (the @mono method return type now carries its substituted arg), so a `Some(x)` arm binds
-  // `x: Box`. "" for a bare/erased subject — the payload then keeps its enum-declared type (unchanged).
-  val payTy = soleTypeArg(typeNameOf(ctx, subj))
-  var i = 0
-  while (i < arms.len()) {
-    val arm: Arm = arms.get(i)
-    val lnext = "Lwn_" + (l.toStr() + ("_" + i.toStr()))
-    if (arm.isElse == 0) { testAndBind(ctx, arm.pat, lnext, payTy) }
-    emit(ctx, IStackFree(16)); genExpr(ctx, arm.body); emit(ctx, ICallL(lend)); emit(ctx, ILabel(lnext))
-    i = i + 1
-  }
-  emit(ctx, IStackFree(16)); emit(ctx, IZero(0)); return emit(ctx, ILabel(lend))
-}
-
-fun collectPat(acc: IntBuf, pat: Pat): Int {
-  when (pat) {
-    PBindP(name) -> { acc.push(name); 0 }
-    PCtorP(v, subs) -> { var j = 0; while (j < subs.len()) { collectPat(acc, subs.get(j)); j = j + 1 }; 0 }
-    else -> 0
-  }
-  return 0
 }
 
 fun genFieldAssign(ctx: Ctx, base: Expr, f: String, rhs: Expr): Int {
@@ -645,12 +566,12 @@ fun genFcloseF(ctx: Ctx, fp: Expr): Int { genExpr(ctx, fp); return emit(ctx, ICa
 
 // EStr literal — a boxed String: call the library ___mkStr(rawPtr, byteLen), which heap-copies the interned
 // bytes into an owned buffer so the String's deinit can free it. byteLen is the DECODED byte count (strBytesK,
-// the same unescaping arm64 emits), so an embedded \x00 counts and a literal's `.len()` is its true byte
+// the same unescaping arm64 emits), so an embedded \x00 counts and a literal's `.size()` is its true byte
 // length, not the strlen-truncated one.
 fun genStrLit(ctx: Ctx, s: String): Int {
   val lab = internStr(ctx, s)
   emit(ctx, ISymHi(0, lab)); emit(ctx, ISymLo(0, 0, lab))
-  loadImm(ctx, 1, strBytesK(s).len())
+  loadImm(ctx, 1, strBytesK(s).size())
   return emit(ctx, ICallSym("___mkStr"))
 }
 
@@ -741,11 +662,18 @@ fun genBoolToStr(ctx: Ctx, e: Expr): Int {
 fun isStrExpr(ctx: Ctx, e: Expr): Bool {
   return when (e) {
     EStr(s) -> true
-    EIdent(nm) -> containsStr(ctx.strLocals, nm)
+    // A local tracked as a String box, OR any binding whose DECLARED/inferred type is String — the latter
+    // covers a String PARAMETER (params get an lty but are never pushed to strLocals), so `fun f(x: String)
+    // { println(x) }` and `f(id("hi"))` print via %s, not as a pointer.
+    EIdent(nm) -> containsStr(ctx.strLocals, nm) || getLty(ctx, nm) == "String"
     // ANY call whose (declared/intrinsic) return type is String — not just a hardcoded builtin set.
     // typeNameOf consults funRetOf, so user functions like jsonToStr/chr print via %s, not as a pointer.
     ECall(nm, aa) -> typeNameOf(ctx, e) == "String"
     EField(b, f) -> typeNameOf(ctx, e) == "String"
+    // A generic call whose bare-type-param return binds to String is klower-wrapped as ECast(call,"String")
+    // (17f894d's recovery); recognize it so println(id("hi")) and a `val s: String = id("hi")` binding print
+    // via %s, not as a pointer. ty is the recovered concrete type; only "String" selects the string path.
+    ECast(x, ty) -> ty == "String"
     else -> false
   }
 }
@@ -805,7 +733,7 @@ fun genClosGet(ctx: Ctx, env: Expr, idxE: Expr): Int {
 
 fun genClosNew(ctx: Ctx, args: IntBuf): Int {
   val fn = strOfExpr(aAt(args, 0))
-  val ncaps = args.len() - 1
+  val ncaps = args.size() - 1
   loadImm(ctx, 0, 8 * (1 + ncaps)); genAllocHdr(ctx, 0 - 1); emit(ctx, IPush(0))
   emit(ctx, IFuncAddr(0, "_" + fn)); emit(ctx, ILoadTop(1)); emit(ctx, IStoreOff(0, 1, 0))
   var i = 1
@@ -820,8 +748,8 @@ fun genClosNew(ctx: Ctx, args: IntBuf): Int {
 
 fun genClosCall(ctx: Ctx, args: IntBuf): Int {
   var i = 0
-  while (i < args.len()) { genExpr(ctx, aAt(args, i)); emit(ctx, IPush(0)); i = i + 1 }
-  var j = args.len() - 1
+  while (i < args.size()) { genExpr(ctx, aAt(args, i)); emit(ctx, IPush(0)); i = i + 1 }
+  var j = args.size() - 1
   while (j >= 0) { emit(ctx, IPop(j)); j = j - 1 }
   emit(ctx, ILoadOff(16, 0, 0))
   return emit(ctx, ICallReg(16))
@@ -1074,9 +1002,9 @@ fun genFreeObj(ctx: Ctx, p: Expr): Int {
 // to a stale guess. The standalone genProgram entry (empty tables) never reaches here: isRelField short-
 // circuits on its empty struct table first, so isArcExemptIn is not called at all.
 fun isArcExemptIn(arcE: IntBuf, t: String): Bool {
-  if (arcE.len() == 0) { eprintln("codegen: ARC-exemption set empty (@arc(manual) decouple desync) — cannot classify deep-release"); __abort() }
+  if (arcE.size() == 0) { eprintln("codegen: ARC-exemption set empty (@arc(manual) decouple desync) — cannot classify deep-release"); __abort() }
   var i = 0
-  while (i < arcE.len()) { if (arcE.get(i) == t) { return true }; i = i + 1 }
+  while (i < arcE.size()) { if (arcE.get(i) == t) { return true }; i = i + 1 }
   return false
 }
 
@@ -1093,7 +1021,7 @@ fun structHasRefField(gen: Gen, name: String): Bool {
   if (idx < 0) { return false }
   val fts: IntBuf = gen.structFT.get(idx)
   var i = 0
-  while (i < fts.len()) { val ft: String = fts.get(i); if (isRelField(gen, ft)) { return true }; i = i + 1 }
+  while (i < fts.size()) { val ft: String = fts.get(i); if (isRelField(gen, ft)) { return true }; i = i + 1 }
   return false
 }
 
@@ -1158,58 +1086,58 @@ fun floorRetTag(nm: String): String {
 }
 
 fun genCall(ctx: Ctx, name: String, args: IntBuf): Int {
-  if (name == "toInt" && args.len() == 1) { return genFToInt(ctx, aAt(args, 0)) }
-  if (name == "toFloat" && args.len() == 1) { return genIToFloat(ctx, aAt(args, 0)) }
-  if (name == "__abort" && args.len() == 0) { return emit(ctx, ICallSym("_abort")) }
-  if (name == "__allocRC" && args.len() == 1) { return genAllocRC(ctx, aAt(args, 0)) }
-  if (name == "__retain" && args.len() == 1) { return genRetain(ctx, aAt(args, 0)) }
-  if (name == "__release" && args.len() == 1) { return genReleaseDisp(ctx, aAt(args, 0)) }
-  if (name == "__decRefcount" && args.len() == 1) { return genDecRefcount(ctx, aAt(args, 0)) }
-  if (name == "__freeObj" && args.len() == 1) { return genFreeObj(ctx, aAt(args, 0)) }
-  if (name == "__refcount" && args.len() == 1) { return genRefcount(ctx, aAt(args, 0)) }
-  if (name == "__isUnique" && args.len() == 1) { return genIsUnique(ctx, aAt(args, 0)) }
-  if (name == "__typeId" && args.len() == 1) { return genTypeId(ctx, aAt(args, 0)) }
-  if (name == "__rawAlloc" && args.len() == 1) { return genRawAlloc(ctx, aAt(args, 0)) }
-  if (name == "__rawFree" && args.len() == 1) { return genRawFree(ctx, aAt(args, 0)) }
-  if (name == "__rawRealloc" && args.len() == 2) { return genRawRealloc(ctx, aAt(args, 0), aAt(args, 1)) }
-  if (name == "__argv" && args.len() == 2) { genArgv(ctx, aAt(args, 0), aAt(args, 1)); return genBoxCstr(ctx) }
-  if (name == "__rawLoad" && args.len() == 2) { return genRawLoad(ctx, aAt(args, 0), aAt(args, 1)) }
-  if (name == "__rawStore" && args.len() == 3) { return genRawStore(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2)) }
-  if (name == "__rawLoadByte" && args.len() == 2) { return genRawLoadByte(ctx, aAt(args, 0), aAt(args, 1)) }
-  if (name == "__rawStoreByte" && args.len() == 3) { return genRawStoreByte(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2)) }
-  if (name == "__rawLoad16" && args.len() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 0) }
-  if (name == "__rawStore16" && args.len() == 3) { return genRawStoreSized(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2), 0) }
-  if (name == "__rawLoad32" && args.len() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 1) }
-  if (name == "__rawStore32" && args.len() == 3) { return genRawStoreSized(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2), 1) }
-  if (name == "__rawLoad8S" && args.len() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 2) }
-  if (name == "__rawLoad16S" && args.len() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 3) }
-  if (name == "__rawLoad32S" && args.len() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 4) }
-  if (name == "__funcAddr" && args.len() == 1) { return genFuncAddr(ctx, aAt(args, 0)) }
-  if (name == "__closGet" && args.len() == 2) { return genClosGet(ctx, aAt(args, 0), aAt(args, 1)) }
+  if (name == "toInt" && args.size() == 1) { return genFToInt(ctx, aAt(args, 0)) }
+  if (name == "toFloat" && args.size() == 1) { return genIToFloat(ctx, aAt(args, 0)) }
+  if (name == "__abort" && args.size() == 0) { return emit(ctx, ICallSym("_abort")) }
+  if (name == "__allocRC" && args.size() == 1) { return genAllocRC(ctx, aAt(args, 0)) }
+  if (name == "__retain" && args.size() == 1) { return genRetain(ctx, aAt(args, 0)) }
+  if (name == "__release" && args.size() == 1) { return genReleaseDisp(ctx, aAt(args, 0)) }
+  if (name == "__decRefcount" && args.size() == 1) { return genDecRefcount(ctx, aAt(args, 0)) }
+  if (name == "__freeObj" && args.size() == 1) { return genFreeObj(ctx, aAt(args, 0)) }
+  if (name == "__refcount" && args.size() == 1) { return genRefcount(ctx, aAt(args, 0)) }
+  if (name == "__isUnique" && args.size() == 1) { return genIsUnique(ctx, aAt(args, 0)) }
+  if (name == "__typeId" && args.size() == 1) { return genTypeId(ctx, aAt(args, 0)) }
+  if (name == "__rawAlloc" && args.size() == 1) { return genRawAlloc(ctx, aAt(args, 0)) }
+  if (name == "__rawFree" && args.size() == 1) { return genRawFree(ctx, aAt(args, 0)) }
+  if (name == "__rawRealloc" && args.size() == 2) { return genRawRealloc(ctx, aAt(args, 0), aAt(args, 1)) }
+  if (name == "__argv" && args.size() == 2) { genArgv(ctx, aAt(args, 0), aAt(args, 1)); return genBoxCstr(ctx) }
+  if (name == "__rawLoad" && args.size() == 2) { return genRawLoad(ctx, aAt(args, 0), aAt(args, 1)) }
+  if (name == "__rawStore" && args.size() == 3) { return genRawStore(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2)) }
+  if (name == "__rawLoadByte" && args.size() == 2) { return genRawLoadByte(ctx, aAt(args, 0), aAt(args, 1)) }
+  if (name == "__rawStoreByte" && args.size() == 3) { return genRawStoreByte(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2)) }
+  if (name == "__rawLoad16" && args.size() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 0) }
+  if (name == "__rawStore16" && args.size() == 3) { return genRawStoreSized(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2), 0) }
+  if (name == "__rawLoad32" && args.size() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 1) }
+  if (name == "__rawStore32" && args.size() == 3) { return genRawStoreSized(ctx, aAt(args, 0), aAt(args, 1), aAt(args, 2), 1) }
+  if (name == "__rawLoad8S" && args.size() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 2) }
+  if (name == "__rawLoad16S" && args.size() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 3) }
+  if (name == "__rawLoad32S" && args.size() == 2) { return genRawLoadSized(ctx, aAt(args, 0), aAt(args, 1), 4) }
+  if (name == "__funcAddr" && args.size() == 1) { return genFuncAddr(ctx, aAt(args, 0)) }
+  if (name == "__closGet" && args.size() == 2) { return genClosGet(ctx, aAt(args, 0), aAt(args, 1)) }
   if (name == "__closNew") { return genClosNew(ctx, args) }
   if (name == "__closCall") { return genClosCall(ctx, args) }
-  if (name == "println" && args.len() == 1) { genPrintln(ctx, aAt(args, 0), "Lfmt_println_s", "Lfmt_println"); return 0 }
-  if (name == "print" && args.len() == 1) { genPrintln(ctx, aAt(args, 0), "Lfmt_print_s", "Lfmt_print"); return 0 }
-  if (name == "printlnF" && args.len() == 1) { return genPrintFloat(ctx, aAt(args, 0), "Lfmt_println_f") }
-  if (name == "printF" && args.len() == 1) { return genPrintFloat(ctx, aAt(args, 0), "Lfmt_print_f") }
-  if (name == "floatToStr" && args.len() == 1) { return genFloatToStr(ctx, aAt(args, 0)) }
-  if (name == "boolToStr" && args.len() == 1) { return genBoolToStr(ctx, aAt(args, 0)) }
-  if (name == "eprintln" && args.len() == 1) { return genEStderr(ctx, aAt(args, 0), 1) }
-  if (name == "eprint" && args.len() == 1) { return genEStderr(ctx, aAt(args, 0), 0) }
+  if (name == "println" && args.size() == 1) { genPrintln(ctx, aAt(args, 0), "Lfmt_println_s", "Lfmt_println"); return 0 }
+  if (name == "print" && args.size() == 1) { genPrintln(ctx, aAt(args, 0), "Lfmt_print_s", "Lfmt_print"); return 0 }
+  if (name == "printlnF" && args.size() == 1) { return genPrintFloat(ctx, aAt(args, 0), "Lfmt_println_f") }
+  if (name == "printF" && args.size() == 1) { return genPrintFloat(ctx, aAt(args, 0), "Lfmt_print_f") }
+  if (name == "floatToStr" && args.size() == 1) { return genFloatToStr(ctx, aAt(args, 0)) }
+  if (name == "boolToStr" && args.size() == 1) { return genBoolToStr(ctx, aAt(args, 0)) }
+  if (name == "eprintln" && args.size() == 1) { return genEStderr(ctx, aAt(args, 0), 1) }
+  if (name == "eprint" && args.size() == 1) { return genEStderr(ctx, aAt(args, 0), 0) }
   // IntBuf/string ops (listNew/listPush/listGet/listSet/listLen, strLen/charAt/strEq/concat/substr/
   // intToStr) are pure-Kite prelude functions (lib/core/string.kite, lib/alloc/collections/list.kite)
   // on the raw memory/byte primitives; they resolve through the default ICallSym path below. Their
   // former machine lowerings were deleted.
-  if (name == "readFile" && args.len() == 1) { genReadFile(ctx, aAt(args, 0)); return genBoxCstr(ctx) }
-  if (name == "writeFile" && args.len() == 2) { return genWriteFile(ctx, aAt(args, 0), aAt(args, 1)) }
-  if (name == "fopenW" && args.len() == 1) { return genFopenW(ctx, aAt(args, 0)) }
-  if (name == "fputByte" && args.len() == 2) { return genFputByte(ctx, aAt(args, 0), aAt(args, 1)) }
-  if (name == "fcloseF" && args.len() == 1) { return genFcloseF(ctx, aAt(args, 0)) }
+  if (name == "readFile" && args.size() == 1) { genReadFile(ctx, aAt(args, 0)); return genBoxCstr(ctx) }
+  if (name == "writeFile" && args.size() == 2) { return genWriteFile(ctx, aAt(args, 0), aAt(args, 1)) }
+  if (name == "fopenW" && args.size() == 1) { return genFopenW(ctx, aAt(args, 0)) }
+  if (name == "fputByte" && args.size() == 2) { return genFputByte(ctx, aAt(args, 0), aAt(args, 1)) }
+  if (name == "fcloseF" && args.size() == 1) { return genFcloseF(ctx, aAt(args, 0)) }
   if (isVariantName(ctx.gen, name)) { return genVariantNew(ctx, name, args) }
   if (isStructName(ctx.gen, name)) { return genStructNew(ctx, name, args) }
   var i = 0
-  while (i < args.len()) { val a: Expr = args.get(i); genExpr(ctx, a); emit(ctx, IPush(0)); i = i + 1 }
-  var j = args.len() - 1
+  while (i < args.size()) { val a: Expr = args.get(i); genExpr(ctx, a); emit(ctx, IPush(0)); i = i + 1 }
+  var j = args.size() - 1
   while (j >= 0) { emit(ctx, IPop(j)); j = j - 1 }
   return emit(ctx, ICallSym("_" + name))
 }
@@ -1248,7 +1176,7 @@ fun genWhile(ctx: Ctx, c: Expr, body: Expr): Int {
 // innermost pair is the top. Uses listSet-below-length + listPush-at-length + a mutable depth so no
 // list-pop primitive is needed.
 fun pushLoop(ctx: Ctx, brk: String, cont: String): Int {
-  if (ctx.loopDepth < ctx.brkL.len()) { ctx.brkL.set(ctx.loopDepth, brk); ctx.contL.set(ctx.loopDepth, cont) }
+  if (ctx.loopDepth < ctx.brkL.size()) { ctx.brkL.set(ctx.loopDepth, brk); ctx.contL.set(ctx.loopDepth, cont) }
   else { ctx.brkL.push(brk); ctx.contL.push(cont) }
   ctx.loopDepth = ctx.loopDepth + 1
   return 0
@@ -1281,7 +1209,7 @@ fun genLoop(ctx: Ctx, c: Expr, body: Expr, step: Stmt): Int {
 
 fun genBlock(ctx: Ctx, stmts: IntBuf, res: Expr): Int {
   var i = 0
-  while (i < stmts.len()) { val s: Stmt = stmts.get(i); genStmt(ctx, s); i = i + 1 }
+  while (i < stmts.size()) { val s: Stmt = stmts.get(i); genStmt(ctx, s); i = i + 1 }
   if (isNoRes(res) == false) { genExpr(ctx, res) }
   return 0
 }
@@ -1313,7 +1241,6 @@ fun genExpr(ctx: Ctx, e: Expr): Int {
     ECast(x, ty) -> genCast(ctx, x, ty)
     ECall(nm, args) -> genCall(ctx, nm, args)
     EField(b, f) -> genField(ctx, b, f)
-    EWhen(subj, arms) -> genWhenE(ctx, subj, arms)
     EBlock(stmts, res) -> genBlock(ctx, stmts, res)
     EIf(c, t, el) -> genIf(ctx, c, t, el)
     ERet(v) -> genRet(ctx, v)
@@ -1342,23 +1269,26 @@ fun collectE(acc: IntBuf, e: Expr): Int {
   when (e) {
     EBlock(stmts, res) -> {
       var i = 0
-      while (i < stmts.len()) { collectS(acc, stmts.get(i)); i = i + 1 }
+      while (i < stmts.size()) { collectS(acc, stmts.get(i)); i = i + 1 }
       if (isNoRes(res) == false) { collectE(acc, res) }
       0
     }
-    EIf(c, t, el) -> { collectE(acc, t); if (isNoRes(el) == false) { collectE(acc, el) }; 0 }
+    // Walk the CONDITION too, not just the branches: an `is`/`!!`/`?:`/`?.` desugar in a condition is an
+    // EBlock that BINDS a fresh temp (e.g. `if (x is Dog && ..)` -> `EBlock([SLet(_is, x)], ..)`), and that
+    // temp needs a stack slot. Missing it left slotOf==0, so the temp's store hit a bogus offset and
+    // corrupted the frame (layout-dependent crash). See collectE recursion into EBin/ECall/... below.
+    EIf(c, t, el) -> { collectE(acc, c); collectE(acc, t); if (isNoRes(el) == false) { collectE(acc, el) }; 0 }
     ERet(v) -> { if (isNoRes(v) == false) { collectE(acc, v) }; 0 }
-    EWhen(subj, arms) -> {
-      collectE(acc, subj)
-      var i = 0
-      while (i < arms.len()) {
-        val arm: Arm = arms.get(i)
-        if (arm.isElse == 0) { collectPat(acc, arm.pat) }
-        collectE(acc, arm.body)
-        i = i + 1
-      }
-      0
-    }
+    // Recurse into every OPERAND-bearing expression so a temp-binding EBlock nested anywhere (an `is` test
+    // in a condition, an `x!!`/`x?:d` inside a call arg or a `&&`, ...) is discovered and slotted. Before
+    // this, only EBlock/EIf-branch/ERet were walked, so such nested temps silently got slot 0 —
+    // a frame-corrupting store. Leaf forms (EInt/EIdent/EStr/EFLit/EBrk/ECont/ENoRes) bind nothing.
+    EBin(op, l, r) -> { collectE(acc, l); collectE(acc, r); 0 }
+    EFBin(op, l, r) -> { collectE(acc, l); collectE(acc, r); 0 }
+    EUnary(op, x) -> collectE(acc, x)
+    ECall(nm, args) -> { var i = 0; while (i < args.size()) { collectE(acc, args.get(i)); i = i + 1 }; 0 }
+    EField(b, f) -> collectE(acc, b)
+    ECast(x, ty) -> collectE(acc, x)
     else -> 0
   }
   return 0
@@ -1369,20 +1299,20 @@ fun genFun(gen: Gen, fd: Func): Int {
   collectE(locals, fd.body)
   val names = intBuf()
   var i = 0
-  while (i < fd.params.len()) { names.push(fd.params.get(i)); i = i + 1 }
+  while (i < fd.params.size()) { names.push(fd.params.get(i)); i = i + 1 }
   i = 0
-  while (i < locals.len()) {
+  while (i < locals.size()) {
     val nm: String = locals.get(i)
     if (containsStr(names, nm) == false) { names.push(nm) }
     i = i + 1
   }
   val offs = intBuf()
   i = 0
-  while (i < names.len()) { offs.push(8 * (i + 1)); i = i + 1 }
-  val frame = align16(8 * names.len())
+  while (i < names.size()) { offs.push(8 * (i + 1)); i = i + 1 }
+  val frame = align16(8 * names.size())
   val ctx = Ctx(gen, names, offs, "Lepi_" + fd.name, intBuf(), intBuf(), intBuf(), intBuf(), intBuf(), 0)
   i = 0
-  while (i < fd.paramTys.len()) {
+  while (i < fd.paramTys.size()) {
     val pty: String = fd.paramTys.get(i)
     if (pty != "") { setLty(ctx, fd.params.get(i), pty) }
     i = i + 1
@@ -1392,7 +1322,7 @@ fun genFun(gen: Gen, fd: Func): Int {
   emit(ctx, ISetFrame)
   if (frame > 0) { emitStackAlloc(ctx, frame) }
   i = 0
-  while (i < fd.params.len()) { emit(ctx, IStoreLocal(i, 8 * (i + 1))); i = i + 1 }
+  while (i < fd.params.size()) { emit(ctx, IStoreLocal(i, 8 * (i + 1))); i = i + 1 }
   genExpr(ctx, fd.body)
   emit(ctx, ILabel("Lepi_" + fd.name))
   if (frame > 0) { emitStackFree(ctx, frame) }
@@ -1421,7 +1351,7 @@ fun buildRelRoutine(gen: Gen, name: String): Func {
     stmts.push(SExprS(ECall(name + "_deinit", dArgs)))
   }
   var i = 0
-  while (i < fields.len()) {
+  while (i < fields.size()) {
     val ft: String = fts.get(i)
     if (isRelField(gen, ft)) {
       val relArgs = intBuf(); relArgs.push(EField(EIdent("p"), fields.get(i)))
@@ -1451,13 +1381,13 @@ fun buildRelRoutine(gen: Gen, name: String): Func {
 fun loweredNames(funcs: IntBuf): IntBuf {
   val out = intBuf()
   var i = 0
-  while (i < funcs.len()) { val f: Func = funcs.get(i); out.push(f.name); i = i + 1 }
+  while (i < funcs.size()) { val f: Func = funcs.get(i); out.push(f.name); i = i + 1 }
   return out
 }
 
 fun genRelRoutines(gen: Gen, lowered: IntBuf): Int {
   var i = 0
-  while (i < gen.structN.len()) {
+  while (i < gen.structN.size()) {
     val nm: String = gen.structN.get(i)
     // A struct needs a rel routine if it has a releasable ref field, OR it has a deinit whose body was
     // actually lowered (skips the dropped @mono-template deinit that would dangle ___rel_<template>).
@@ -1471,7 +1401,7 @@ fun genRelRoutines(gen: Gen, lowered: IntBuf): Int {
 fun genProgramG(funcs: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBuf, variantN: IntBuf, variantTag: IntBuf, variantTys: IntBuf, funN: IntBuf, funRet: IntBuf, arcE: IntBuf): Gen {
   val gen = Gen(intBuf(), 0, intBuf(), intBuf(), 0, structN, structF, structFT, variantN, variantTag, variantTys, funN, funRet, arcE)
   var i = 0
-  while (i < funcs.len()) { val f: Func = funcs.get(i); genFun(gen, f); i = i + 1 }
+  while (i < funcs.size()) { val f: Func = funcs.get(i); genFun(gen, f); i = i + 1 }
   genRelRoutines(gen, loweredNames(funcs))
   return gen
 }
@@ -1500,7 +1430,7 @@ fun isIdMov(i: Instr): Bool { return when (i) { IMov(d, m) -> d == m; else -> fa
 
 fun peephole1(code: IntBuf): IntBuf {
   val out = intBuf()
-  val n = code.len()
+  val n = code.size()
   var i = 0
   while (i < n) {
     val a: Instr = code.get(i)
@@ -1528,7 +1458,7 @@ fun optimize(code: IntBuf): IntBuf {
   var pass = 0
   while (pass < 20) {
     val nxt = peephole1(cur)
-    if (nxt.len() == cur.len()) { return nxt }
+    if (nxt.size() == cur.size()) { return nxt }
     cur = nxt
     pass = pass + 1
   }

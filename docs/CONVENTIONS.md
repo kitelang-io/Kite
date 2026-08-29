@@ -34,16 +34,16 @@ body or an `impl` block), called `v.op(...)`. Reserve top-level functions for fa
 class Vec(var n: Int, var cap: Int, var data: Int) {
   fun push(self, x: Int): Int { ... }     // v.push(x)
   fun get(self, i: Int): Int  { ... }     // v.get(i)   (or v[i])
-  fun len(self): Int          { ... }     // v.len()
+  fun size(self): Int         { ... }     // v.size()
   deinit { __rawFree(self.data) }
 }
 fun vecNew(): Vec { return Vec(0, 4, __rawAlloc(4 * 8)) }   // factory: a top-level function
 ```
 
 Method calls resolve by the receiver's type (`v.push(x)` → `Vec_push(v, x)`), so `Vec.get` and `IntMap.get`
-never collide. This matches the built-in nominal methods (`xs.push(x)`, `s.len()`). Method names may reuse a
-field name (`len()` method vs a `n` field is clearer than a `len` field + `len()` method — prefer distinct
-field names).
+never collide. This matches the built-in nominal methods (Kotlin naming: `xs.push(x)`, `xs.size()` on a
+sequence, `s.length()` on a String). Method names may reuse a field name (`size()` method vs a `n` field is
+clearer than a `size` field + `size()` method — prefer distinct field names).
 
 ## 4. Packages: three top-level, nest the rest
 

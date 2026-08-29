@@ -1,0 +1,63 @@
+// Smart-cast Phase 1: `is` / `!is` as first-class boolean expressions (NO narrowing yet).
+// Exercises every target kind: struct/class (header type-id), enum variant (tag at [obj+0]),
+// trait (impl type-id membership), primitive (compile-time fold), plus precedence.
+
+trait Shape { fun area(self): Int }
+
+struct Circle(val r: Int)
+
+struct Square(val s: Int)
+
+impl Shape for Circle { fun area(self): Int = self.r * self.r }
+
+impl Shape for Square { fun area(self): Int = self.s * self.s }
+
+enum Opt { Non; Som(Int) }
+
+fun bstr(b: Bool): String { if (b) { return "true" } return "false" }
+
+fun main(): Int {
+  // --- struct via a type-erased container (runtime header type-id) ---
+  val shapes = intBuf()
+  shapes.push(Circle(2))
+  shapes.push(Square(3))
+  val c = shapes.get(0)
+  val sq = shapes.get(1)
+  println("c is Circle   = " + bstr(c is Circle)) // true
+  println("c is Square   = " + bstr(c is Square)) // false
+  println("c !is Square  = " + bstr(c !is Square)) // true
+  // --- trait membership (Circle & Square both impl Shape) ---
+  println("c is Shape    = " + bstr(c is Shape)) // true
+  println("sq is Shape   = " + bstr(sq is Shape)) // true
+
+  // --- enum variant via the tag word ---
+  val v = Som(42)
+  val n = Non
+  println("v is Som      = " + bstr(v is Som)) // true
+  println("v is Non      = " + bstr(v is Non)) // false
+  println("n is Non      = " + bstr(n is Non)) // true
+  if (v is Som) { println("if (v is Som) -> matched") }
+
+  // --- primitive: compile-time fold from the static type ---
+  val x = 5
+  println("x is Int      = " + bstr(x is Int)) // true (folded)
+  println("x is Bool     = " + bstr(x is Bool)) // false (folded)
+
+  // --- precedence: `is` binds tighter than && , so `a is T && b is U` == `(a is T) && (b is U)` ---
+  val p1 = (c is Circle) && (sq is Square)
+  val p2 = c is Circle && sq is Square
+  println("prec (a is T && b is U) = " + (bstr(p1) + (" / " + bstr(p2)))) // true / true
+  // relational binds tighter than `is` (a < b evaluated as its own unit)
+  println("rel 1 < 2     = " + bstr(1 < 2)) // true
+
+  // exit code encodes each check (1+2+4+8+16+32+64 = 127)
+  var score = 0
+  if (c is Circle) { score = score + 1 }
+  if (c !is Square) { score = score + 2 }
+  if (c is Shape) { score = score + 4 }
+  if (v is Som) { score = score + 8 }
+  if (n is Non) { score = score + 16 }
+  if (x is Int) { score = score + 32 }
+  if (p2) { score = score + 64 }
+  return score
+}

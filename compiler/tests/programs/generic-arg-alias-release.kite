@@ -1,0 +1,21 @@
+// Regression: a class temp passed to a GENERIC callee whose declared return is a bare type-param
+// (`fun id<T>(x: T): T`) must NOT be released after the call — the callee returns that very object
+// (identity passthrough), so releasing it frees the object the binding still points to (use-after-free).
+// Pre-fix, an allocating call (println) between the first and a later field read reused the freed memory,
+// so `p.b` read garbage. `argNeedsRelease`/`retMayAliasArg` now leak conservatively for an erased return.
+// Exit code = sum of fields read ACROSS intervening allocating calls; only equals 76 when nothing is freed.
+class Bx(val a: Int, val b: Int)
+
+fun id<T>(x: T): T { return x }
+
+fun main(): Int {
+  val p = id(Bx(7, 9))
+  println(p.a.toStr())          // 7  — this println ALLOCATES (the trigger); a freed p would be reused here
+  val pb = p.b                  // must be 9, not garbage
+  val q = id(Bx(20, 40))
+  println(q.a.toStr())          // 20
+  val qb = q.b                  // must be 40
+  println(pb.toStr())           // 9
+  println(qb.toStr())           // 40
+  return p.a + pb + q.a + qb    // 7 + 9 + 20 + 40 = 76
+}

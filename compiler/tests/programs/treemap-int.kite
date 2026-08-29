@@ -1,7 +1,7 @@
 import "lib/alloc/collections/treemap.kite"
 fun main(): Int {
   var acc = 0
-  val t = TreeMap::<Int, Int>(0 - 1, 0, 0, 0, 0, 0, 0, 0)
+  val t = TreeMap::<Int, Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0), RawBuf(0))
   t.set(50, 500) t.set(20, 200) t.set(80, 800) t.set(20, 222) t.set(10, 100) t.set(30, 300)
   if (t.size() == 5) { acc = acc + 1 }
   when (t.get(20)) { Some(v) -> { if (v == 222) { acc = acc + 1 } }; None -> 0 }

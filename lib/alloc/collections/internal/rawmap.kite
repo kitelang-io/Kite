@@ -1,6 +1,6 @@
 // kite::alloc::collections::internal::rawmap — the language-primitive RawMap: an insertion-ordered key->value map that
 // backs the {..} literal and the m[k] / m[k]=v index sugar. Storage is two parallel word-lists
-// {keys@0, vals@8}: keys[i] pairs with vals[i]. String-keyed methods (get/set/has/size/keys) are the
+// {keys@0, vals@8}: keys[i] pairs with vals[i]. String-keyed methods (get/set/containsKey/size/keys) are the
 // m.get/set/... surface AND back m["k"]/m["k"]=v; an Int-keyed path (getI/setI) backs m[intKey].
 // Following Kotlin, a type's convention methods (the desugar landing points) live WITH the type; the
 // {..} constructor is the top-level rawMap() factory (like IntBuf's intBuf()). Auto-included via
@@ -12,17 +12,17 @@
 // already excludes both RawMap and its IntBuf fields from deep-release.
 @arc(manual)
 class RawMap(var keys: IntBuf, var vals: IntBuf) {
-  fun size(self): Int { return self.keys.len() }
+  fun size(self): Int { return self.keys.size() }
 
   // @lang("rawmap.getS"): m["k"] load (String key) resolves here (emitted Map_get); also the m.get("k") surface.
   @lang("rawmap.getS")
-  fun get(self, k: String): Int { var i = 0 while (i < self.keys.len()) { if (self.keys.get(i) == k) { return self.vals.get(i) } i = i + 1 } return 0 }
+  fun get(self, k: String): Int { var i = 0 while (i < self.keys.size()) { if (self.keys.get(i) == k) { return self.vals.get(i) } i = i + 1 } return 0 }
 
-  fun has(self, k: String): Bool { var i = 0 while (i < self.keys.len()) { if (self.keys.get(i) == k) { return true } i = i + 1 } return false }
+  fun containsKey(self, k: String): Bool { var i = 0 while (i < self.keys.size()) { if (self.keys.get(i) == k) { return true } i = i + 1 } return false }
 
   // @lang("rawmap.setS"): m["k"] = v store (String key). Updates k in place, else appends (k, v).
   @lang("rawmap.setS")
-  fun set(self, k: String, v: Int): Int { var i = 0 while (i < self.keys.len()) { if (self.keys.get(i) == k) { self.vals.set(i, v) return 0 } i = i + 1 } self.keys.push(k) self.vals.push(v) return 0 }
+  fun set(self, k: String, v: Int): Int { var i = 0 while (i < self.keys.size()) { if (self.keys.get(i) == k) { self.vals.set(i, v) return 0 } i = i + 1 } self.keys.push(k) self.vals.push(v) return 0 }
 
   // the keys, in insertion order — for iteration (`for (k in m.keys())`).
   fun keys(self): IntBuf { return self.keys }
@@ -30,11 +30,11 @@ class RawMap(var keys: IntBuf, var vals: IntBuf) {
   // Int-keyed path (m[intKey]): `==` compare instead of strEq.
   // @lang("rawmap.getI"): m[intKey] load.
   @lang("rawmap.getI")
-  fun getI(self, k: Int): Int { var i = 0 while (i < self.keys.len()) { if (self.keys.get(i) == k) { return self.vals.get(i) } i = i + 1 } return 0 }
+  fun getI(self, k: Int): Int { var i = 0 while (i < self.keys.size()) { if (self.keys.get(i) == k) { return self.vals.get(i) } i = i + 1 } return 0 }
 
   // @lang("rawmap.setI"): m[intKey] = v store.
   @lang("rawmap.setI")
-  fun setI(self, k: Int, v: Int): Int { var i = 0 while (i < self.keys.len()) { if (self.keys.get(i) == k) { self.vals.set(i, v) return 0 } i = i + 1 } self.keys.push(k) self.vals.push(v) return 0 }
+  fun setI(self, k: Int, v: Int): Int { var i = 0 while (i < self.keys.size()) { if (self.keys.get(i) == k) { self.vals.set(i, v) return 0 } i = i + 1 } self.keys.push(k) self.vals.push(v) return 0 }
 }
 
 // @lang("rawmap.new"): the {..} literal constructor. A fresh empty RawMap over two empty word-lists.

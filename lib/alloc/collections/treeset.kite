@@ -3,69 +3,106 @@
 // concrete T's `<`/`==` (String content order, Int machine order). A STANDALONE template (a monomorphized
 // template cannot nest a TreeMap<T,Unit>).
 //
+// `@value` gives it VALUE SEMANTICS via CoW-over-ARC (STDLIB-REDESIGN §124), the SAME model as Vec/Deque:
+// the three node buffers (elems/left/right) each live in a distinct `RawBuf` ARC object whose refcount is
+// the uniqueness signal. Binding one takes a value COPY (`copy` deep-retains the shared RawBufs), and every
+// mutator (`add`/`remove`) calls `ensureUnique` first — cloning all three buffers when co-owned — so mutating
+// a bound copy copy-on-writes and never corrupts the original. A `deinit` drops the three RawBufs at scope
+// exit. (CLASS elements are not element-retained on the CoW clone — same type-erasure bound Vec documents.)
+//
 // Navigation returns Option: min/max/floor(<=x)/ceil(>=x)/higher(>x)/lower(<x); ordered iteration = `min()`
 // then `higher(prev)`. (Self-balancing is a deferred optimization; ordering is exact.) Importable via `import
-// kite::alloc::collections::treeset`. Construct empty: `TreeSet::<Int>(0 - 1, 0, 0, 0, 0, 0, 0)`.
+// kite::alloc::collections::treeset`. Construct empty: `TreeSet::<Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))`.
 import kite::core::panic
+import kite::alloc::collections::internal::rawbuf
 
 @mono
-@arc(manual)
-class TreeSet<T>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var elems: Int, var left: Int, var right: Int) {
+@value
+class TreeSet<T>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var elems: RawBuf, var left: RawBuf, var right: RawBuf) {
+  // CoW: clone one backing buffer (`bytes` copied verbatim) into a fresh uniquely-owned RawBuf. A 0-byte
+  // (never-allocated) buffer clones to a null RawBuf(0). The caller drops the old co-ownership afterwards.
+  fun cloneBuf(self, old: RawBuf, bytes: Int): RawBuf {
+    val nd = if (bytes == 0) { 0 } else { __rawAlloc(bytes) }
+    var i = 0
+    while (i < bytes) { __rawStoreByte(nd, i, __rawLoadByte(old.data, i)) i = i + 1 }
+    return RawBuf(nd)
+  }
+  // CoW: clone all three buffers away from other owners before an in-place write. A no-op when uniquely
+  // owned. The three RawBufs always move in lockstep, so `elems`'s refcount is the shared uniqueness signal.
+  fun ensureUnique(self): Int {
+    if (__refcount(self.elems) > 1) {
+      val oe = self.elems val ol = self.left val orr = self.right
+      self.elems = self.cloneBuf(oe, self.cap * sizeOf::<T>())
+      self.left = self.cloneBuf(ol, self.cap * 8)
+      self.right = self.cloneBuf(orr, self.cap * 8)
+      oe.drop() ol.drop() orr.drop()
+    }
+    return 0
+  }
+  // value COPY on bind: share the three buffers (+1 each) so a later write on either side copy-on-writes.
+  fun copy(self): TreeSet<T> {
+    __retain(self.elems) __retain(self.left) __retain(self.right)
+    return TreeSet::<T>(self.root, self.n, self.nalloc, self.cap, self.elems, self.left, self.right)
+  }
+  // scope-exit drop: release this handle's co-ownership of each buffer (RawBuf.drop frees at the last owner).
+  deinit { self.elems.drop() self.left.drop() self.right.drop() }
+  // node allocator (called only from addAt, under a mutator that already ensureUnique'd — buffers private).
   fun newNode(self, x: T): Int {
     if (self.nalloc == self.cap) {
       if (self.cap == 0) { self.cap = 8 } else { self.cap = self.cap * 2 }
-      self.elems = __rawRealloc(self.elems, self.cap * sizeOf::<T>())
-      self.left = __rawRealloc(self.left, self.cap * 8)
-      self.right = __rawRealloc(self.right, self.cap * 8)
+      self.elems.data = __rawRealloc(self.elems.data, self.cap * sizeOf::<T>())
+      self.left.data = __rawRealloc(self.left.data, self.cap * 8)
+      self.right.data = __rawRealloc(self.right.data, self.cap * 8)
     }
     val idx = self.nalloc
-    __packedSet::<T>(self.elems, idx, x)
-    __rawStore(self.left, idx * 8, 0 - 1)
-    __rawStore(self.right, idx * 8, 0 - 1)
+    __packedSet::<T>(self.elems.data, idx, x)
+    __rawStore(self.left.data, idx * 8, 0 - 1)
+    __rawStore(self.right.data, idx * 8, 0 - 1)
     self.nalloc = self.nalloc + 1
     self.n = self.n + 1
     return idx
   }
   fun addAt(self, node: Int, x: T): Int {
     if (node < 0) { return self.newNode(x) }
-    val nx: T = __packedGet::<T>(self.elems, node)
+    val nx: T = __packedGet::<T>(self.elems.data, node)
     if (x == nx) { return node }
-    if (x < nx) { val nl = self.addAt(__rawLoad(self.left, node * 8), x) __rawStore(self.left, node * 8, nl) }
-    else { val nr = self.addAt(__rawLoad(self.right, node * 8), x) __rawStore(self.right, node * 8, nr) }
+    if (x < nx) { val nl = self.addAt(__rawLoad(self.left.data, node * 8), x) __rawStore(self.left.data, node * 8, nl) }
+    else { val nr = self.addAt(__rawLoad(self.right.data, node * 8), x) __rawStore(self.right.data, node * 8, nr) }
     return node
   }
   // add -> Bool matching HashSet.add: true when x was newly inserted, false when it was already present.
   // addAt already SHORT-CIRCUITS on a duplicate (`if (x == nx) { return node }`) without calling newNode,
   // and newNode is the only place self.n grows, so a change in the live count is exactly the newly-inserted
   // signal threaded up — no extra tree walk.
-  fun add(self, x: consuming T): Bool { val before = self.n self.root = self.addAt(self.root, x) return self.n != before }
+  fun add(self, x: consuming T): Bool { self.ensureUnique() val before = self.n self.root = self.addAt(self.root, x) return self.n != before }
   fun contains(self, x: T): Bool {
     var node = self.root
     while (node >= 0) {
-      val nx: T = __packedGet::<T>(self.elems, node)
+      val nx: T = __packedGet::<T>(self.elems.data, node)
       if (x == nx) { return true }
-      if (x < nx) { node = __rawLoad(self.left, node * 8) } else { node = __rawLoad(self.right, node * 8) }
+      if (x < nx) { node = __rawLoad(self.left.data, node * 8) } else { node = __rawLoad(self.right.data, node * 8) }
     }
     return false
   }
   fun removeAt(self, node: Int, x: T): Int {
     if (node < 0) { return 0 - 1 }
-    val nx: T = __packedGet::<T>(self.elems, node)
-    if (x < nx) { val nl = self.removeAt(__rawLoad(self.left, node * 8), x) __rawStore(self.left, node * 8, nl) return node }
-    if (nx < x) { val nr = self.removeAt(__rawLoad(self.right, node * 8), x) __rawStore(self.right, node * 8, nr) return node }
-    val l = __rawLoad(self.left, node * 8)
-    val r = __rawLoad(self.right, node * 8)
+    val nx: T = __packedGet::<T>(self.elems.data, node)
+    if (x < nx) { val nl = self.removeAt(__rawLoad(self.left.data, node * 8), x) __rawStore(self.left.data, node * 8, nl) return node }
+    if (nx < x) { val nr = self.removeAt(__rawLoad(self.right.data, node * 8), x) __rawStore(self.right.data, node * 8, nr) return node }
+    val l = __rawLoad(self.left.data, node * 8)
+    val r = __rawLoad(self.right.data, node * 8)
     if (l < 0) { return r }
     if (r < 0) { return l }
     var succ = r
-    while (__rawLoad(self.left, succ * 8) >= 0) { succ = __rawLoad(self.left, succ * 8) }
-    __packedSet::<T>(self.elems, node, __packedGet::<T>(self.elems, succ))
-    val sx: T = __packedGet::<T>(self.elems, succ)
+    while (__rawLoad(self.left.data, succ * 8) >= 0) { succ = __rawLoad(self.left.data, succ * 8) }
+    __packedSet::<T>(self.elems.data, node, __packedGet::<T>(self.elems.data, succ))
+    val sx: T = __packedGet::<T>(self.elems.data, succ)
     val nr2 = self.removeAt(r, sx)
-    __rawStore(self.right, node * 8, nr2)
+    __rawStore(self.right.data, node * 8, nr2)
     return node
   }
   fun remove(self, x: T): Bool {
+    self.ensureUnique()
     if (self.contains(x) == false) { return false }
     self.root = self.removeAt(self.root, x)
     self.n = self.n - 1
@@ -74,54 +111,54 @@ class TreeSet<T>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var e
   fun min(self): Option<T> {
     if (self.root < 0) { return None }
     var node = self.root
-    while (__rawLoad(self.left, node * 8) >= 0) { node = __rawLoad(self.left, node * 8) }
-    return Some(__packedGet::<T>(self.elems, node))
+    while (__rawLoad(self.left.data, node * 8) >= 0) { node = __rawLoad(self.left.data, node * 8) }
+    return Some(__packedGet::<T>(self.elems.data, node))
   }
   fun max(self): Option<T> {
     if (self.root < 0) { return None }
     var node = self.root
-    while (__rawLoad(self.right, node * 8) >= 0) { node = __rawLoad(self.right, node * 8) }
-    return Some(__packedGet::<T>(self.elems, node))
+    while (__rawLoad(self.right.data, node * 8) >= 0) { node = __rawLoad(self.right.data, node * 8) }
+    return Some(__packedGet::<T>(self.elems.data, node))
   }
   fun floor(self, x: T): Option<T> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
-      val nx: T = __packedGet::<T>(self.elems, node)
-      if (x < nx) { node = __rawLoad(self.left, node * 8) } else { best = node node = __rawLoad(self.right, node * 8) }
+      val nx: T = __packedGet::<T>(self.elems.data, node)
+      if (x < nx) { node = __rawLoad(self.left.data, node * 8) } else { best = node node = __rawLoad(self.right.data, node * 8) }
     }
     if (best < 0) { return None }
-    return Some(__packedGet::<T>(self.elems, best))
+    return Some(__packedGet::<T>(self.elems.data, best))
   }
   fun ceil(self, x: T): Option<T> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
-      val nx: T = __packedGet::<T>(self.elems, node)
-      if (nx < x) { node = __rawLoad(self.right, node * 8) } else { best = node node = __rawLoad(self.left, node * 8) }
+      val nx: T = __packedGet::<T>(self.elems.data, node)
+      if (nx < x) { node = __rawLoad(self.right.data, node * 8) } else { best = node node = __rawLoad(self.left.data, node * 8) }
     }
     if (best < 0) { return None }
-    return Some(__packedGet::<T>(self.elems, best))
+    return Some(__packedGet::<T>(self.elems.data, best))
   }
   fun higher(self, x: T): Option<T> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
-      val nx: T = __packedGet::<T>(self.elems, node)
-      if (x < nx) { best = node node = __rawLoad(self.left, node * 8) } else { node = __rawLoad(self.right, node * 8) }
+      val nx: T = __packedGet::<T>(self.elems.data, node)
+      if (x < nx) { best = node node = __rawLoad(self.left.data, node * 8) } else { node = __rawLoad(self.right.data, node * 8) }
     }
     if (best < 0) { return None }
-    return Some(__packedGet::<T>(self.elems, best))
+    return Some(__packedGet::<T>(self.elems.data, best))
   }
   fun lower(self, x: T): Option<T> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
-      val nx: T = __packedGet::<T>(self.elems, node)
-      if (nx < x) { best = node node = __rawLoad(self.right, node * 8) } else { node = __rawLoad(self.left, node * 8) }
+      val nx: T = __packedGet::<T>(self.elems.data, node)
+      if (nx < x) { best = node node = __rawLoad(self.right.data, node * 8) } else { node = __rawLoad(self.left.data, node * 8) }
     }
     if (best < 0) { return None }
-    return Some(__packedGet::<T>(self.elems, best))
+    return Some(__packedGet::<T>(self.elems.data, best))
   }
   fun size(self): Int { return self.n }
   fun isEmpty(self): Bool { return self.n == 0 }

@@ -27,7 +27,7 @@ fun parseProgramLn(toks: IntBuf, lines: IntBuf): IntBuf {
       // check pass so the ROOT module's decls (appended last) were never parsed or member-checked.
       if (pk(p) == 56) { eat(p) }
       val k = pk(p)
-      val n0 = decls.len()
+      val n0 = decls.size()
       if (k == 10 || k == 88) { decls.push(DFun(parseFunc(p, annos))) }
       else { if (k == 54) { decls.push(DType(0, parseTypeDecl(p, annos, 0))) }
         else { if (k == 65) { decls.push(DType(1, parseTypeDecl(p, annos, 1))) }
@@ -48,7 +48,7 @@ fun parseProgramLn(toks: IntBuf, lines: IntBuf): IntBuf {
                     // type-table entry. Recording it keeps the loop token-synced either way.
                     else { if (k == 81) { decls.push(DConst(parseUse(p).alias)) }
                       else { go = 0 } } } } } } } } }
-      if (decls.len() > n0) { lines.push(dl) }
+      if (decls.size() > n0) { lines.push(dl) }
     }
   }
   return decls
@@ -60,7 +60,7 @@ fun linePrefix(n: Int): String { return "line " + (n.toStr() + ": ") }
 // ---- small helpers ----
 fun memList(l: IntBuf, n: String): Bool {
   var i = 0
-  while (i < l.len()) { val x: String = l.get(i); if (x == n) { return true }; i = i + 1 }
+  while (i < l.size()) { val x: String = l.get(i); if (x == n) { return true }; i = i + 1 }
   return false
 }
 
@@ -77,7 +77,7 @@ fun isBuiltin(n: String): Bool {
 fun splitLamParams(s: String): IntBuf {
   val out = intBuf()
   if (s == "") { return out }
-  val n = s.len()
+  val n = s.length()
   var i = 0
   var start = 0
   while (i <= n) {
@@ -97,7 +97,7 @@ fun splitLamParams(s: String): IntBuf {
 // when-subject bind string "val y = " -> "y"  ("" -> "")
 fun whenBindName(b: String): String {
   if (b == "") { return "" }
-  return b.substr(4, b.len() - 4 - 3)
+  return b.substr(4, b.length() - 4 - 3)
 }
 
 // ================= RESOLVE PASS =================
@@ -123,7 +123,7 @@ fun rErr(ctx: RCtx, msg: String): Int { ctx.diags.push(linePrefix(ctx.curLine) +
 // resolver can vouch for without types; a selector that appears nowhere is a definite no-member.
 fun cmSelExists(mt: CMTab, sel: String): Bool {
   var i = 0
-  while (i < mt.sel.len()) { if (mt.sel.get(i) == sel) { return true }; i = i + 1 }
+  while (i < mt.sel.size()) { if (mt.sel.get(i) == sel) { return true }; i = i + 1 }
   return false
 }
 
@@ -159,13 +159,13 @@ fun rShadowStatic(ctx: RCtx, base: FExpr, sel: String): Int {
 
 fun rBound(ctx: RCtx, n: String): Bool {
   var i = 0
-  while (i < ctx.scopes.len()) { val sc: IntBuf = ctx.scopes.get(i); if (memList(sc, n)) { return true }; i = i + 1 }
+  while (i < ctx.scopes.size()) { val sc: IntBuf = ctx.scopes.get(i); if (memList(sc, n)) { return true }; i = i + 1 }
   if (memList(ctx.globals, n)) { return true }
   return isBuiltin(n)
 }
 
 fun rBind(ctx: RCtx, n: String): Int {
-  val top: IntBuf = ctx.scopes.get(ctx.scopes.len() - 1)
+  val top: IntBuf = ctx.scopes.get(ctx.scopes.size() - 1)
   top.push(n)
   return 0
 }
@@ -174,7 +174,7 @@ fun rPush(ctx: RCtx): IntBuf { // returns saved scopes for restore
   val saved = ctx.scopes
   val ns = intBuf()
   var i = 0
-  while (i < saved.len()) { ns.push(saved.get(i)); i = i + 1 }
+  while (i < saved.size()) { ns.push(saved.get(i)); i = i + 1 }
   ns.push(intBuf())
   ctx.scopes = ns
   return saved
@@ -216,31 +216,33 @@ fun rExpr(ctx: RCtx, e: FExpr): Int {
     FELambda(params, body) -> rLambda(ctx, params, body)
     FEBlock(stmts, res) -> rBlock(ctx, stmts, res)
     FEWhen(hasSubj, bind, subj, arms) -> rWhen(ctx, hasSubj, bind, subj, arms)
+    FEIs(a, ty, neg) -> rExpr(ctx, a) // RHS is a TYPE, resolved by the type machinery — only the subject binds names
+    FEIn(el, c, neg) -> { rExpr(ctx, el); rExpr(ctx, c) }
     else -> 0
   }
 }
 
 fun rArgs(ctx: RCtx, args: IntBuf): Int {
   var i = 0
-  while (i < args.len()) { val a: FArg = args.get(i); rExpr(ctx, a.expr); i = i + 1 }
+  while (i < args.size()) { val a: FArg = args.get(i); rExpr(ctx, a.expr); i = i + 1 }
   return 0
 }
 
 fun rExprList(ctx: RCtx, es: IntBuf): Int {
   var i = 0
-  while (i < es.len()) { val x: FExpr = es.get(i); rExpr(ctx, x); i = i + 1 }
+  while (i < es.size()) { val x: FExpr = es.get(i); rExpr(ctx, x); i = i + 1 }
   return 0
 }
 
 fun rMap(ctx: RCtx, ents: IntBuf): Int {
   var i = 0
-  while (i < ents.len()) { val en: FMapEnt = ents.get(i); rExpr(ctx, en.k); rExpr(ctx, en.v); i = i + 1 }
+  while (i < ents.size()) { val en: FMapEnt = ents.get(i); rExpr(ctx, en.k); rExpr(ctx, en.v); i = i + 1 }
   return 0
 }
 
 fun rInterp(ctx: RCtx, parts: IntBuf): Int {
   var i = 0
-  while (i < parts.len()) {
+  while (i < parts.size()) {
     val pt: FIPart = parts.get(i)
     when (pt) { FIExpr(e) -> rExpr(ctx, e); else -> 0 }
     i = i + 1
@@ -255,7 +257,7 @@ fun rLambda(ctx: RCtx, params: String, body: FExpr): Int {
   // params="" for both `{ it }` and `{ -> ... }`; binding an unused `it` for the latter is harmless).
   if (params == "") { rBind(ctx, "it") }
   var i = 0
-  while (i < names.len()) { val nm: String = names.get(i); rBind(ctx, nm); i = i + 1 }
+  while (i < names.size()) { val nm: String = names.get(i); rBind(ctx, nm); i = i + 1 }
   rExpr(ctx, body)
   rPop(ctx, saved)
   return 0
@@ -264,7 +266,7 @@ fun rLambda(ctx: RCtx, params: String, body: FExpr): Int {
 fun rBlock(ctx: RCtx, stmts: IntBuf, res: FExpr): Int {
   val saved = rPush(ctx)
   var i = 0
-  while (i < stmts.len()) { val s: FStmt = stmts.get(i); rStmt(ctx, s); i = i + 1 }
+  while (i < stmts.size()) { val s: FStmt = stmts.get(i); rStmt(ctx, s); i = i + 1 }
   if (isNoResF(res) == false) { rExpr(ctx, res) }
   rPop(ctx, saved)
   return 0
@@ -292,6 +294,13 @@ fun rFor(ctx: RCtx, v: String, it: FExpr, b: FExpr): Int {
   return 0
 }
 
+// a pattern that binds NO name — the only kind allowed inside a `p1 | p2` alternation. Two alternatives
+// cannot bind different payloads (a name bound in one branch but not the other is a footgun), so a binding
+// alternation is a compile error. Literals / bare paths / is / in / wildcard are bind-free.
+fun patBindFreeC(p: FPat): Bool {
+  return when (p) { FPBind(s) -> false; FPCtor(pth, subs) -> false; FPRecord(pth, f, h) -> false; else -> true }
+}
+
 fun rPat(ctx: RCtx, pat: FPat): Int {
   return when (pat) {
     FPBind(s) -> rBind(ctx, s)
@@ -304,13 +313,13 @@ fun rPat(ctx: RCtx, pat: FPat): Int {
 
 fun rPatList(ctx: RCtx, subs: IntBuf): Int {
   var i = 0
-  while (i < subs.len()) { val sp: FPat = subs.get(i); rPat(ctx, sp); i = i + 1 }
+  while (i < subs.size()) { val sp: FPat = subs.get(i); rPat(ctx, sp); i = i + 1 }
   return 0
 }
 
 fun rRecordPat(ctx: RCtx, flds: IntBuf): Int {
   var i = 0
-  while (i < flds.len()) {
+  while (i < flds.size()) {
     val f: FRFld = flds.get(i)
     if (f.hasPat == 1) { rPat(ctx, f.pat) } else { rBind(ctx, f.name) }
     i = i + 1
@@ -322,12 +331,14 @@ fun rWhen(ctx: RCtx, hasSubj: Int, bind: String, subj: FExpr, arms: IntBuf): Int
   if (hasSubj == 1) { rExpr(ctx, subj) }
   val bn = whenBindName(bind)
   var i = 0
-  while (i < arms.len()) {
+  while (i < arms.size()) {
     val a: FArm = arms.get(i)
     val saved = rPush(ctx)
     if (hasSubj == 1 && bn != "") { rBind(ctx, bn) }
     if (a.kind == 0) { rExpr(ctx, a.lhs) }
-    else { if (a.kind == 2) { var j = 0; while (j < a.pats.len()) { val pp: FPat = a.pats.get(j); rPat(ctx, pp); j = j + 1 } } }
+    else { if (a.kind == 2) {
+      if (a.pats.size() > 1) { var bad = 0; var b = 0; while (b < a.pats.size()) { if (patBindFreeC(a.pats.get(b)) == false) { bad = 1 }; b = b + 1 }; if (bad == 1) { rErr(ctx, "binding pattern not allowed in an alternation `|` arm (a name bound in one alternative may be unbound in another)") } }
+      var j = 0; while (j < a.pats.size()) { val pp: FPat = a.pats.get(j); rPat(ctx, pp); j = j + 1 } } }
     if (isNoResF(a.guard) == false) { rExpr(ctx, a.guard) }
     rExpr(ctx, a.body)
     rPop(ctx, saved)
@@ -340,7 +351,7 @@ fun rFun(ctx: RCtx, fd: FFunc): Int {
   if (isNoResF(fd.body)) { return 0 } // signature-only (trait) — nothing to resolve
   val saved = rPush(ctx)
   var i = 0
-  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); rBind(ctx, pp.name); i = i + 1 }
+  while (i < fd.params.size()) { val pp: FParam = fd.params.get(i); rBind(ctx, pp.name); i = i + 1 }
   rExpr(ctx, fd.body)
   rPop(ctx, saved)
   return 0
@@ -348,7 +359,7 @@ fun rFun(ctx: RCtx, fd: FFunc): Int {
 
 fun rMethods(ctx: RCtx, methods: IntBuf): Int {
   var i = 0
-  while (i < methods.len()) { val m: FFunc = methods.get(i); rFun(ctx, m); i = i + 1 }
+  while (i < methods.size()) { val m: FFunc = methods.get(i); rFun(ctx, m); i = i + 1 }
   return 0
 }
 
@@ -369,7 +380,7 @@ fun rDecl(ctx: RCtx, d: Decl): Int {
 fun collectGlobals(decls: IntBuf, lines: IntBuf, globals: IntBuf, diags: IntBuf, skipDup: Int): Int {
   val seen = intBuf()
   var i = 0
-  while (i < decls.len()) {
+  while (i < decls.size()) {
     val d: Decl = decls.get(i)
     val ln = lines.get(i)
     when (d) {
@@ -403,15 +414,15 @@ fun defineGKey(seen: IntBuf, globals: IntBuf, diags: IntBuf, dupKey: String, gNa
 // a free function's SIGNATURE key: `<name>#<arity>#<t1>#<t2>...`, coarse base-name tags. Same-name /
 // different-signature functions produce distinct keys (overloading); an identical redeclaration collides.
 fun cmFunSigKey(fd: FFunc): String {
-  var s = fd.name + ("#" + fd.params.len().toStr())
+  var s = fd.name + ("#" + fd.params.size().toStr())
   var i = 0
-  while (i < fd.params.len()) { val p: FParam = fd.params.get(i); s = s + ("#" + cmBaseName(cmStripMode(p.ty))); i = i + 1 }
+  while (i < fd.params.size()) { val p: FParam = fd.params.get(i); s = s + ("#" + cmBaseName(cmStripMode(p.ty))); i = i + 1 }
   return s
 }
 
 fun addVariants(globals: IntBuf, variants: IntBuf): Int {
   var i = 0
-  while (i < variants.len()) { val v: FVariant = variants.get(i); globals.push(v.name); i = i + 1 }
+  while (i < variants.size()) { val v: FVariant = variants.get(i); globals.push(v.name); i = i + 1 }
   return 0
 }
 
@@ -420,7 +431,7 @@ fun addVariants(globals: IntBuf, variants: IntBuf): Int {
 // checker can treat them as DEFINED, not merely whitelisted.
 fun collectDeclNames(decls: IntBuf, out: IntBuf): Int {
   var i = 0
-  while (i < decls.len()) {
+  while (i < decls.size()) {
     val d: Decl = decls.get(i)
     when (d) {
       DFun(fd) -> out.push(fd.name)
@@ -447,13 +458,13 @@ fun preludeDeclList(): IntBuf {
   val out = intBuf()
   val paths = preludeConfPaths()
   var pi = 0
-  while (pi < paths.len()) {
+  while (pi < paths.size()) {
     val src = readFile(paths.get(pi))
-    if (src.len() > 0) {
+    if (src.length() > 0) {
       val plines = intBuf()
       val decls = parseProgramLn(lex(src), plines)
       var di = 0
-      while (di < decls.len()) { out.push(decls.get(di)); di = di + 1 }
+      while (di < decls.size()) { out.push(decls.get(di)); di = di + 1 }
     }
     pi = pi + 1
   }
@@ -471,14 +482,14 @@ fun resolveCheck(decls: IntBuf, lines: IntBuf, skipDup: Int): IntBuf {
   val globals = intBuf()
   val pre = preludeSigs()
   var pj = 0
-  while (pj < pre.len()) { globals.push(pre.get(pj)); pj = pj + 1 }
+  while (pj < pre.size()) { globals.push(pre.get(pj)); pj = pj + 1 }
   collectGlobals(decls, lines, globals, diags, skipDup)
   val scopes = intBuf()
   // shadowOn=0: the member table is empty and every rShadow* hook is inert — the real resolve diagnostics
   // are byte-identical to before (M2 is SHADOW-only, no output regression on the check/compile path).
   val ctx = RCtx(globals, scopes, diags, 0, cmNew(), intBuf(), 0, skipDup)
   var i = 0
-  while (i < decls.len()) { val d: Decl = decls.get(i); ctx.curLine = lines.get(i); rDecl(ctx, d); i = i + 1 }
+  while (i < decls.size()) { val d: Decl = decls.get(i); ctx.curLine = lines.get(i); rDecl(ctx, d); i = i + 1 }
   return diags
 }
 
@@ -491,13 +502,13 @@ fun resolveShadow(decls: IntBuf, lines: IntBuf): IntBuf {
   val globals = intBuf()
   val pre = preludeSigs()
   var pj = 0
-  while (pj < pre.len()) { globals.push(pre.get(pj)); pj = pj + 1 }
+  while (pj < pre.size()) { globals.push(pre.get(pj)); pj = pj + 1 }
   collectGlobals(decls, lines, globals, intBuf(), 1)
   val scopes = intBuf()
   val mtab = buildCMTab(preludeDeclList(), decls)
   val ctx = RCtx(globals, scopes, intBuf(), 0, mtab, shadow, 1, 1)
   var i = 0
-  while (i < decls.len()) { val d: Decl = decls.get(i); ctx.curLine = lines.get(i); rDecl(ctx, d); i = i + 1 }
+  while (i < decls.size()) { val d: Decl = decls.get(i); ctx.curLine = lines.get(i); rDecl(ctx, d); i = i + 1 }
   return shadow
 }
 
@@ -541,9 +552,9 @@ fun primAnnoInt(e: FExpr): Int { return when (e) { FEInt(t) -> parseIntK(t); els
 // record a decl's `@prim("<kind>", <bits>)` marker (name -> kind code + storage bits) into the registry.
 fun recordPrim(annos: IntBuf, name: String, reg: PReg): Int {
   var i = 0
-  while (i < annos.len()) {
+  while (i < annos.size()) {
     val a: Anno = annos.get(i)
-    if (a.name == "prim" && a.args.len() >= 2) {
+    if (a.name == "prim" && a.args.size() >= 2) {
       reg.names.push(name)
       reg.kinds.push(primKindCode(primAnnoStr(a.args.get(0))))
       reg.bits.push(primAnnoInt(a.args.get(1)))
@@ -556,9 +567,9 @@ fun recordPrim(annos: IntBuf, name: String, reg: PReg): Int {
 // record a decl's `@alias("<Primary>")` marker (alias name -> primary name) into the registry.
 fun recordAlias(annos: IntBuf, name: String, reg: PReg): Int {
   var i = 0
-  while (i < annos.len()) {
+  while (i < annos.size()) {
     val a: Anno = annos.get(i)
-    if (a.name == "alias" && a.args.len() >= 1) {
+    if (a.name == "alias" && a.args.size() >= 1) {
       reg.aliasFrom.push(name)
       reg.aliasTo.push(primAnnoStr(a.args.get(0)))
     }
@@ -573,7 +584,7 @@ fun recordAlias(annos: IntBuf, name: String, reg: PReg): Int {
 fun buildPReg(decls: IntBuf): PReg {
   val reg = PReg(intBuf(), intBuf(), intBuf(), intBuf(), intBuf())
   var i = 0
-  while (i < decls.len()) {
+  while (i < decls.size()) {
     val d: Decl = decls.get(i)
     when (d) {
       DFun(fd) -> { recordPrim(fd.annos, fd.name, reg); recordAlias(fd.annos, fd.name, reg) }
@@ -620,7 +631,7 @@ fun cmIsType(mt: CMTab, n: String): Bool { return memList(mt.types, n) }
 // fold an alias to its PRIMARY (I8 -> Byte, ...); a name with no @alias row is returned unchanged.
 fun cmCanon(mt: CMTab, n: String): String {
   var i = 0
-  while (i < mt.aliasFrom.len()) { if (mt.aliasFrom.get(i) == n) { return mt.aliasTo.get(i) }; i = i + 1 }
+  while (i < mt.aliasFrom.size()) { if (mt.aliasFrom.get(i) == n) { return mt.aliasTo.get(i) }; i = i + 1 }
   return n
 }
 
@@ -628,7 +639,7 @@ fun cmCanon(mt: CMTab, n: String): String {
 // variants/consts attributed to that owner.
 fun cmHasMember(mt: CMTab, owner: String, sel: String): Bool {
   var i = 0
-  while (i < mt.owner.len()) { if (mt.owner.get(i) == owner) { if (mt.sel.get(i) == sel) { return true } }; i = i + 1 }
+  while (i < mt.owner.size()) { if (mt.owner.get(i) == owner) { if (mt.sel.get(i) == sel) { return true } }; i = i + 1 }
   return false
 }
 
@@ -636,7 +647,7 @@ fun cmHasMember(mt: CMTab, owner: String, sel: String): Bool {
 // which resolves a dotted selector against any free function of the right name.
 fun cmHasFree(mt: CMTab, sel: String): Bool {
   var i = 0
-  while (i < mt.owner.len()) { if (mt.owner.get(i) == "") { if (mt.sel.get(i) == sel) { return true } }; i = i + 1 }
+  while (i < mt.owner.size()) { if (mt.owner.get(i) == "") { if (mt.sel.get(i) == sel) { return true } }; i = i + 1 }
   return false
 }
 
@@ -644,7 +655,7 @@ fun cmHasFree(mt: CMTab, sel: String): Bool {
 // trait method resolves a dotted call on any type that impls it.
 fun cmHasTraitMethod(mt: CMTab, sel: String): Bool {
   var i = 0
-  while (i < mt.kind.len()) { if (mt.kind.get(i) == "traitmethod") { if (mt.sel.get(i) == sel) { return true } }; i = i + 1 }
+  while (i < mt.kind.size()) { if (mt.kind.get(i) == "traitmethod") { if (mt.sel.get(i) == sel) { return true } }; i = i + 1 }
   return false
 }
 
@@ -653,7 +664,7 @@ fun cmHasTraitMethod(mt: CMTab, sel: String): Bool {
 // through `.` on the type is a cross-use error rather than a plain no-member.
 fun cmMemberKind(mt: CMTab, owner: String, sel: String): String {
   var i = 0
-  while (i < mt.owner.len()) { if (mt.owner.get(i) == owner) { if (mt.sel.get(i) == sel) { return mt.kind.get(i) } }; i = i + 1 }
+  while (i < mt.owner.size()) { if (mt.owner.get(i) == owner) { if (mt.sel.get(i) == sel) { return mt.kind.get(i) } }; i = i + 1 }
   return ""
 }
 
@@ -663,19 +674,19 @@ fun cmMemberKind(mt: CMTab, owner: String, sel: String): String {
 // stays on the instance path, never the type-dot path.
 fun cmIsVariantName(mt: CMTab, name: String): Bool {
   var i = 0
-  while (i < mt.kind.len()) { if (mt.kind.get(i) == "variant") { if (mt.sel.get(i) == name) { return true } }; i = i + 1 }
+  while (i < mt.kind.size()) { if (mt.kind.get(i) == "variant") { if (mt.sel.get(i) == name) { return true } }; i = i + 1 }
   return false
 }
 
 // --- member-table population (checker side; mirrors klower's collectDecl whitelist) ---
 fun cmHasPrimAnno(annos: IntBuf): Bool {
   var i = 0
-  while (i < annos.len()) { val a: Anno = annos.get(i); if (a.name == "prim") { return true }; i = i + 1 }
+  while (i < annos.size()) { val a: Anno = annos.get(i); if (a.name == "prim") { return true }; i = i + 1 }
   return false
 }
 
 fun cmStripMode(ty: String): String {
-  val n = ty.len()
+  val n = ty.length()
   if (n >= 10) { if (ty.substr(0, 10) == "consuming ") { return ty.substr(10, n - 10) } }
   if (n >= 6) { if (ty.substr(0, 6) == "inout ") { return ty.substr(6, n - 6) } }
   return ty
@@ -683,7 +694,7 @@ fun cmStripMode(ty: String): String {
 
 // base name of a (possibly generic) type string: "Option" from "Option", "IntBuf" from "IntBuf<Int>".
 fun cmBaseName(ty: String): String {
-  val n = ty.len()
+  val n = ty.length()
   var i = 0
   while (i < n && ty.charAt(i) != 60 && ty.charAt(i) != 32) { i = i + 1 }
   return ty.substr(0, i)
@@ -691,7 +702,7 @@ fun cmBaseName(ty: String): String {
 
 fun cmFirstUnderscore(s: String): Int {
   var i = 0
-  while (i < s.len()) { if (s.charAt(i) == 95) { return i }; i = i + 1 }
+  while (i < s.length()) { if (s.charAt(i) == 95) { return i }; i = i + 1 }
   return 0 - 1
 }
 
@@ -702,7 +713,7 @@ fun cmFirstUnderscore(s: String): Int {
 // any REST on a fn WITH params stays "assocfn" (a static METHOD, valid via dot). This is the only signal that
 // separates a nullary assoc const from a nullary static method at the shared `<Type>_<REST>` surface mangle.
 fun cmIsConstSel(s: String): Bool {
-  val n = s.len()
+  val n = s.length()
   if (n == 0) { return false }
   var i = 0
   var hasAlpha = 0
@@ -717,9 +728,9 @@ fun cmIsConstSel(s: String): Bool {
 
 fun cmRecordAlias(mt: CMTab, annos: IntBuf, name: String): Int {
   var i = 0
-  while (i < annos.len()) {
+  while (i < annos.size()) {
     val a: Anno = annos.get(i)
-    if (a.name == "alias" && a.args.len() >= 1) { mt.aliasFrom.push(name); mt.aliasTo.push(primAnnoStr(a.args.get(0))) }
+    if (a.name == "alias" && a.args.size() >= 1) { mt.aliasFrom.push(name); mt.aliasTo.push(primAnnoStr(a.args.get(0))) }
     i = i + 1
   }
   return 0
@@ -727,7 +738,7 @@ fun cmRecordAlias(mt: CMTab, annos: IntBuf, name: String): Int {
 
 fun cmFields(mt: CMTab, td: FTDecl): Int {
   var i = 0
-  while (i < td.fields.len()) { val f: FFld = td.fields.get(i); cmAdd(mt, td.name, f.name, "field"); i = i + 1 }
+  while (i < td.fields.size()) { val f: FFld = td.fields.get(i); cmAdd(mt, td.name, f.name, "field"); i = i + 1 }
   return 0
 }
 
@@ -743,9 +754,9 @@ fun cmIsProtoRole(r: String): Bool { return r == "seq.new" || r == "seq.push" ||
 fun cmIsDefaultRole(r: String): Bool { return r == "seq.default" || r == "map.default" }
 fun cmLangRoles(mt: CMTab, owner: String, annos: IntBuf): Int {
   var i = 0
-  while (i < annos.len()) {
+  while (i < annos.size()) {
     val a: Anno = annos.get(i)
-    if (a.name == "lang" && a.args.len() > 0) { val r = primAnnoStr(a.args.get(0)); if (cmIsProtoRole(r)) { cmAdd(mt, owner, "#lang#" + r, "role") } else { if (cmIsDefaultRole(r)) { cmAdd(mt, "#default", r, owner) } } }
+    if (a.name == "lang" && a.args.size() > 0) { val r = primAnnoStr(a.args.get(0)); if (cmIsProtoRole(r)) { cmAdd(mt, owner, "#lang#" + r, "role") } else { if (cmIsDefaultRole(r)) { cmAdd(mt, "#default", r, owner) } } }
     i = i + 1
   }
   return 0
@@ -756,7 +767,7 @@ fun cmLangRoles(mt: CMTab, owner: String, annos: IntBuf): Int {
 // lowerer's roleSymFallback for seq.default/map.default).
 fun cmDefaultTy(mt: CMTab, role: String): String {
   var i = 0
-  while (i < mt.owner.len()) { if (mt.owner.get(i) == "#default") { if (mt.sel.get(i) == role) { return mt.kind.get(i) } }; i = i + 1 }
+  while (i < mt.owner.size()) { if (mt.owner.get(i) == "#default") { if (mt.sel.get(i) == role) { return mt.kind.get(i) } }; i = i + 1 }
   return ""
 }
 fun cmSeqDefault(mt: CMTab): String { val s = cmDefaultTy(mt, "seq.default"); if (s != "") { return s } return "Vec" }
@@ -765,7 +776,7 @@ fun cmMapDefault(mt: CMTab): String { val s = cmDefaultTy(mt, "map.default"); if
 // struct/class body or impl-block methods: recv non-empty => instance ("method"); recv empty => "assocfn".
 fun cmMethods(mt: CMTab, owner: String, methods: IntBuf): Int {
   var i = 0
-  while (i < methods.len()) {
+  while (i < methods.size()) {
     val m: FFunc = methods.get(i)
     if (isConstValFn(m.annos)) { cmAdd(mt, owner, m.name, "const") }
     else { if (m.recv == "") { cmAdd(mt, owner, m.name, "assocfn") } else { cmAdd(mt, owner, m.name, "method") } }
@@ -789,13 +800,13 @@ fun cmIsMapProto(mt: CMTab, base: String): Bool {
 
 fun cmTraitMethods(mt: CMTab, owner: String, methods: IntBuf): Int {
   var i = 0
-  while (i < methods.len()) { val m: FFunc = methods.get(i); cmAdd(mt, owner, m.name, "traitmethod"); i = i + 1 }
+  while (i < methods.size()) { val m: FFunc = methods.get(i); cmAdd(mt, owner, m.name, "traitmethod"); i = i + 1 }
   return 0
 }
 
 fun cmVariants(mt: CMTab, ed: FEDecl): Int {
   var i = 0
-  while (i < ed.variants.len()) { val v: FVariant = ed.variants.get(i); cmAdd(mt, ed.name, v.name, "variant"); i = i + 1 }
+  while (i < ed.variants.size()) { val v: FVariant = ed.variants.get(i); cmAdd(mt, ed.name, v.name, "variant"); i = i + 1 }
   return 0
 }
 
@@ -820,11 +831,11 @@ fun cmDeriveMethod(tr: String): String {
 // is an associated fn (`Type::default()`); the rest are instance methods (`v.clone()`/`v.debug()`).
 fun cmDerives(mt: CMTab, annos: IntBuf, tyName: String): Int {
   var i = 0
-  while (i < annos.len()) {
+  while (i < annos.size()) {
     val a: Anno = annos.get(i)
     if (a.name == "derive") {
       var j = 0
-      while (j < a.args.len()) {
+      while (j < a.args.size()) {
         val ax: FExpr = a.args.get(j)
         val trn = when (ax) { FEIdent(n) -> n; else -> "" }
         val m = cmDeriveMethod(trn)
@@ -841,13 +852,13 @@ fun cmDerives(mt: CMTab, annos: IntBuf, tyName: String): Int {
 //   - EXTENSION fn: first param named "this" — an instance method of its receiver type, selector recovered
 //     by dropping the KNOWN "<Recv>_" prefix (never a guessed split, ambiguous with a real free fn Foo_bar).
 //   - PLAIN free fn: recorded "freefn"; ADDITIONALLY when its name is "<KnownType>_<rest>" (the assoc-const
-//     / static / UFCS mangle, e.g. Int_MAX, String_len) an ASSOCIATED VIEW is attributed to that nominal.
+//     / static / UFCS mangle, e.g. Int_MAX, String_length) an ASSOCIATED VIEW is attributed to that nominal.
 fun cmFreeFun(mt: CMTab, fd: FFunc): Int {
-  if (fd.params.len() > 0) {
+  if (fd.params.size() > 0) {
     val p0: FParam = fd.params.get(0)
     if (p0.name == "this") {
       val recv = cmBaseName(cmStripMode(p0.ty))
-      val sel = if (fd.name.len() > recv.len() + 1) { fd.name.substr(recv.len() + 1, fd.name.len() - recv.len() - 1) } else { fd.name }
+      val sel = if (fd.name.length() > recv.length() + 1) { fd.name.substr(recv.length() + 1, fd.name.length() - recv.length() - 1) } else { fd.name }
       // A GENERIC extension (`fun <A,B> A.to(..)`, receiver a type PARAMETER) is universally callable via
       // type erasure — a receiver of ANY type resolves it. Record the selector as a free UFCS-style fn so
       // requireMember(x, sel) passes for any receiver, rather than attributing it to the phantom type "A".
@@ -860,15 +871,15 @@ fun cmFreeFun(mt: CMTab, fd: FFunc): Int {
   if (us > 0) {
     val pre = fd.name.substr(0, us)
     if (memList(mt.types, pre)) {
-      val rest = fd.name.substr(us + 1, fd.name.len() - us - 1)
+      val rest = fd.name.substr(us + 1, fd.name.length() - us - 1)
       // A nullary `<Type>_<SCREAMING>` is an associated CONSTANT (Int::MAX) — classify "const" so dot-access
       // (`Int.MAX`) is the locked cross-use error. Everything else (has params, or a lowercase-headed rest
       // like a `_make`/`_of` factory) is a static "assocfn", reachable via dot.
-      val amk = if (fd.params.len() == 0 && cmIsConstSel(rest)) { "const" } else { "assocfn" }
+      val amk = if (fd.params.size() == 0 && cmIsConstSel(rest)) { "const" } else { "assocfn" }
       cmAdd(mt, pre, rest, amk)
       // setter-property mangle `<Type>_<name>_set` also exposes the bare property name, so a setter-only
       // property (`b.wide = 7` -> Box_wide_set) resolves `b.wide` — mirroring the checker's hasAccessorM.
-      val rn = rest.len()
+      val rn = rest.length()
       if (rn > 4 && rest.substr(rn - 4, 4) == "_set") { cmAdd(mt, pre, rest.substr(0, rn - 4), "assocfn") }
     }
   }
@@ -879,7 +890,7 @@ fun cmFreeFun(mt: CMTab, fd: FFunc): Int {
 // sees the full type set regardless of decl order (a free Int_MAX may precede/follow `class Int`).
 fun cmCollectTypes(mt: CMTab, decls: IntBuf): Int {
   var i = 0
-  while (i < decls.len()) {
+  while (i < decls.size()) {
     val d: Decl = decls.get(i)
     when (d) {
       DFun(fd) -> { if (cmHasPrimAnno(fd.annos)) { cmType(mt, fd.name); cmRecordAlias(mt, fd.annos, fd.name) } }
@@ -896,7 +907,7 @@ fun cmCollectTypes(mt: CMTab, decls: IntBuf): Int {
 // Pass 2: record the MEMBERS of every decl against the type set from pass 1.
 fun cmCollectMembers(mt: CMTab, decls: IntBuf): Int {
   var i = 0
-  while (i < decls.len()) {
+  while (i < decls.size()) {
     val d: Decl = decls.get(i)
     when (d) {
       DFun(fd) -> { if (cmHasPrimAnno(fd.annos) == false) { cmFreeFun(mt, fd) } }
@@ -929,13 +940,13 @@ fun buildCMTab(pdecls: IntBuf, udecls: IntBuf): CMTab {
 // SINGLE point where alias identity collapses — sourced from the lib @alias table, not a baked switch.
 fun canonPrim(reg: PReg, n: String): String {
   var i = 0
-  while (i < reg.aliasFrom.len()) { if (reg.aliasFrom.get(i) == n) { return reg.aliasTo.get(i) }; i = i + 1 }
+  while (i < reg.aliasFrom.size()) { if (reg.aliasFrom.get(i) == n) { return reg.aliasTo.get(i) }; i = i + 1 }
   return n
 }
 
 fun primKind(reg: PReg, n: String): Int {
   var i = 0
-  while (i < reg.names.len()) { if (reg.names.get(i) == n) { return reg.kinds.get(i) }; i = i + 1 }
+  while (i < reg.names.size()) { if (reg.names.get(i) == n) { return reg.kinds.get(i) }; i = i + 1 }
   return 0
 }
 
@@ -954,7 +965,7 @@ fun primIsReserved(reg: PReg, n: String): Bool { return primKind(reg, n) == 9 }
 // matching the legacy switch exactly (Char/Float/reserved etc. all fell through to 64 there too).
 fun primBits(reg: PReg, n: String): Int {
   var i = 0
-  while (i < reg.names.len()) {
+  while (i < reg.names.size()) {
     if (reg.names.get(i) == n) {
       val k = reg.kinds.get(i)
       val b = reg.bits.get(i)
@@ -980,7 +991,7 @@ fun pow2(n: Int): Long { var r: Long = 1; var i = 0; while (i < n) { r = r * 2; 
 // Sub-word widths (8/16/32) are checked exactly; the 64-bit word can't be bounded inside an i64, so we
 // only enforce the unsigned-can't-be-negative rule there.
 fun intInRange(reg: PReg, numStr: String, name: String): Bool {
-  val neg = numStr.len() >= 1 && numStr.charAt(0) == 45
+  val neg = numStr.length() >= 1 && numStr.charAt(0) == 45
   if (neg && primIsSigned(reg, name) == false) { return false } // unsigned rejects negatives
   val bits = primBits(reg, name)
   if (bits >= 64) { return true }
@@ -1051,7 +1062,7 @@ fun tyBase(reg: PReg, p: P): Ty {
   while (pk(p) == 26) { eat(p); name = ptext(p); eat(p) }
   val args = intBuf()
   if (pk(p) == 37) { eat(p); args.push(parseTyC(reg, p)); while (pk(p) == 24) { eat(p); args.push(parseTyC(reg, p)) }; eat(p) }
-  if (isPrimitive(reg, name) && args.len() == 0) { return TPrim(name) }
+  if (isPrimitive(reg, name) && args.size() == 0) { return TPrim(name) }
   return TNamed(name, args)
 }
 
@@ -1065,7 +1076,7 @@ fun parseTyC(reg: PReg, p: P): Ty {
 // modifier is not part of the type, so skip a leading `inout`(71)/`consuming`(72) token before parsing.
 fun parseTyStr(reg: PReg, s: String): Ty {
   if (s == "") { return TUnknown }
-  val p = P(lex(s), 0, intBuf())
+  val p = P(lex(s), 0, intBuf(), 0)
   if (pk(p) == 71 || pk(p) == 72) { eat(p) }
   return parseTyC(reg, p)
 }
@@ -1101,9 +1112,9 @@ fun isNumOk(reg: PReg, t: Ty): Bool {
 fun tyEqPrim(t: Ty, name: String): Bool { return when (t) { TPrim(x) -> x == name; else -> false } }
 
 fun compatList(reg: PReg, a: IntBuf, b: IntBuf): Bool {
-  if (a.len() != b.len()) { return false }
+  if (a.size() != b.size()) { return false }
   var i = 0
-  while (i < a.len()) { val x: Ty = a.get(i); val y: Ty = b.get(i); if (compat(reg, x, y) == false) { return false }; i = i + 1 }
+  while (i < a.size()) { val x: Ty = a.get(i); val y: Ty = b.get(i); if (compat(reg, x, y) == false) { return false }; i = i + 1 }
   return true
 }
 
@@ -1150,7 +1161,7 @@ fun compatNullR(reg: PReg, x: Ty, b: Ty): Bool { return when (b) { TNull(y) -> c
 
 // a single uppercase letter (T, A, K, V, ...) is a generic type PARAMETER — erased, compatible with any.
 fun isTypeParam(n: String): Bool {
-  if (n.len() != 1) { return false }
+  if (n.length() != 1) { return false }
   val c = n.charAt(0)
   if (c < 65) { return false }
   if (c > 90) { return false }
@@ -1165,7 +1176,7 @@ fun compatNamedR(reg: PReg, n1: String, a1: IntBuf, b: Ty): Bool {
       else { if (n1 != n2) { false }
         // same base type: with type erasure, `IntBuf<Int>` and `IntBuf` are compatible — only compare type
         // args when BOTH sides carry them.
-        else { if (a1.len() == 0) { true } else { if (a2.len() == 0) { true } else { compatList(reg, a1, a2) } } } }
+        else { if (a1.size() == 0) { true } else { if (a2.size() == 0) { true } else { compatList(reg, a1, a2) } } } }
     }
     TNull(y) -> compat(reg, TNamed(n1, a1), y)
     else -> false
@@ -1181,14 +1192,14 @@ fun joinTy(reg: PReg, a: Ty, b: Ty): Ty { if (compat(reg, a, b)) { return b } if
 fun showTyList(l: IntBuf): String {
   var s = ""
   var i = 0
-  while (i < l.len()) { val t: Ty = l.get(i); if (i == 0) { s = showTy(t) } else { s = s + (", " + showTy(t)) }; i = i + 1 }
+  while (i < l.size()) { val t: Ty = l.get(i); if (i == 0) { s = showTy(t) } else { s = s + (", " + showTy(t)) }; i = i + 1 }
   return s
 }
 
 fun showTy(t: Ty): String {
   return when (t) {
     TPrim(s) -> s
-    TNamed(n, args) -> if (args.len() == 0) { n } else { n + ("<" + (showTyList(args) + ">")) }
+    TNamed(n, args) -> if (args.size() == 0) { n } else { n + ("<" + (showTyList(args) + ">")) }
     TNull(x) -> showTy(x) + "?"
     TFun(ps, r) -> "(" + (showTyList(ps) + (") -> " + showTy(r)))
     TUnknown -> "?unknown"
@@ -1197,7 +1208,11 @@ fun showTy(t: Ty): String {
 }
 
 // --- env + scope ---
-struct Binding(val name: String, val ty: Ty)
+// mut (smart-cast Phase 2): 0 = an immutable `val` (or function value-parameter / `this`) — the ONLY kind a
+// flow-narrowing fact may narrow; 1 = a reassignable `var`, which is never narrowed (it could be assigned a
+// different runtime type between the `is`/null check and the use — unsound). The bit is set from FSLet.isVar
+// (checkLet); every other binder is a val (mut 0). See localMut / applyFacts.
+struct Binding(val name: String, val ty: Ty, val mut: Int)
 
 struct Look(val found: Int, val ty: Ty)
 
@@ -1220,7 +1235,7 @@ struct TEnv(val funN: IntBuf, val funP: IntBuf, val funR: IntBuf, val funG: IntB
 // compat at return/arg/let sites (not inside compat, which is env-free).
 fun implsTrait(env: TEnv, ty: String, tr: String): Bool {
   var i = 0
-  while (i < env.implN.len()) {
+  while (i < env.implN.size()) {
     if (env.implN.get(i) == ty) { if (env.implT.get(i) == tr) { return true } }
     i = i + 1
   }
@@ -1249,7 +1264,7 @@ fun tPush(env: TEnv): IntBuf {
   val saved = env.locals
   val ns = intBuf()
   var i = 0
-  while (i < saved.len()) { ns.push(saved.get(i)); i = i + 1 }
+  while (i < saved.size()) { ns.push(saved.get(i)); i = i + 1 }
   ns.push(intBuf())
   env.locals = ns
   return saved
@@ -1257,27 +1272,63 @@ fun tPush(env: TEnv): IntBuf {
 
 fun tPop(env: TEnv, saved: IntBuf): Int { env.locals = saved; return 0 }
 
-fun tBind(env: TEnv, name: String, ty: Ty): Int {
-  val top: IntBuf = env.locals.get(env.locals.len() - 1)
-  top.push(Binding(name, ty))
+fun tBind(env: TEnv, name: String, ty: Ty): Int { return tBindMut(env, name, ty, 0) }
+
+// bind `name` with an explicit mutability bit (0 val / 1 var). tBind defaults to val (mut 0) — correct for
+// params, `this`, pattern binds, and every synthetic binder; only a real `var` let passes mut 1.
+fun tBindMut(env: TEnv, name: String, ty: Ty, mut: Int): Int {
+  val top: IntBuf = env.locals.get(env.locals.size() - 1)
+  top.push(Binding(name, ty, mut))
   return 0
 }
 
 fun tLocal(env: TEnv, name: String): Look {
-  var i = env.locals.len() - 1
+  var i = env.locals.size() - 1
   while (i >= 0) {
     val sc: IntBuf = env.locals.get(i)
-    var j = sc.len() - 1
+    var j = sc.size() - 1
     while (j >= 0) { val b: Binding = sc.get(j); if (b.name == name) { return Look(1, b.ty) }; j = j - 1 }
     i = i - 1
   }
   return Look(0, TUnknown)
 }
 
+// the mutability of the innermost binding of `name`: 0 = val, 1 = var. An unknown name (not a local) returns
+// 1 so it is treated as NOT narrowable — the SEMANTIC half of the stability rule (§2.3). This is where a
+// `var` is refused: applyFacts skips any fact whose target is not a stable (mut 0) local.
+fun localMut(env: TEnv, name: String): Int {
+  var i = env.locals.size() - 1
+  while (i >= 0) {
+    val sc: IntBuf = env.locals.get(i)
+    var j = sc.size() - 1
+    while (j >= 0) { val b: Binding = sc.get(j); if (b.name == name) { return b.mut }; j = j - 1 }
+    i = i - 1
+  }
+  return 1
+}
+
+// Apply a set of narrowing facts into the CURRENT (already tPush'd) scope. Each fact narrows its target ONLY
+// if that target is a stable `val` local (localMut == 0) — a `var` fact is silently dropped (soundness). A
+// NONNULL fact strips the `?` off the target's current declared type; an IS fact rebinds it to the named
+// narrowed type. tBind shadows the outer, wider binding, so downstream infer/tLocal transparently see the
+// narrower type until tPop restores the scope.
+fun applyFacts(env: TEnv, facts: IntBuf): Int {
+  var i = 0
+  while (i < facts.size()) {
+    val f: Fact = facts.get(i)
+    if (localMut(env, f.name) == 0) {
+      if (f.kind == scNonNullKind()) { tBind(env, f.name, stripNull(tLocal(env, f.name).ty)) }
+      else { tBind(env, f.name, parseTyStr(env.prim, f.ty)) }
+    }
+    i = i + 1
+  }
+  return 0
+}
+
 fun splitLamPairs(s: String): IntBuf {
   val out = intBuf()
   if (s == "") { return out }
-  val n = s.len()
+  val n = s.length()
   var i = 0
   var start = 0
   while (i <= n) {
@@ -1313,9 +1364,9 @@ fun inferIdent(env: TEnv, s: String): Ty {
   val lk = tLocal(env, s)
   if (lk.found == 1) { return lk.ty }
   var i = 0
-  while (i < env.funN.len()) { if (env.funN.get(i) == s) { return TFun(env.funP.get(i), env.funR.get(i)) }; i = i + 1 }
+  while (i < env.funN.size()) { if (env.funN.get(i) == s) { return TFun(env.funP.get(i), env.funR.get(i)) }; i = i + 1 }
   var j = 0
-  while (j < env.structN.len()) { if (env.structN.get(j) == s) { return TFun(env.structFT.get(j), TNamed(s, intBuf())) }; j = j + 1 }
+  while (j < env.structN.size()) { if (env.structN.get(j) == s) { return TFun(env.structFT.get(j), TNamed(s, intBuf())) }; j = j + 1 }
   return TUnknown
 }
 
@@ -1324,7 +1375,7 @@ fun inferIdent(env: TEnv, s: String): Ty {
 // visible free function (the lowerer raises the loud, actionable error for undefined/ambiguous refs).
 fun inferFnRef(env: TEnv, s: String): Ty {
   var i = 0
-  while (i < env.funN.len()) { if (env.funN.get(i) == s) { return TFun(env.funP.get(i), env.funR.get(i)) }; i = i + 1 }
+  while (i < env.funN.size()) { if (env.funN.get(i) == s) { return TFun(env.funP.get(i), env.funR.get(i)) }; i = i + 1 }
   return TUnknown
 }
 
@@ -1365,6 +1416,16 @@ fun mixedIntFloat(reg: PReg, ta: Ty, tb: Ty): Bool {
 }
 
 fun inferBinary(env: TEnv, op: String, a: FExpr, b: FExpr): Ty {
+  // smart-cast (§2.4): the RHS of a short-circuit connective sees the LHS's facts. `x is T && x.f` narrows x
+  // to T while checking `x.f` (the RHS runs only when the LHS was true); `x !is T || x.f` narrows x on the
+  // RHS (which runs only when the LHS was false). Facts are scoped to the RHS via tPush/tPop.
+  if (op == "&&" || op == "||") {
+    requireBool(env, infer(env, a), "logical operator")
+    val sc = if (op == "&&") { 1 } else { 0 }
+    val sv = tPush(env); applyFacts(env, narrowFacts(a, sc)); val tb0 = infer(env, b); tPop(env, sv)
+    requireBool(env, tb0, "logical operator")
+    return TPrim("Bool")
+  }
   val ta = infer(env, a)
   val tb = infer(env, b)
   if (mixedIntFloat(env.prim, ta, tb)) {
@@ -1429,12 +1490,12 @@ fun hasAccessorM(env: TEnv, n: String, f: String): Bool {
 
 fun inferFieldNamed(env: TEnv, n: String, f: String, isSafe: Int): Ty {
   var i = 0
-  while (i < env.structN.len()) {
+  while (i < env.structN.size()) {
     if (env.structN.get(i) == n) {
       val fns: IntBuf = env.structFN.get(i)
       val fts: IntBuf = env.structFT.get(i)
       var j = 0
-      while (j < fns.len()) {
+      while (j < fns.size()) {
         if (fns.get(j) == f) { val ft: Ty = fts.get(j); if (isSafe == 1) { return TNull(ft) } return ft }
         j = j + 1
       }
@@ -1596,7 +1657,7 @@ fun headNameOf(t: Ty): String { return when (t) { TPrim(x) -> x; TNamed(n, args)
 
 fun subFind(subN: IntBuf, n: String): Int {
   var i = 0
-  while (i < subN.len()) { val x: String = subN.get(i); if (x == n) { return i }; i = i + 1 }
+  while (i < subN.size()) { val x: String = subN.get(i); if (x == n) { return i }; i = i + 1 }
   return 0 - 1
 }
 
@@ -1623,7 +1684,7 @@ fun bindTypeVar(env: TEnv, subN: IntBuf, subT: IntBuf, n: String, at: Ty): Int {
 fun instTyList(l: IntBuf, subN: IntBuf, subT: IntBuf): IntBuf {
   val out = intBuf()
   var i = 0
-  while (i < l.len()) { out.push(instTy(l.get(i), subN, subT)); i = i + 1 }
+  while (i < l.size()) { out.push(instTy(l.get(i), subN, subT)); i = i + 1 }
   return out
 }
 
@@ -1632,7 +1693,7 @@ fun instTyList(l: IntBuf, subN: IntBuf, subT: IntBuf): IntBuf {
 fun instTy(t: Ty, subN: IntBuf, subT: IntBuf): Ty {
   return when (t) {
     TNamed(n, args) -> {
-      if (isTypeParam(n) && args.len() == 0) { val j = subFind(subN, n); if (j >= 0) { subT.get(j) } else { t } }
+      if (isTypeParam(n) && args.size() == 0) { val j = subFind(subN, n); if (j >= 0) { subT.get(j) } else { t } }
       else { TNamed(n, instTyList(args, subN, subT)) }
     }
     TNull(x) -> TNull(instTy(x, subN, subT))
@@ -1647,7 +1708,7 @@ fun instTy(t: Ty, subN: IntBuf, subT: IntBuf): Ty {
 struct GBounds(val names: IntBuf, val traits: IntBuf)
 
 fun trimStr(s: String): String {
-  val n = s.len()
+  val n = s.length()
   var a = 0
   while (a < n && s.charAt(a) == 32) { a = a + 1 }
   var b = n
@@ -1659,7 +1720,7 @@ fun trimStr(s: String): String {
 // each piece is trimmed.
 fun topSplit(s: String, sep: Int): IntBuf {
   val out = intBuf()
-  val n = s.len()
+  val n = s.length()
   var depth = 0
   var start = 0
   var i = 0
@@ -1678,7 +1739,7 @@ fun topSplit(s: String, sep: Int): IntBuf {
 
 // leading identifier of a (trimmed) type string: `Show<T>` -> `Show`, `Show` -> `Show`.
 fun headIdent(s: String): String {
-  val n = s.len()
+  val n = s.length()
   var i = 0
   while (i < n && s.charAt(i) != 60 && s.charAt(i) != 32) { i = i + 1 }
   return s.substr(0, i)
@@ -1688,14 +1749,14 @@ fun parseGenBounds(gen: String): GBounds {
   val names = intBuf()
   val traits = intBuf()
   if (gen == "") { return GBounds(names, traits) }
-  val n = gen.len()
+  val n = gen.length()
   var body = gen
   if (n >= 2 && gen.charAt(0) == 60) { body = gen.substr(1, n - 2) } // strip < >
   val segs = topSplit(body, 44) // ','
   var i = 0
-  while (i < segs.len()) {
+  while (i < segs.size()) {
     val seg: String = segs.get(i)
-    val sl = seg.len()
+    val sl = seg.length()
     var colon = 0 - 1
     var eq = 0 - 1
     var depth = 0
@@ -1718,7 +1779,7 @@ fun parseGenBounds(gen: String): GBounds {
       val boundStr = seg.substr(colon + 1, bEnd - colon - 1)
       val parts = topSplit(boundStr, 43) // '+'
       var j = 0
-      while (j < parts.len()) { val pnm = headIdent(trimStr(parts.get(j))); if (pnm != "") { trs.push(pnm) }; j = j + 1 }
+      while (j < parts.size()) { val pnm = headIdent(trimStr(parts.get(j))); if (pnm != "") { trs.push(pnm) }; j = j + 1 }
     }
     names.push(nm)
     traits.push(trs)
@@ -1729,7 +1790,7 @@ fun parseGenBounds(gen: String): GBounds {
 
 fun boundsOf(gb: GBounds, n: String): IntBuf {
   var i = 0
-  while (i < gb.names.len()) { if (gb.names.get(i) == n) { return gb.traits.get(i) }; i = i + 1 }
+  while (i < gb.names.size()) { if (gb.names.get(i) == n) { return gb.traits.get(i) }; i = i + 1 }
   return intBuf()
 }
 
@@ -1741,7 +1802,7 @@ fun checkBound(env: TEnv, gb: GBounds, n: String, at: Ty): Int {
   val ts = boundsOf(gb, n)
   val cn = headNameOf(at)
   var i = 0
-  while (i < ts.len()) {
+  while (i < ts.size()) {
     val tr: String = ts.get(i)
     if (implsTrait(env, cn, tr) == false) {
       tErr(env, "type " + (showTy(at) + (" does not satisfy trait bound " + (tr + (" on type parameter " + n)))))
@@ -1757,19 +1818,19 @@ fun calleeBounds(env: TEnv, f: FExpr): GBounds {
   val nm = when (f) { FEIdent(s) -> s; else -> "" }
   if (nm == "") { return GBounds(intBuf(), intBuf()) }
   var i = 0
-  while (i < env.funN.len()) { if (env.funN.get(i) == nm) { return parseGenBounds(env.funG.get(i)) }; i = i + 1 }
+  while (i < env.funN.size()) { if (env.funN.get(i) == nm) { return parseGenBounds(env.funG.get(i)) }; i = i + 1 }
   return GBounds(intBuf(), intBuf())
 }
 
 fun checkCallArgs(env: TEnv, params: IntBuf, args: IntBuf, ret: Ty, gb: GBounds): Ty {
-  if (params.len() != args.len()) {
-    tErr(env, "wrong number of arguments: expected " + (params.len().toStr() + (", got " + args.len().toStr())))
+  if (params.size() != args.size()) {
+    tErr(env, "wrong number of arguments: expected " + (params.size().toStr() + (", got " + args.size().toStr())))
     return ret
   }
   val subN = intBuf()
   val subT = intBuf()
   var i = 0
-  while (i < params.len()) {
+  while (i < params.size()) {
     val pt: Ty = params.get(i)
     val ar: FArg = args.get(i)
     val at = infer(env, ar.expr)
@@ -1786,7 +1847,7 @@ fun checkCallArgs(env: TEnv, params: IntBuf, args: IntBuf, ret: Ty, gb: GBounds)
 
 fun inferArgList(env: TEnv, args: IntBuf): Int {
   var i = 0
-  while (i < args.len()) { val ar: FArg = args.get(i); infer(env, ar.expr); i = i + 1 }
+  while (i < args.size()) { val ar: FArg = args.get(i); infer(env, ar.expr); i = i + 1 }
   return 0
 }
 
@@ -1817,15 +1878,15 @@ fun hasSecondaryCtor(env: TEnv, nm: String, arity: Int): Bool {
 fun funOverloadCount(env: TEnv, nm: String): Int {
   var c = 0
   var i = 0
-  while (i < env.funN.len()) { if (env.funN.get(i) == nm) { c = c + 1 }; i = i + 1 }
+  while (i < env.funN.size()) { if (env.funN.get(i) == nm) { c = c + 1 }; i = i + 1 }
   return c
 }
 
 // do all argument types `ats` fit the parameter types `ps` (structural compat OR trait-subtype)?
 fun overloadParamsFit(env: TEnv, ps: IntBuf, ats: IntBuf): Bool {
-  if (ps.len() != ats.len()) { return false }
+  if (ps.size() != ats.size()) { return false }
   var i = 0
-  while (i < ps.len()) {
+  while (i < ps.size()) {
     val pt: Ty = ps.get(i); val at: Ty = ats.get(i)
     if (isTypeParamTy(pt) == false) { if (compat(env.prim, at, pt) == false) { if (subtypeOk(env, at, pt) == false) { return false } } }
     i = i + 1
@@ -1840,11 +1901,11 @@ fun overloadParamsFit(env: TEnv, ps: IntBuf, ats: IntBuf): Bool {
 fun resolveOverloadRet(env: TEnv, nm: String, args: IntBuf): Ty {
   val ats = intBuf()
   var a = 0
-  while (a < args.len()) { val ar: FArg = args.get(a); ats.push(infer(env, ar.expr)); a = a + 1 }
+  while (a < args.size()) { val ar: FArg = args.get(a); ats.push(infer(env, ar.expr)); a = a + 1 }
   var best = TUnknown
   var nmatch = 0
   var i = 0
-  while (i < env.funN.len()) {
+  while (i < env.funN.size()) {
     if (env.funN.get(i) == nm) { val ps: IntBuf = env.funP.get(i); if (overloadParamsFit(env, ps, ats)) { nmatch = nmatch + 1; best = env.funR.get(i) } }
     i = i + 1
   }
@@ -1856,17 +1917,17 @@ fun resolveOverloadRet(env: TEnv, nm: String, args: IntBuf): Ty {
 // a variadic free function. Used to relax the strict arity check on a call to a single vararg definition.
 fun funVarargFixed(env: TEnv, nm: String): Int {
   var i = 0
-  while (i < env.funN.len()) { if (env.funN.get(i) == nm) { if (env.funVA.get(i) >= 0) { return env.funVA.get(i) } }; i = i + 1 }
+  while (i < env.funN.size()) { if (env.funN.get(i) == nm) { if (env.funVA.get(i) >= 0) { return env.funVA.get(i) } }; i = i + 1 }
   return 0 - 1
 }
 
 // the ELEMENT type E of vararg free function `nm` — the type-arg of its trailing `Array<E>` param.
 fun funVarargElemTy(env: TEnv, nm: String): Ty {
   var i = 0
-  while (i < env.funN.len()) {
+  while (i < env.funN.size()) {
     if (env.funN.get(i) == nm) { if (env.funVA.get(i) >= 0) {
       val ps: IntBuf = env.funP.get(i)
-      if (ps.len() >= 1) { val last: Ty = ps.get(ps.len() - 1); return when (last) { TNamed(hn, ta) -> if (ta.len() >= 1) { ta.get(0) } else { TUnknown }; else -> TUnknown } }
+      if (ps.size() >= 1) { val last: Ty = ps.get(ps.size() - 1); return when (last) { TNamed(hn, ta) -> if (ta.size() >= 1) { ta.get(0) } else { TUnknown }; else -> TUnknown } }
     } }
     i = i + 1
   }
@@ -1880,15 +1941,15 @@ fun checkVarargCall(env: TEnv, nm: String, args: IntBuf, fixed: Int): Ty {
   var fps = TUnknown
   var fret = TUnknown
   var i = 0
-  while (i < env.funN.len()) { if (env.funN.get(i) == nm) { if (env.funVA.get(i) >= 0) { fps = TFun(env.funP.get(i), env.funR.get(i)); fret = env.funR.get(i) } }; i = i + 1 }
+  while (i < env.funN.size()) { if (env.funN.get(i) == nm) { if (env.funVA.get(i) >= 0) { fps = TFun(env.funP.get(i), env.funR.get(i)); fret = env.funR.get(i) } }; i = i + 1 }
   val fparams = when (fps) { TFun(ps, r) -> ps; else -> intBuf() }
   val elem = funVarargElemTy(env, nm)
   var a = 0
-  while (a < args.len()) {
+  while (a < args.size()) {
     val ar: FArg = args.get(a)
     val at = infer(env, ar.expr)
     if (a < fixed) {
-      if (a < fparams.len()) { val pt: Ty = fparams.get(a)
+      if (a < fparams.size()) { val pt: Ty = fparams.get(a)
         if (isTypeParamTy(pt) == false) { if (adoptArgLit(env, ar.expr, pt)) { 0 } else { if (compat(env.prim, at, pt) == false) { if (subtypeOk(env, at, pt) == false) { tErr(env, "argument type " + (showTy(at) + (" is not compatible with parameter " + showTy(pt)))) } } } } }
     }
     else {
@@ -1914,7 +1975,7 @@ fun inferCall(env: TEnv, f: FExpr, args: IntBuf): Ty {
       val tnm = when (f) { FEIdent(s) -> s; FETypeApp(inner, t) -> when (inner) { FEIdent(s2) -> s2; else -> "" }; else -> "" }
       // A secondary-constructor call `Owner(args)` whose arity matches a `__ctor_<arity>` factory (not the
       // primary field list) is accepted with the owner type — bypassing the primary-ctor arity check.
-      if (cmIsType(env.mtab, nm) && hasSecondaryCtor(env, nm, args.len())) { inferArgList(env, args); TNamed(nm, intBuf()) }
+      if (cmIsType(env.mtab, nm) && hasSecondaryCtor(env, nm, args.size())) { inferArgList(env, args); TNamed(nm, intBuf()) }
       else { if (tnm != "" && funOverloadCount(env, tnm) > 1) {
         // OVERLOADED free function: arity-first + arg-type selection against the overload set (lenient tie).
         resolveOverloadRet(env, tnm, args)
@@ -1939,7 +2000,7 @@ fun inferCall(env: TEnv, f: FExpr, args: IntBuf): Ty {
 fun inferList(env: TEnv, es: IntBuf): Ty {
   var acc = TUnknown
   var i = 0
-  while (i < es.len()) { val x: FExpr = es.get(i); acc = joinTy(env.prim, acc, infer(env, x)); i = i + 1 }
+  while (i < es.size()) { val x: FExpr = es.get(i); acc = joinTy(env.prim, acc, infer(env, x)); i = i + 1 }
   return TNamed(cmSeqDefault(env.mtab), cons1(acc))
 }
 
@@ -1952,7 +2013,7 @@ fun inferMap(env: TEnv, ents: IntBuf): Ty {
   var kacc = TUnknown
   var vacc = TUnknown
   var i = 0
-  while (i < ents.len()) { val en: FMapEnt = ents.get(i); kacc = joinTy(env.prim, kacc, infer(env, en.k)); vacc = joinTy(env.prim, vacc, infer(env, en.v)); i = i + 1 }
+  while (i < ents.size()) { val en: FMapEnt = ents.get(i); kacc = joinTy(env.prim, kacc, infer(env, en.k)); vacc = joinTy(env.prim, vacc, infer(env, en.v)); i = i + 1 }
   val l = intBuf(); l.push(kacc); l.push(vacc)
   return TNamed(cmMapDefault(env.mtab), l)
 }
@@ -1962,7 +2023,7 @@ fun inferMap(env: TEnv, ents: IntBuf): Ty {
 // lenient `TUnknown` — the pre-flip index behavior, so RawMap's raw-value indexing is unchanged.
 fun indexResTy(mt: CMTab, at: Ty): Ty {
   return when (at) {
-    TNamed(n, args) -> if (n == cmMapDefault(mt) && args.len() >= 2) { TNamed("Option", cons1(args.get(1))) } else { TUnknown }
+    TNamed(n, args) -> if (n == cmMapDefault(mt) && args.size() >= 2) { TNamed("Option", cons1(args.get(1))) } else { TUnknown }
     else -> TUnknown
   }
 }
@@ -1972,7 +2033,7 @@ fun inferLambda(env: TEnv, params: String, body: FExpr): Ty {
   val ptys = intBuf()
   val pairs = splitLamPairs(params)
   var i = 0
-  while (i < pairs.len()) {
+  while (i < pairs.size()) {
     val lp: LP = pairs.get(i)
     val ty = if (lp.ty == "") { TUnknown } else { parseTyStr(env.prim, lp.ty) }
     ptys.push(ty); tBind(env, lp.name, ty); i = i + 1
@@ -1982,16 +2043,21 @@ fun inferLambda(env: TEnv, params: String, body: FExpr): Ty {
   return TFun(ptys, bt)
 }
 
+// smart-cast (§2.4): the then-branch is type-checked under narrowFacts(c,1) and the else-branch under
+// narrowFacts(c,0), so `if (x is Dog) { x.bark() }` type-checks x as Dog in the then, and
+// `if (x is Cat) {..} else { x.<not-Cat> }` narrows x on the else side. A plain condition yields no facts,
+// so an ordinary `if` type-checks exactly as before (byte-inert for the compiler's own build).
 fun inferIf(env: TEnv, c: FExpr, t: FExpr, el: FExpr): Ty {
   requireBool(env, infer(env, c), "if")
-  val tt = infer(env, t)
+  val s1 = tPush(env); applyFacts(env, narrowFacts(c, 1)); val tt = infer(env, t); tPop(env, s1)
   if (isNoResF(el)) { return tt }
-  return joinTy(env.prim, tt, infer(env, el))
+  val s0 = tPush(env); applyFacts(env, narrowFacts(c, 0)); val et = infer(env, el); tPop(env, s0)
+  return joinTy(env.prim, tt, et)
 }
 
 fun inferInterp(env: TEnv, parts: IntBuf): Int {
   var i = 0
-  while (i < parts.len()) { val pt: FIPart = parts.get(i); when (pt) { FIExpr(e) -> infer(env, e); else -> TUnknown }; i = i + 1 }
+  while (i < parts.size()) { val pt: FIPart = parts.get(i); when (pt) { FIExpr(e) -> infer(env, e); else -> TUnknown }; i = i + 1 }
   return 0
 }
 
@@ -1999,7 +2065,7 @@ fun bindPattern(env: TEnv, pat: FPat): Int {
   return when (pat) {
     FPBind(s) -> tBind(env, s, TUnknown)
     FPInP(e, neg) -> { infer(env, e); 0 }
-    FPCtor(pth, subs) -> { var i = 0; while (i < subs.len()) { bindPattern(env, subs.get(i)); i = i + 1 }; 0 }
+    FPCtor(pth, subs) -> { var i = 0; while (i < subs.size()) { bindPattern(env, subs.get(i)); i = i + 1 }; 0 }
     FPRecord(pth, flds, hasRest) -> bindRecordPat(env, flds)
     else -> 0
   }
@@ -2007,36 +2073,120 @@ fun bindPattern(env: TEnv, pat: FPat): Int {
 
 fun bindRecordPat(env: TEnv, flds: IntBuf): Int {
   var i = 0
-  while (i < flds.len()) { val f: FRFld = flds.get(i); if (f.hasPat == 1) { bindPattern(env, f.pat) } else { tBind(env, f.name, TUnknown) }; i = i + 1 }
+  while (i < flds.size()) { val f: FRFld = flds.get(i); if (f.hasPat == 1) { bindPattern(env, f.pat) } else { tBind(env, f.name, TUnknown) }; i = i + 1 }
   return 0
 }
 
 fun inferWhen(env: TEnv, hasSubj: Int, bind: String, subj: FExpr, arms: IntBuf): Ty {
-  if (hasSubj == 1) { infer(env, subj) }
+  var subjTy = TUnknown
+  if (hasSubj == 1) { subjTy = infer(env, subj) }
   val bn = whenBindName(bind)
   var acc = TUnknown
   var i = 0
-  while (i < arms.len()) {
+  while (i < arms.size()) {
     val a: FArm = arms.get(i)
     val saved = tPush(env)
     if (a.kind == 0) { requireBool(env, infer(env, a.lhs), "when") }
-    else { if (a.kind == 2) { var j = 0; while (j < a.pats.len()) { bindPattern(env, a.pats.get(j)); j = j + 1 } } }
+    else { if (a.kind == 2) { var j = 0; while (j < a.pats.size()) { bindPattern(env, a.pats.get(j)); j = j + 1 } } }
     if (hasSubj == 1 && bn != "") { tBind(env, bn, TUnknown) }
     if (isNoResF(a.guard) == false) { requireBool(env, infer(env, a.guard), "guard") }
     acc = joinTy(env.prim, acc, infer(env, a.body))
     tPop(env, saved)
     i = i + 1
   }
+  if (hasSubj == 1) { checkWhenExhaust(env, subjTy, arms) }
   return acc
+}
+
+// all variant names declared for enum `owner` (from the member table's "variant" rows). Empty when `owner`
+// is not a known enum owner, so callers treat "no variants" as "not an enum I can reason about" and skip.
+fun cmVariantsOf(mt: CMTab, owner: String): IntBuf {
+  val out = intBuf()
+  var i = 0
+  while (i < mt.kind.size()) { if (mt.kind.get(i) == "variant") { if (mt.owner.get(i) == owner) { out.push(mt.sel.get(i)) } }; i = i + 1 }
+  return out
+}
+
+// the enum type NAME a `when` subject has, or "" when it is not a plain (non-nullable) named enum. Nullable
+// enum subjects are exempt (null is not a variant, so exhaustiveness over variants alone would be unsound to
+// enforce), as is any subject whose type inference could not pin to a known enum — keeping the check a sound,
+// conservative "only fire when certain" gate that never breaks a build it cannot prove non-exhaustive.
+fun tyEnumName(env: TEnv, t: Ty): String {
+  return when (t) {
+    TNamed(n, args) -> if (memList(env.enumN, n)) { n } else { "" }
+    else -> ""
+  }
+}
+
+// the variant name a coverage-relevant pattern names (FPPath / FPCtor / FPRecord, and a positive `is V`),
+// else "". A negated `!is V` covers nothing.
+fun patVariantName(p: FPat): String {
+  return when (p) {
+    FPPath(pth) -> lastSeg(pth)
+    FPCtor(pth, subs) -> lastSeg(pth)
+    FPRecord(pth, flds, hr) -> lastSeg(pth)
+    FPIsP(ty, neg) -> if (neg == 0) { lastSeg(ty) } else { "" }
+    else -> ""
+  }
+}
+
+fun patIsCatchAllC(p: FPat): Bool { return when (p) { FPWild -> true; FPBind(s) -> true; else -> false } }
+
+// EXHAUSTIVENESS (#5, Kotlin-style): a `when` over an ENUM subject that neither covers every variant nor has a
+// catch-all (`else` / a bare-ident / `_` arm) is a COMPILE ERROR. Only UNGUARDED arms count toward coverage
+// and catch-all (a guarded arm may fail its guard, so it guarantees nothing). Fires only for a subject whose
+// static type pins to a known non-nullable enum with a known variant set — conservative by construction so an
+// exhaustive `when`, or one the checker cannot prove, is never rejected.
+fun checkWhenExhaust(env: TEnv, subjTy: Ty, arms: IntBuf): Int {
+  val base = tyEnumName(env, subjTy)
+  if (base == "") { return 0 }
+  val all = cmVariantsOf(env.mtab, base)
+  if (all.size() == 0) { return 0 }
+  val covered = intBuf()
+  var catchAll = 0
+  var uncertain = 0
+  var i = 0
+  while (i < arms.size()) {
+    val a: FArm = arms.get(i)
+    if (a.kind == 1) { catchAll = 1 }
+    else { if (a.kind == 2 && isNoResF(a.guard)) {
+      var j = 0
+      while (j < a.pats.size()) {
+        val p: FPat = a.pats.get(j)
+        // A pattern that names a variant covers it; a catch-all covers all. Anything else — a NEGATED `!is V`
+        // (covers "every variant but V"), an `in r`, a stray literal — cannot be mapped to a fixed variant
+        // set, so the whole `when` is treated as UNCERTAIN and the check backs off (never a false reject).
+        if (patIsCatchAllC(p)) { catchAll = 1 } else { val vn = patVariantName(p); if (vn != "") { covered.push(vn) } else { uncertain = 1 } }
+        j = j + 1
+      }
+    } }
+    i = i + 1
+  }
+  if (catchAll == 1) { return 0 }
+  if (uncertain == 1) { return 0 }
+  var missing = ""
+  var k = 0
+  while (k < all.size()) { if (memList(covered, all.get(k)) == false) { if (missing == "") { missing = all.get(k) } }; k = k + 1 }
+  if (missing != "") { tErr(env, "non-exhaustive `when` over enum `" + (base + ("`: variant `" + (missing + "` is not covered — add an `else` branch or cover every variant")))) }
+  return 0
 }
 
 fun inferBlock(env: TEnv, stmts: IntBuf, res: FExpr): Ty {
   val saved = tPush(env)
   var i = 0
-  while (i < stmts.len()) { checkStmt(env, stmts.get(i)); i = i + 1 }
+  while (i < stmts.size()) {
+    val st: FStmt = stmts.get(i)
+    checkStmt(env, st)
+    // EARLY-RETURN narrowing (§2.4): after a guard `if (cond) return/throw/panic` with no else, the rest of
+    // the block runs only when `cond` was FALSE, so it inherits narrowFacts(cond, 0). Push a nested scope
+    // carrying those facts; it (and any later guard's scope) is discarded when the block restores below.
+    val gc: FExpr = scGuardCond(st)
+    if (isNoResF(gc) == false) { tPush(env); applyFacts(env, narrowFacts(gc, 0)) }
+    i = i + 1
+  }
   var rt = TPrim("Unit")
   if (isNoResF(res) == false) { rt = infer(env, res) }
-  tPop(env, saved)
+  env.locals = saved
   return rt
 }
 
@@ -2073,8 +2223,39 @@ fun infer(env: TEnv, e: FExpr): Ty {
     FEIf(c, t, el) -> inferIf(env, c, t, el)
     FEWhen(hasSubj, bind, subj, arms) -> inferWhen(env, hasSubj, bind, subj, arms)
     FEBlock(stmts, res) -> inferBlock(env, stmts, res)
+    FEIs(a, ty, neg) -> inferIs(env, a, ty, neg)
+    FEIn(el, c, neg) -> inferIn(env, el, c, neg)
     else -> TUnknown
   }
+}
+
+// `e is T` / `e !is T` — always yields Bool (smart-cast Phase 1). Validates that `T` names a real,
+// runtime-decidable type: a whole ENUM type (`x is Option`) is rejected because every enum value shares
+// header type-id -1 (only its tag at [obj+0] distinguishes it) — the user must name a concrete variant
+// (`is Some`), struct/class, trait, or primitive. An unknown type name is a hard error too.
+fun inferIs(env: TEnv, a: FExpr, tyStr: String, neg: Int): Ty {
+  infer(env, a) // type-check the subject
+  val base = cmBaseName(tyStr)
+  val tgt = parseTyStr(env.prim, tyStr)
+  reservedTyErr(env, tgt)
+  val isVariant = cmIsVariantName(env.mtab, base)
+  if (memList(env.enumN, base) && (isVariant == false)) {
+    tErr(env, "`is " + (base + "` names a whole enum type, which is not runtime-decidable — match a concrete variant (e.g. `is Some`) instead"))
+  } else {
+    if (isPrimitive(env.prim, base) == false && cmIsType(env.mtab, base) == false && (isVariant == false)) {
+      tErr(env, "unknown type `" + (base + "` in `is` expression"))
+    }
+  }
+  return TPrim("Bool")
+}
+
+// `e in c` / `e !in c` — always yields Bool. Desugars (in klower) to `c.containsKey(e)` for a MAP receiver,
+// else `c.contains(e)`; here we just type-check both operands. Whether `c` actually has the resolved method
+// is enforced at lowering (a clean unresolved-method error otherwise).
+fun inferIn(env: TEnv, el: FExpr, c: FExpr, neg: Int): Ty {
+  infer(env, el)
+  infer(env, c)
+  return TPrim("Bool")
 }
 
 // the type ARGUMENTS of a named type (`Vec<Int>` -> [Int], `HashMap<K,V>` -> [K,V]); empty for a bare type.
@@ -2082,8 +2263,8 @@ fun tyArgsOf(t: Ty): IntBuf { return when (t) { TNamed(n, a) -> a; else -> intBu
 // erased-generic arg compatibility (mirrors compatNamedR's rule): compatible when either side omits its
 // type args, else element-wise compatible.
 fun protoArgsOk(reg: PReg, litArgs: IntBuf, annoArgs: IntBuf): Bool {
-  if (litArgs.len() == 0) { return true }
-  if (annoArgs.len() == 0) { return true }
+  if (litArgs.size() == 0) { return true }
+  if (annoArgs.size() == 0) { return true }
   return compatList(reg, litArgs, annoArgs)
 }
 // EXPECTED-TYPE opt-in: a `[..]`/`[k:v]` literal (inferred `it` = Vec<E> / HashMap<K,V>) is assignable to a
@@ -2102,19 +2283,23 @@ fun collectionLitCompat(env: TEnv, init: FExpr, it: Ty, dt: Ty): Bool {
   }
 }
 
-fun checkLet(env: TEnv, name: String, ty: String, init: FExpr): Int {
-  if (ty == "") { val it0 = infer(env, init); tBind(env, name, it0); return 0 }
+fun checkLet(env: TEnv, isVar: Int, name: String, ty: String, init: FExpr): Int {
+  if (ty == "") { val it0 = infer(env, init); tBindMut(env, name, it0, isVar); return 0 }
   val dt = parseTyStr(env.prim, ty)
   reservedTyErr(env, dt)
   // A bare integer literal adopts an integer annotation (val x: U16 = 300) with a compile-time range
   // check, instead of the generic compat test (which would reject Int vs U16 under the tightened rule).
-  if (adoptBareIntLit(env, init, dt)) { tBind(env, name, dt); return 0 }
+  if (adoptBareIntLit(env, init, dt)) { tBindMut(env, name, dt, isVar); return 0 }
   val it = infer(env, init)
   // A collection literal bound to an opt-in protocol implementor (`val xs: MyList<Int> = [1,2,3]`) is
   // accepted before the base-name compat test (which would reject Vec<Int> vs MyList<Int>).
-  if (collectionLitCompat(env, init, it, dt)) { tBind(env, name, dt); return 0 }
-  if (compat(env.prim, it, dt) == false) { tErr(env, "cannot assign " + (showTy(it) + (" to " + (showTy(dt) + (" " + name))))) }
-  tBind(env, name, dt)
+  if (collectionLitCompat(env, init, it, dt)) { tBindMut(env, name, dt, isVar); return 0 }
+  // A concrete value binds to a `val x: Trait` it implements (trait subtyping), the same relaxation
+  // checkReturnV/checkFun already apply at return/arg sites. Purely additive — it only ACCEPTS more (never
+  // rejects a currently-valid binding), so it is byte-inert for the compiler's own build. This is what lets
+  // `val x: Animal = Dog(..)` type-check so the smart-cast then narrows x back to Dog.
+  if (compat(env.prim, it, dt) == false && subtypeOk(env, it, dt) == false) { tErr(env, "cannot assign " + (showTy(it) + (" to " + (showTy(dt) + (" " + name))))) }
+  tBindMut(env, name, dt, isVar)
   return 0
 }
 
@@ -2142,7 +2327,7 @@ fun checkFor(env: TEnv, v: String, it: FExpr, b: FExpr): Int {
 
 fun checkStmt(env: TEnv, s: FStmt): Int {
   return when (s) {
-    FSLet(isVar, name, ty, init) -> checkLet(env, name, ty, init)
+    FSLet(isVar, name, ty, init) -> checkLet(env, isVar, name, ty, init)
     FSExprS(e) -> { infer(env, e); 0 }
     FSAssign(l, r) -> { infer(env, l); infer(env, r); 0 }
     FSReturnV(e) -> checkReturnV(env, e)
@@ -2161,7 +2346,7 @@ fun checkFun(env: TEnv, fd: FFunc): Int {
   if (isNoResF(fd.body)) { return 0 }
   val saved = tPush(env)
   var i = 0
-  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); val pt = parseTyStr(env.prim, pp.ty); reservedTyErr(env, pt); tBind(env, pp.name, pt); i = i + 1 }
+  while (i < fd.params.size()) { val pp: FParam = fd.params.get(i); val pt = parseTyStr(env.prim, pp.ty); reservedTyErr(env, pt); tBind(env, pp.name, pt); i = i + 1 }
   val prevRet = env.curRet
   val prevHas = env.hasRet
   env.curRet = retTy(env.prim, fd.ret)
@@ -2183,7 +2368,7 @@ fun checkFun(env: TEnv, fd: FFunc): Int {
 
 fun checkMethods(env: TEnv, methods: IntBuf): Int {
   var i = 0
-  while (i < methods.len()) { checkFun(env, methods.get(i)); i = i + 1 }
+  while (i < methods.size()) { checkFun(env, methods.get(i)); i = i + 1 }
   return 0
 }
 
@@ -2201,7 +2386,7 @@ fun checkDecl(env: TEnv, d: Decl): Int {
 // the vararg FIXED-parameter count of a function's signature: (#params - 1) when the LAST param is a
 // vararg, else -1 (not variadic). Recorded parallel to funN so an overloaded-away arity check is skipped.
 fun funVarargFixedOf(fd: FFunc): Int {
-  val n = fd.params.len()
+  val n = fd.params.size()
   if (n == 0) { return 0 - 1 }
   val last: FParam = fd.params.get(n - 1)
   if (last.isVararg == 1) { return n - 1 }
@@ -2211,7 +2396,7 @@ fun funVarargFixedOf(fd: FFunc): Int {
 fun addFunSig(env: TEnv, fd: FFunc): Int {
   val ptys = intBuf()
   var i = 0
-  while (i < fd.params.len()) { val pp: FParam = fd.params.get(i); ptys.push(parseTyStr(env.prim, pp.ty)); i = i + 1 }
+  while (i < fd.params.size()) { val pp: FParam = fd.params.get(i); ptys.push(parseTyStr(env.prim, pp.ty)); i = i + 1 }
   env.funN.push(fd.name); env.funP.push(ptys); env.funR.push(retTy(env.prim, fd.ret)); env.funG.push(fd.gen); env.funVA.push(funVarargFixedOf(fd))
   return 0
 }
@@ -2219,7 +2404,7 @@ fun addFunSig(env: TEnv, fd: FFunc): Int {
 fun addStructSig(env: TEnv, td: FTDecl): Int {
   val fns = intBuf(); val fts = intBuf()
   var i = 0
-  while (i < td.fields.len()) { val f: FFld = td.fields.get(i); fns.push(f.name); fts.push(parseTyStr(env.prim, f.ty)); i = i + 1 }
+  while (i < td.fields.size()) { val f: FFld = td.fields.get(i); fns.push(f.name); fts.push(parseTyStr(env.prim, f.ty)); i = i + 1 }
   env.structN.push(td.name); env.structFN.push(fns); env.structFT.push(fts)
   return 0
 }
@@ -2228,7 +2413,7 @@ fun addStructSig(env: TEnv, td: FTDecl): Int {
 // deliberately skipped so prelude nominal types stay opaque to field-access checking.
 fun collectFunSigsOnly(env: TEnv, decls: IntBuf): Int {
   var i = 0
-  while (i < decls.len()) {
+  while (i < decls.size()) {
     val d: Decl = decls.get(i)
     when (d) { DFun(fd) -> addFunSig(env, fd); else -> 0 }
     i = i + 1
@@ -2238,7 +2423,7 @@ fun collectFunSigsOnly(env: TEnv, decls: IntBuf): Int {
 
 fun collectSigs(env: TEnv, decls: IntBuf): Int {
   var i = 0
-  while (i < decls.len()) {
+  while (i < decls.size()) {
     val d: Decl = decls.get(i)
     when (d) {
       DFun(fd) -> addFunSig(env, fd)
@@ -2273,7 +2458,7 @@ fun typecheckCheck(decls: IntBuf, lines: IntBuf): IntBuf {
   // first-match keeps the user's definition.
   collectFunSigsOnly(env, pdecls)
   var i = 0
-  while (i < decls.len()) { env.curLine = lines.get(i); checkDecl(env, decls.get(i)); i = i + 1 }
+  while (i < decls.size()) { env.curLine = lines.get(i); checkDecl(env, decls.get(i)); i = i + 1 }
   return diags
 }
 
@@ -2295,6 +2480,6 @@ fun checkDiags(toks: IntBuf, skipDup: Int): IntBuf {
   val diags = resolveCheck(decls, lines, skipDup)
   val td = typecheckCheck(decls, lines)
   var k = 0
-  while (k < td.len()) { diags.push(td.get(k)); k = k + 1 }
+  while (k < td.size()) { diags.push(td.get(k)); k = k + 1 }
   return diags
 }

@@ -37,7 +37,7 @@ fun main(): Int {
 
   // ---- item 2: `import kite::alloc::collections` reaches TreeSet (a NON-prelude type) by short name ----
   // ---- item 5: TreeSet.add -> Bool with newly-inserted semantics ----
-  val ts = TreeSet::<Int>(0 - 1, 0, 0, 0, 0, 0, 0)
+  val ts = TreeSet::<Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
   val added = ts.add(7)
   val dup = ts.add(7)
   if (added) { acc = acc + 1 }
@@ -70,8 +70,8 @@ fun main(): Int {
   // visible) proves every element is visited.
   val sink = [0]
   v.forEach({ x -> sink.push(x) 0 })
-  if (sink.len() == 5) { acc = acc + 1 }
-  println("Vec.forEach visited ${sink.len() - 1} elements")
+  if (sink.size() == 5) { acc = acc + 1 }
+  println("Vec.forEach visited ${sink.size() - 1} elements")
 
   println("stdlib-polish acc=${acc}")
   return acc

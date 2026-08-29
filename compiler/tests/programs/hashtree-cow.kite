@@ -1,0 +1,142 @@
+// Regression: CoW value semantics for the hashed/tree collections (HashMap/HashSet/TreeMap/TreeSet),
+// the same @value + RawBuf model Vec/Array/Deque already use (STDLIB-REDESIGN §124). Before this, all four
+// stored their buffers as BARE Int pointers with no copy/ensureUnique/deinit, so binding one ALIASED it —
+// mutating the bound copy corrupted the original, and a growth-realloc through a stale alias was a UAF; the
+// buffers also leaked for the process lifetime. Now each buffer is a shared-CoW RawBuf: binding takes a
+// value copy (shares the buffers), a mutator ensureUnique-clones before writing, and a deinit frees the
+// buffers at scope exit.
+//
+// Each assertion adds a distinct weight so a specific regression is legible. Exit = 33 on full success:
+//   HashMap isolation 9 + HashSet isolation 6 + TreeMap isolation 7 + TreeSet isolation 6
+//   + 4 growth (1 each) + 1 build/drop stress = 33.
+import "lib/alloc/collections/hashmap.kite"
+import "lib/alloc/collections/hashset.kite"
+import "lib/alloc/collections/treemap.kite"
+import "lib/alloc/collections/treeset.kite"
+
+// ---- value-copy isolation: mutating a bound COPY must not corrupt the ORIGINAL ----
+fun hashmapIsolation(): Int {
+  val m = HashMap::<Int, Int>(0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
+  m.set(1, 10) m.set(2, 20) m.set(3, 30)
+  val c = m
+  c.set(1, 999) c.set(4, 40) c.remove(2)     // mutate + grow + remove on the copy
+  var ok = 0
+  if (m.size() == 3) { ok = ok + 1 }          // original size intact
+  if (m.getOr(1, 0) == 10) { ok = ok + 1 }    // original value not clobbered by copy's set
+  if (m.getOr(2, 0) == 20) { ok = ok + 1 }    // original key not removed by copy's remove
+  if (m.getOr(3, 0) == 30) { ok = ok + 1 }
+  if (m.containsKey(4) == false) { ok = ok + 1 }      // copy's insert did not reach the original
+  if (c.getOr(1, 0) == 999) { ok = ok + 1 }   // copy reflects its own mutation
+  if (c.getOr(4, 0) == 40) { ok = ok + 1 }
+  if (c.containsKey(2) == false) { ok = ok + 1 }
+  if (c.size() == 3) { ok = ok + 1 }          // copy: {1,3,4}
+  return ok
+}
+fun hashsetIsolation(): Int {
+  val s = HashSet::<Int>(0, 0, 0, RawBuf(0), RawBuf(0))
+  s.add(1) s.add(2) s.add(3)
+  val c = s
+  c.add(4) c.remove(2)
+  var ok = 0
+  if (s.size() == 3) { ok = ok + 1 }
+  if (s.contains(2)) { ok = ok + 1 }
+  if (s.contains(4) == false) { ok = ok + 1 }
+  if (c.size() == 3) { ok = ok + 1 }
+  if (c.contains(2) == false) { ok = ok + 1 }
+  if (c.contains(4)) { ok = ok + 1 }
+  return ok
+}
+fun treemapIsolation(): Int {
+  val t = TreeMap::<Int, Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0), RawBuf(0))
+  t.set(5, 50) t.set(2, 20) t.set(8, 80)
+  val c = t
+  c.set(5, 999) c.set(1, 10) c.remove(2)
+  var ok = 0
+  if (t.size() == 3) { ok = ok + 1 }
+  if (t.getOr(5, 0) == 50) { ok = ok + 1 }
+  if (t.getOr(2, 0) == 20) { ok = ok + 1 }
+  if (t.containsKey(1) == false) { ok = ok + 1 }
+  if (c.getOr(5, 0) == 999) { ok = ok + 1 }
+  if (c.getOr(1, 0) == 10) { ok = ok + 1 }
+  if (c.containsKey(2) == false) { ok = ok + 1 }
+  return ok
+}
+fun treesetIsolation(): Int {
+  val s = TreeSet::<Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
+  s.add(5) s.add(2) s.add(8)
+  val c = s
+  c.add(1) c.remove(2)
+  var ok = 0
+  if (s.size() == 3) { ok = ok + 1 }
+  if (s.contains(2)) { ok = ok + 1 }
+  if (s.contains(1) == false) { ok = ok + 1 }
+  if (c.size() == 3) { ok = ok + 1 }
+  if (c.contains(2) == false) { ok = ok + 1 }
+  if (c.contains(1)) { ok = ok + 1 }
+  return ok
+}
+
+// ---- growth correctness: insert past initial cap, every entry survives the realloc+free path ----
+fun hashmapGrowth(): Int {
+  val m = HashMap::<Int, Int>(0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
+  var i = 0
+  while (i < 100) { m.set(i, i * 7) i = i + 1 }
+  var found = 0
+  i = 0
+  while (i < 100) { if (m.getOr(i, 0 - 1) == i * 7) { found = found + 1 } i = i + 1 }
+  if (found == 100) { if (m.size() == 100) { return 1 } }
+  return 0
+}
+fun hashsetGrowth(): Int {
+  val s = HashSet::<Int>(0, 0, 0, RawBuf(0), RawBuf(0))
+  var i = 0
+  while (i < 100) { s.add(i * 3) i = i + 1 }
+  var found = 0
+  i = 0
+  while (i < 100) { if (s.contains(i * 3)) { found = found + 1 } i = i + 1 }
+  if (found == 100) { if (s.size() == 100) { return 1 } }
+  return 0
+}
+fun treemapGrowth(): Int {
+  val t = TreeMap::<Int, Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0), RawBuf(0))
+  var i = 1
+  while (i <= 100) { t.set(i, i * 11) i = i + 1 }
+  var found = 0
+  i = 1
+  while (i <= 100) { if (t.getOr(i, 0 - 1) == i * 11) { found = found + 1 } i = i + 1 }
+  if (found == 100) { if (t.size() == 100) { return 1 } }
+  return 0
+}
+fun treesetGrowth(): Int {
+  val s = TreeSet::<Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
+  var i = 0
+  while (i < 100) { s.add(i * 5) i = i + 1 }
+  var found = 0
+  i = 0
+  while (i < 100) { if (s.contains(i * 5)) { found = found + 1 } i = i + 1 }
+  if (found == 100) { if (s.size() == 100) { return 1 } }
+  return 0
+}
+
+// ---- build+drop stress: 200 function-scoped build/drop cycles per type must not crash (deinit frees) ----
+fun hmBuildDrop(): Int { val m = HashMap::<Int, Int>(0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0)) var i = 0 while (i < 30) { m.set(i, i) i = i + 1 } return m.size() }
+fun hsBuildDrop(): Int { val s = HashSet::<Int>(0, 0, 0, RawBuf(0), RawBuf(0)) var i = 0 while (i < 30) { s.add(i) i = i + 1 } return s.size() }
+fun tmBuildDrop(): Int { val t = TreeMap::<Int, Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0), RawBuf(0)) var i = 0 while (i < 30) { t.set(i, i) i = i + 1 } return t.size() }
+fun tsBuildDrop(): Int { val s = TreeSet::<Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0)) var i = 0 while (i < 30) { s.add(i) i = i + 1 } return s.size() }
+
+fun main(): Int {
+  var acc = 0
+  acc = acc + hashmapIsolation()   // 9
+  acc = acc + hashsetIsolation()   // 6
+  acc = acc + treemapIsolation()   // 7
+  acc = acc + treesetIsolation()   // 6
+  acc = acc + hashmapGrowth()      // 1
+  acc = acc + hashsetGrowth()      // 1
+  acc = acc + treemapGrowth()      // 1
+  acc = acc + treesetGrowth()      // 1
+  var i = 0
+  var stress = 0
+  while (i < 200) { stress = stress + hmBuildDrop() + hsBuildDrop() + tmBuildDrop() + tsBuildDrop() i = i + 1 }
+  if (stress == 24000) { acc = acc + 1 }   // 200 * (30*4) build+drop cycles, no crash
+  return acc
+}

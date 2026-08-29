@@ -1,0 +1,31 @@
+// Regression: a generic function whose declared return type is a bare type-parameter `T` must have its
+// concrete return type recovered at the CALL SITE, so an unannotated binding / direct field access resolves
+// LATER fields (offset > 0) of a multi-field struct/class — not silently erase to offset 0. Guards the
+// miscompile where `val p = id(Pt(7,9)); p.y` read `p.x`. Every access below is a SECOND field (the bug
+// locus): a bound struct, a direct field access, a nested generic call, and a bound class. The exit code
+// sums them and only equals 80 when all offsets resolve to the correct concrete type (a clean pre-fix
+// compiler erases them to offset 0 and returns 51).
+struct Pt(val x: Int, val y: Int)
+class Bx(val a: Int, val b: Int)
+
+fun id<T>(x: T): T { return x }
+
+fun structCase(): Int {
+  val p = id(Pt(7, 9))              // bound struct: p.y must be 9 (bug read p.x = 7)
+  val direct = id(Pt(3, 5)).y       // direct field access: 5 (bug read 3)
+  val nested = id(id(Pt(1, 6))).y   // nested generic call: 6 (bug read 1)
+  return p.y + direct + nested      // 9 + 5 + 6 = 20
+}
+
+fun classCase(): Int {
+  val b = id(Bx(20, 40))            // bound class: b.b must be 40 (bug read b.a = 20)
+  return b.a + b.b                  // 20 + 40 = 60
+}
+
+fun main(): Int {
+  val s = structCase()
+  val c = classCase()
+  println(s)
+  println(c)
+  return s + c                      // 20 + 60 = 80
+}

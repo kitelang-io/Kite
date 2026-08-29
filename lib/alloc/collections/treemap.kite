@@ -4,83 +4,123 @@
 // sorted for free. A binary search tree over parallel packed node buffers (key/val by sizeOf stride, left/
 // right child-index words; -1 = nil). Delete uses the in-order-successor splice.
 //
+// `@value` gives it VALUE SEMANTICS via CoW-over-ARC (STDLIB-REDESIGN §124), the SAME model as Vec/Deque:
+// the four node buffers (keys/vals/left/right) each live in a distinct `RawBuf` ARC object whose refcount is
+// the uniqueness signal. Binding one takes a value COPY (`copy` deep-retains the shared RawBufs), and every
+// mutator (`set`/`remove`) calls `ensureUnique` first — cloning all four buffers when co-owned — so mutating
+// a bound copy copy-on-writes and never corrupts the original (`val b = a; b.set(k,v)` leaves `a` untouched,
+// and a grow-realloc through a stale alias can no longer UAF). A `deinit` drops the four RawBufs at scope
+// exit. (CLASS keys/values are not element-retained on the CoW clone — same type-erasure bound Vec documents.)
+//
 // Navigation returns Option: get/min/max/floor(<=k)/ceil(>=k)/higher(>k)/lower(<k). Ordered iteration =
 // `min()` then `higher(prev)` to exhaustion. (Self-balancing LLRB rotations are a deferred optimization;
 // ordering/semantics are exact, worst-case depth is not yet bounded.)
 //
 // Importable via `import kite::alloc::collections::treemap` (the module pipeline runs the @mono instantiation pass).
-// Construct empty: `TreeMap::<Int, Int>(0 - 1, 0, 0, 0, 0, 0, 0, 0)`.
+// Construct empty: `TreeMap::<Int, Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0), RawBuf(0))`.
 import kite::core::panic
+import kite::alloc::collections::internal::rawbuf
 
 // root node index (-1 = empty); n live entries; nalloc high-water node slots (freed nodes are not reused);
-// cap node-array capacity; keys/vals packed node payloads; left/right child-index word arrays.
+// cap node-array capacity; keys/vals packed node payloads; left/right child-index word arrays. keys/vals/
+// left/right are each a shared-CoW `RawBuf` (`.data` is the raw byte pointer, 0 until first alloc).
 @mono
-@arc(manual)
-class TreeMap<K, V>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var keys: Int, var vals: Int, var left: Int, var right: Int) {
+@value
+class TreeMap<K, V>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, var keys: RawBuf, var vals: RawBuf, var left: RawBuf, var right: RawBuf) {
+  // CoW: clone one backing buffer (`bytes` copied verbatim) into a fresh uniquely-owned RawBuf. A 0-byte
+  // (never-allocated) buffer clones to a null RawBuf(0). The caller drops the old co-ownership afterwards.
+  fun cloneBuf(self, old: RawBuf, bytes: Int): RawBuf {
+    val nd = if (bytes == 0) { 0 } else { __rawAlloc(bytes) }
+    var i = 0
+    while (i < bytes) { __rawStoreByte(nd, i, __rawLoadByte(old.data, i)) i = i + 1 }
+    return RawBuf(nd)
+  }
+  // CoW: clone all four buffers away from other owners before an in-place write. A no-op when uniquely
+  // owned. The four RawBufs always move in lockstep, so `keys`'s refcount is the shared uniqueness signal.
+  fun ensureUnique(self): Int {
+    if (__refcount(self.keys) > 1) {
+      val ok = self.keys val ov = self.vals val ol = self.left val orr = self.right
+      self.keys = self.cloneBuf(ok, self.cap * sizeOf::<K>())
+      self.vals = self.cloneBuf(ov, self.cap * sizeOf::<V>())
+      self.left = self.cloneBuf(ol, self.cap * 8)
+      self.right = self.cloneBuf(orr, self.cap * 8)
+      ok.drop() ov.drop() ol.drop() orr.drop()
+    }
+    return 0
+  }
+  // value COPY on bind: share the four buffers (+1 each) so a later write on either side copy-on-writes.
+  fun copy(self): TreeMap<K, V> {
+    __retain(self.keys) __retain(self.vals) __retain(self.left) __retain(self.right)
+    return TreeMap::<K, V>(self.root, self.n, self.nalloc, self.cap, self.keys, self.vals, self.left, self.right)
+  }
+  // scope-exit drop: release this handle's co-ownership of each buffer (RawBuf.drop frees at the last owner).
+  deinit { self.keys.drop() self.vals.drop() self.left.drop() self.right.drop() }
+  // node allocator (called only from insertAt, under a mutator that already ensureUnique'd — buffers private).
   fun newNode(self, k: K, v: V): Int {
     if (self.nalloc == self.cap) {
       if (self.cap == 0) { self.cap = 8 } else { self.cap = self.cap * 2 }
-      self.keys = __rawRealloc(self.keys, self.cap * sizeOf::<K>())
-      self.vals = __rawRealloc(self.vals, self.cap * sizeOf::<V>())
-      self.left = __rawRealloc(self.left, self.cap * 8)
-      self.right = __rawRealloc(self.right, self.cap * 8)
+      self.keys.data = __rawRealloc(self.keys.data, self.cap * sizeOf::<K>())
+      self.vals.data = __rawRealloc(self.vals.data, self.cap * sizeOf::<V>())
+      self.left.data = __rawRealloc(self.left.data, self.cap * 8)
+      self.right.data = __rawRealloc(self.right.data, self.cap * 8)
     }
     val idx = self.nalloc
-    __packedSet::<K>(self.keys, idx, k)
-    __packedSet::<V>(self.vals, idx, v)
-    __rawStore(self.left, idx * 8, 0 - 1)
-    __rawStore(self.right, idx * 8, 0 - 1)
+    __packedSet::<K>(self.keys.data, idx, k)
+    __packedSet::<V>(self.vals.data, idx, v)
+    __rawStore(self.left.data, idx * 8, 0 - 1)
+    __rawStore(self.right.data, idx * 8, 0 - 1)
     self.nalloc = self.nalloc + 1
     self.n = self.n + 1
     return idx
   }
   fun insertAt(self, node: Int, k: K, v: V): Int {
     if (node < 0) { return self.newNode(k, v) }
-    val nk: K = __packedGet::<K>(self.keys, node)
-    if (k == nk) { __packedSet::<V>(self.vals, node, v) return node }
-    if (k < nk) { val nl = self.insertAt(__rawLoad(self.left, node * 8), k, v) __rawStore(self.left, node * 8, nl) }
-    else { val nr = self.insertAt(__rawLoad(self.right, node * 8), k, v) __rawStore(self.right, node * 8, nr) }
+    val nk: K = __packedGet::<K>(self.keys.data, node)
+    if (k == nk) { __packedSet::<V>(self.vals.data, node, v) return node }
+    if (k < nk) { val nl = self.insertAt(__rawLoad(self.left.data, node * 8), k, v) __rawStore(self.left.data, node * 8, nl) }
+    else { val nr = self.insertAt(__rawLoad(self.right.data, node * 8), k, v) __rawStore(self.right.data, node * 8, nr) }
     return node
   }
-  fun set(self, k: consuming K, v: consuming V): Int { self.root = self.insertAt(self.root, k, v) return 0 }
+  fun set(self, k: consuming K, v: consuming V): Int { self.ensureUnique() self.root = self.insertAt(self.root, k, v) return 0 }
   fun get(self, k: K): Option<V> {
     var node = self.root
     while (node >= 0) {
-      val nk: K = __packedGet::<K>(self.keys, node)
-      if (k == nk) { return Some(__packedGet::<V>(self.vals, node)) }
-      if (k < nk) { node = __rawLoad(self.left, node * 8) } else { node = __rawLoad(self.right, node * 8) }
+      val nk: K = __packedGet::<K>(self.keys.data, node)
+      if (k == nk) { return Some(__packedGet::<V>(self.vals.data, node)) }
+      if (k < nk) { node = __rawLoad(self.left.data, node * 8) } else { node = __rawLoad(self.right.data, node * 8) }
     }
     return None
   }
   fun getOr(self, k: K, dflt: V): V {
     var node = self.root
     while (node >= 0) {
-      val nk: K = __packedGet::<K>(self.keys, node)
-      if (k == nk) { return __packedGet::<V>(self.vals, node) }
-      if (k < nk) { node = __rawLoad(self.left, node * 8) } else { node = __rawLoad(self.right, node * 8) }
+      val nk: K = __packedGet::<K>(self.keys.data, node)
+      if (k == nk) { return __packedGet::<V>(self.vals.data, node) }
+      if (k < nk) { node = __rawLoad(self.left.data, node * 8) } else { node = __rawLoad(self.right.data, node * 8) }
     }
     return dflt
   }
-  fun has(self, k: K): Bool { return self.get(k).isSome() }
+  fun containsKey(self, k: K): Bool { return self.get(k).isSome() }
   fun removeAt(self, node: Int, k: K): Int {
     if (node < 0) { return 0 - 1 }
-    val nk: K = __packedGet::<K>(self.keys, node)
-    if (k < nk) { val nl = self.removeAt(__rawLoad(self.left, node * 8), k) __rawStore(self.left, node * 8, nl) return node }
-    if (nk < k) { val nr = self.removeAt(__rawLoad(self.right, node * 8), k) __rawStore(self.right, node * 8, nr) return node }
-    val l = __rawLoad(self.left, node * 8)
-    val r = __rawLoad(self.right, node * 8)
+    val nk: K = __packedGet::<K>(self.keys.data, node)
+    if (k < nk) { val nl = self.removeAt(__rawLoad(self.left.data, node * 8), k) __rawStore(self.left.data, node * 8, nl) return node }
+    if (nk < k) { val nr = self.removeAt(__rawLoad(self.right.data, node * 8), k) __rawStore(self.right.data, node * 8, nr) return node }
+    val l = __rawLoad(self.left.data, node * 8)
+    val r = __rawLoad(self.right.data, node * 8)
     if (l < 0) { return r }
     if (r < 0) { return l }
     var succ = r
-    while (__rawLoad(self.left, succ * 8) >= 0) { succ = __rawLoad(self.left, succ * 8) }
-    __packedSet::<K>(self.keys, node, __packedGet::<K>(self.keys, succ))
-    __packedSet::<V>(self.vals, node, __packedGet::<V>(self.vals, succ))
-    val sk: K = __packedGet::<K>(self.keys, succ)
+    while (__rawLoad(self.left.data, succ * 8) >= 0) { succ = __rawLoad(self.left.data, succ * 8) }
+    __packedSet::<K>(self.keys.data, node, __packedGet::<K>(self.keys.data, succ))
+    __packedSet::<V>(self.vals.data, node, __packedGet::<V>(self.vals.data, succ))
+    val sk: K = __packedGet::<K>(self.keys.data, succ)
     val nr2 = self.removeAt(r, sk)
-    __rawStore(self.right, node * 8, nr2)
+    __rawStore(self.right.data, node * 8, nr2)
     return node
   }
   fun remove(self, k: K): Option<V> {
+    self.ensureUnique()
     val g = self.get(k)
     if (g.isNone()) { return None }
     self.root = self.removeAt(self.root, k)
@@ -90,58 +130,58 @@ class TreeMap<K, V>(var root: Int, var n: Int, var nalloc: Int, var cap: Int, va
   fun min(self): Option<K> {
     if (self.root < 0) { return None }
     var node = self.root
-    while (__rawLoad(self.left, node * 8) >= 0) { node = __rawLoad(self.left, node * 8) }
-    return Some(__packedGet::<K>(self.keys, node))
+    while (__rawLoad(self.left.data, node * 8) >= 0) { node = __rawLoad(self.left.data, node * 8) }
+    return Some(__packedGet::<K>(self.keys.data, node))
   }
   fun max(self): Option<K> {
     if (self.root < 0) { return None }
     var node = self.root
-    while (__rawLoad(self.right, node * 8) >= 0) { node = __rawLoad(self.right, node * 8) }
-    return Some(__packedGet::<K>(self.keys, node))
+    while (__rawLoad(self.right.data, node * 8) >= 0) { node = __rawLoad(self.right.data, node * 8) }
+    return Some(__packedGet::<K>(self.keys.data, node))
   }
   fun floor(self, k: K): Option<K> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
-      val nk: K = __packedGet::<K>(self.keys, node)
-      if (k < nk) { node = __rawLoad(self.left, node * 8) }
-      else { best = node node = __rawLoad(self.right, node * 8) }
+      val nk: K = __packedGet::<K>(self.keys.data, node)
+      if (k < nk) { node = __rawLoad(self.left.data, node * 8) }
+      else { best = node node = __rawLoad(self.right.data, node * 8) }
     }
     if (best < 0) { return None }
-    return Some(__packedGet::<K>(self.keys, best))
+    return Some(__packedGet::<K>(self.keys.data, best))
   }
   fun ceil(self, k: K): Option<K> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
-      val nk: K = __packedGet::<K>(self.keys, node)
-      if (nk < k) { node = __rawLoad(self.right, node * 8) }
-      else { best = node node = __rawLoad(self.left, node * 8) }
+      val nk: K = __packedGet::<K>(self.keys.data, node)
+      if (nk < k) { node = __rawLoad(self.right.data, node * 8) }
+      else { best = node node = __rawLoad(self.left.data, node * 8) }
     }
     if (best < 0) { return None }
-    return Some(__packedGet::<K>(self.keys, best))
+    return Some(__packedGet::<K>(self.keys.data, best))
   }
   fun higher(self, k: K): Option<K> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
-      val nk: K = __packedGet::<K>(self.keys, node)
-      if (k < nk) { best = node node = __rawLoad(self.left, node * 8) }
-      else { node = __rawLoad(self.right, node * 8) }
+      val nk: K = __packedGet::<K>(self.keys.data, node)
+      if (k < nk) { best = node node = __rawLoad(self.left.data, node * 8) }
+      else { node = __rawLoad(self.right.data, node * 8) }
     }
     if (best < 0) { return None }
-    return Some(__packedGet::<K>(self.keys, best))
+    return Some(__packedGet::<K>(self.keys.data, best))
   }
   fun lower(self, k: K): Option<K> {
     var node = self.root
     var best = 0 - 1
     while (node >= 0) {
-      val nk: K = __packedGet::<K>(self.keys, node)
-      if (nk < k) { best = node node = __rawLoad(self.right, node * 8) }
-      else { node = __rawLoad(self.left, node * 8) }
+      val nk: K = __packedGet::<K>(self.keys.data, node)
+      if (nk < k) { best = node node = __rawLoad(self.right.data, node * 8) }
+      else { node = __rawLoad(self.left.data, node * 8) }
     }
     if (best < 0) { return None }
-    return Some(__packedGet::<K>(self.keys, best))
+    return Some(__packedGet::<K>(self.keys.data, best))
   }
   fun size(self): Int { return self.n }
   fun isEmpty(self): Bool { return self.n == 0 }

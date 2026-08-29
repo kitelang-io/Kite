@@ -1,0 +1,20 @@
+// when-binding-alternation-must-abort.kite — Phase 3b step-3 (final): a `|`-alternation arm in which any
+// alternative BINDS a name (`A(x) | B(y) ->`) is a COMPILE ERROR. A name bound in one alternative may be
+// unbound in another (the original "`|` only lowers the first" footgun), and the desugar cannot express it —
+// so the checker (kcheck rWhen) rejects it before lowering: non-zero exit, no binary, a stderr diagnostic.
+// A BIND-FREE alternation (`1 | 2 | 3`, `Red | Green`) is fine and desugars — that is covered positively by
+// when-unified.kite; this fixture asserts ONLY the binding case is rejected.
+
+enum E { A(Int); B(Int); C }
+
+fun f(e: E): Int {
+  return when (e) {
+    A(x) | B(x) -> x
+    else -> 0
+  }
+}
+
+fun main(): Int {
+  println(f(A(7)))
+  return 0
+}

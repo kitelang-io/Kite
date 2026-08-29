@@ -140,10 +140,11 @@ fun main(): Int {
   if (ac.get(1).v == 20) { acc = acc + 1 }             // 24
 
   // ---- HashMap<String, Box> value case: round-trip + overwrite, no crash ----
-  // (HashMap is @arc(manual) with no drop — its values leak by design — but reads/overwrites are correct.
-  //  Read via getOr: the `when (m.get(k)) { Some(x) -> x.v }` Option-of-class binding is a PRE-EXISTING
-  //  issue — it mis-binds the payload on baseline too — and is unrelated to element-ARC-on-drop.)
-  val m = HashMap::<String, Box>(0, 0, 0, 0, 0, 0)
+  // (HashMap is now @value + RawBuf CoW: its BUFFERS are freed via deinit at scope exit, but CLASS values
+  //  are not element-retained/released — same type-erasure bound Vec documents — so Box values still leak.
+  //  Reads/overwrites are correct. Read via getOr: the `when (m.get(k)) { Some(x) -> x.v }` Option-of-class
+  //  binding is a PRE-EXISTING issue — it mis-binds the payload on baseline too — unrelated to element-ARC.)
+  val m = HashMap::<String, Box>(0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0))
   m.set("a", Box(100)) m.set("b", Box(200))
   if (m.getOr("a", Box(0)).v == 100) { acc = acc + 1 } // 25
   if (m.getOr("b", Box(0)).v == 200) { acc = acc + 1 } // 26

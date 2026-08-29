@@ -17,7 +17,7 @@ fun isSpace(c: Int): Bool { return c == 32 }
 // ---- lexer: String -> IntBuf<Tok> -------------------------------------------
 fun lex(src: String): IntBuf {
   val toks = intBuf()
-  val n = src.len()
+  val n = src.length()
   var i = 0
   while (i < n) {
     val c = src.charAt(i)
@@ -52,7 +52,7 @@ fun lex(src: String): IntBuf {
 struct PS(val toks: IntBuf, var pos: Int)
 
 fun peekKind(ps: PS): Int {
-  if (ps.pos >= ps.toks.len()) { return 7 }
+  if (ps.pos >= ps.toks.size()) { return 7 }
   val t: Tok = ps.toks.get(ps.pos)
   return t.kind
 }

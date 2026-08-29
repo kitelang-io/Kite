@@ -30,7 +30,7 @@ fun main(): Int {
   val w = makeInts()
   if (w.get(0) == 42) { acc = acc + 1 }               // 1
   if (w.get(1) == 99) { acc = acc + 1 }               // 2
-  if (w.len() == 2) { acc = acc + 1 }                 // 3
+  if (w.size() == 2) { acc = acc + 1 }                 // 3
 
   // a second coexisting instantiation, also via an inferred-type binding (packed stride 1, wraps at 256).
   val b = makeBytes()

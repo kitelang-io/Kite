@@ -2,7 +2,7 @@ import "lib/alloc/collections/treemap.kite"
 fun eqs(a: String, b: String): Bool { return a.eq(b) }
 fun main(): Int {
   var acc = 0
-  val t = TreeMap::<String, Int>(0 - 1, 0, 0, 0, 0, 0, 0, 0)
+  val t = TreeMap::<String, Int>(0 - 1, 0, 0, 0, RawBuf(0), RawBuf(0), RawBuf(0), RawBuf(0))
   t.set("mango", 1) t.set("apple", 2) t.set("cherry", 3) t.set("banana", 4)
   if (t.size() == 4) { acc = acc + 1 }
   when (t.get("cherry")) { Some(v) -> { if (v == 3) { acc = acc + 1 } }; None -> 0 }
