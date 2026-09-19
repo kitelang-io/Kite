@@ -412,6 +412,11 @@ fun typeNameOf(ctx: Ctx, e: Expr): String {
     // compiler's own USize/untyped machine-word arithmetic — e.g. the lexer's 0x100000000 hex value —
     // unmasked and self-reproducing). Equal widths prefer an unsigned type to keep unsigned div/shift.
     EBin(op, l, r) -> binTy(ctx, l, r)
+    // An if/when/block is a first-class value (genExpr lowers it), so its type is that of the branch/tail it
+    // yields — otherwise a String-valued `if`/`when`/block would fall to "" and print as a raw pointer. `when`
+    // desugars to nested EIf, so this covers it too. Prefer a concrete then-branch type, else the else-branch.
+    EIf(c, t, el) -> { val tt = typeNameOf(ctx, t); if (tt != "") { tt } else { typeNameOf(ctx, el) } }
+    EBlock(stmts, res) -> typeNameOf(ctx, res)
     else -> ""
   }
 }
@@ -674,6 +679,10 @@ fun isStrExpr(ctx: Ctx, e: Expr): Bool {
     // (17f894d's recovery); recognize it so println(id("hi")) and a `val s: String = id("hi")` binding print
     // via %s, not as a pointer. ty is the recovered concrete type; only "String" selects the string path.
     ECast(x, ty) -> ty == "String"
+    // A String-valued if/when/block prints via %s, not as a raw pointer. `when` desugars to nested EIf; a
+    // well-typed if/block has both branches the same type, so either branch revealing String selects %s.
+    EIf(c, t, el) -> isStrExpr(ctx, t) || isStrExpr(ctx, el)
+    EBlock(stmts, res) -> isStrExpr(ctx, res)
     else -> false
   }
 }

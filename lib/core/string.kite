@@ -112,6 +112,11 @@ fun __mkStr(raw: Int, n: Int): String {
 @lang("str.show")
 fun Int.toStr(): String {
   if (self == 0) { val z = __rawAlloc(2) __rawStoreByte(z, 0, 48) __rawStoreByte(z, 1, 0) return String(1, z) }
+  // 64-bit word minimum (-2^63): `0 - self` overflows back to the same negative value, so the digit loops
+  // below (guarded `> 0`) never run and only '-' would be emitted. Detect it by a BITWISE `==` against the
+  // literal min (sign-agnostic) — an inline `(0 - self) < 0` overflow test would mis-compile to an UNSIGNED
+  // compare (the subtraction result carries no signed tag) and miss it. Emit its fixed decimal directly.
+  if (self == 0 - 9223372036854775807 - 1) { return "-9223372036854775808" }
   var neg = 0
   var m = self
   if (self < 0) { neg = 1 m = 0 - self }

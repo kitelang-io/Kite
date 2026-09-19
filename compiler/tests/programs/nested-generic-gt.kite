@@ -1,0 +1,27 @@
+// CODE-REVIEW FIX (0bda23d, kfront eatGt): a nested generic close (`Vec<Vec<Int>>`) lexes its trailing `>>`
+// as a SINGLE shift token (kind 49). An unconditional single `eat` at a generic close swallowed BOTH `>`s at
+// once, so the outer close then ate the token that should have followed it — a silent parser desync with no
+// diagnostic. eatGt now splits a `>>` non-destructively (one `>` consumed now, one pending for the next
+// close), so `Vec<Vec<Int>>` parses as two nested closes. Exercises the type-annotation path (parseTyBase),
+// the declaration-generics path (parseGenerics is exercised transitively through Vec<T> itself), and the
+// turbofish path (parseTypeArgs) all closing back-to-back at end of a `>>`.
+import "lib/alloc/collections/vec.kite"
+
+fun main(): Int {
+  // Type ANNOTATION with a nested generic close: `Vec<Vec<Int>>>` would desync without the fix.
+  val outer: Vec<Vec<Int>> = Vec::<Vec<Int>>(0, 2, RawBuf(__rawAlloc(2 * sizeOf::<Int>())))
+
+  val inner1 = Vec::<Int>(0, 2, RawBuf(__rawAlloc(2 * sizeOf::<Int>())))
+  inner1.push(10)
+  inner1.push(20)
+  val inner2 = Vec::<Int>(0, 2, RawBuf(__rawAlloc(2 * sizeOf::<Int>())))
+  inner2.push(30)
+
+  outer.push(inner1)
+  outer.push(inner2)
+
+  if (outer.size() != 2) { return 0 }
+  val got1 = outer.get(0)
+  val got2 = outer.get(1)
+  return got1.get(0) + got1.get(1) + got2.get(0)  // 10+20+30 = 60
+}

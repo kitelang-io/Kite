@@ -1,0 +1,9 @@
+// CODE-REVIEW FIX (0bda23d, lib/core/string.kite Int.toStr): the 64-bit word minimum (-2^63) is its own
+// negation (`0 - self` overflows back to the same negative value), so the digit loop (guarded `> 0`) never
+// ran and toStr emitted only "-" instead of "-9223372036854775808". Fixed by detecting the word-min value with
+// a bitwise `==` (sign-agnostic) and emitting its fixed decimal directly. The suite checks exit codes, not
+// stdout, so this returns the STRING LENGTH of the result: "-9223372036854775808" is 20 characters; the old
+// buggy "-" was 1.
+fun main(): Int {
+  return (0 - 9223372036854775807 - 1).toStr().length()
+}

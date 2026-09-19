@@ -493,7 +493,7 @@ struct FImplDecl(val annos: IntBuf, val gen: String, val traitName: String, val 
 // body but the START of the NEXT arm (`is T ->` / `in c ->`); parseIsCheck stops there so the arms don't
 // glue. It is 0 everywhere else (guards/conds/subjects are followed by `->`/`)` and must keep consuming
 // their own `is`/`in`), so `is`/`in` as expressions are untouched outside the arm-body boundary.
-struct P(val toks: IntBuf, var pos: Int, val infixNames: IntBuf, var armBody: Int)
+struct P(val toks: IntBuf, var pos: Int, val infixNames: IntBuf, var armBody: Int, var gtPend: Int)
 
 // membership check for the infix-name set (a small deduped IntBuf<String>).
 fun infixSetHas(names: IntBuf, nm: String): Bool {
@@ -535,7 +535,7 @@ fun mkPSeed(toks: IntBuf, seed: IntBuf): P {
   var i = 0
   while (i < seed.size()) { val s: String = seed.get(i); if (infixSetHas(names, s) == false) { names.push(s) }; i = i + 1 }
   scanInfixNames(toks, names)
-  return P(toks, 0, names, 0)
+  return P(toks, 0, names, 0, 0)
 }
 
 // build a parser over `toks` whose infix set is only the infix funs declared inside `toks`.
@@ -555,6 +555,22 @@ fun ptext(p: P): String { if (p.pos < p.toks.size()) { val t: Tok = p.toks.get(p
 fun pline(p: P): Int { if (p.pos < p.toks.size()) { val t: Tok = p.toks.get(p.pos); return t.line } return 0 }
 
 fun eat(p: P): Int { p.pos = p.pos + 1; return 0 }
+
+// Consume exactly ONE `>` at a generic / type-argument CLOSE. A nested close (`Vec<Vec<Int>>`) lexes the
+// trailing `>>` as a single shift token (kind 49); an unconditional `eat` would swallow both `>`s and then
+// the outer close would eat the following real token, desyncing the parser with no diagnostic. Split it
+// NON-DESTRUCTIVELY: on a `>>`, consume one `>` now (advance past the token) and record ONE pending `>` in
+// parser state (`gtPend`) for the outer close to consume — never mutating the shared token buffer, so a
+// speculative parse that rolls back `p.pos` (armIsBoundary / tryLambdaParams, which also save/restore gtPend)
+// leaves the stream untouched. A plain `>` (kind 38) is consumed normally. (`>>` is a shift OPERATOR elsewhere
+// via parseShift — this runs only where the grammar already expects a generic close, so operator `>>` is
+// untouched.)
+fun eatGt(p: P): Int {
+  if (p.gtPend > 0) { p.gtPend = p.gtPend - 1; return 0 }
+  if (pk(p) == 49) { p.gtPend = 1; eat(p); return 0 }
+  eat(p)
+  return 0
+}
 
 // bounded lookahead (kind 0 / text "" past end) — needed by the full grammar
 fun kindAt(p: P, n: Int): Int {
@@ -611,7 +627,7 @@ fun parseTyBase(p: P): String {
     eat(p)
     var inner = parseTy(p)
     while (pk(p) == 24) { eat(p); inner = inner + (", " + parseTy(p)) }
-    eat(p) // '>'
+    eatGt(p) // '>' (splits a nested-close `>>`)
     s = s + ("<" + (inner + ">"))
   }
   return s
@@ -643,7 +659,7 @@ fun parseGenerics(p: P): String { // "" if no '<', else "<...>"
     if (first == 1) { s = s + one; first = 0 } else { s = s + (", " + one) }
     if (pk(p) == 24) { eat(p) } else { more = 0 }
   }
-  eat(p) // '>'
+  eatGt(p) // '>' (splits a nested-close `>>`)
   return s + ">"
 }
 
@@ -1018,7 +1034,7 @@ fun parseTypeArgs(p: P): String { // at '<' — turbofish / generic arg list
   eat(p)
   var s = parseTy(p)
   while (pk(p) == 24) { eat(p); s = s + (", " + parseTy(p)) }
-  eat(p) // '>'
+  eatGt(p) // '>' (splits a nested-close `>>`)
   return s
 }
 
@@ -1142,12 +1158,14 @@ fun armIsBoundary(p: P, k: Int): Bool {
   if (k == 44 && (pk1(p) == 59 || pk1(p) == 53)) { opens = true } // !is / !in
   if (opens == false) { return false }
   val saved = p.pos
+  val savedGt = p.gtPend
   p.armBody = 0
   parsePattern(p)
   while (pk(p) == 61) { eat(p); parsePattern(p) } // `|` alternatives
   if (pk(p) == 50) { eat(p); parseExpr(p) } // optional `if` guard
   val boundary = pk(p) == 60 // arm head landed exactly on `->` => next arm
   p.pos = saved
+  p.gtPend = savedGt // eatGt's split state is speculative too — restore it with pos
   p.armBody = 1
   return boundary
 }
@@ -1237,6 +1255,7 @@ fun parseBlockBody(p: P): FExpr { // '{' already consumed
 // '{' already consumed; if the head looks like `params ->` it's a lambda (ok=1), else restore.
 fun tryLambdaParams(p: P): FLamHead {
   val saved = p.pos
+  val savedGt = p.gtPend
   if (pk(p) == 60) { eat(p); return FLamHead(1, "") } // bare '->'
   if (pk(p) != 1) { return FLamHead(0, "") }
   var s = ""
@@ -1253,6 +1272,7 @@ fun tryLambdaParams(p: P): FLamHead {
   }
   if (ok == 1 && pk(p) == 60) { eat(p); return FLamHead(1, s) }
   p.pos = saved
+  p.gtPend = savedGt // eatGt's split state is speculative too — restore it with pos
   return FLamHead(0, "")
 }
 

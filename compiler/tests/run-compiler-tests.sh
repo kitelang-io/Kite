@@ -100,6 +100,7 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/string-int-concat.kite:11 compiler/tests/programs/named-fn-ref.kite:34
        compiler/tests/programs/assoc-const-value.kite:11
        compiler/tests/programs/const-val.kite:198 compiler/tests/programs/overload.kite:90 compiler/tests/programs/secondary-ctor.kite:29
+       compiler/tests/programs/overload-local-shadow.kite:40
        compiler/tests/programs/mono-fn.kite:16
        compiler/tests/programs/mono-vararg.kite:18
        compiler/tests/programs/fn-ref-elements.kite:16
@@ -117,7 +118,10 @@ TESTS=(examples/demos/native_demo.kite:24 examples/demos/native_loops.kite:67
        compiler/tests/programs/stdlib-polish.kite:23
        compiler/tests/programs/generic-return-typeparam.kite:80
        compiler/tests/programs/generic-return-primitive.kite:26
-       compiler/tests/programs/generic-arg-alias-release.kite:76)
+       compiler/tests/programs/generic-arg-alias-release.kite:76
+       compiler/tests/programs/overload-double.kite:21
+       compiler/tests/programs/tostr-word-min.kite:20
+       compiler/tests/programs/nested-generic-gt.kite:60)
 for t in $TESTS; do
   if check "${t%:*}" "${t##*:}"; then pass=$((pass+1)); else fail=$((fail+1)); fi
 done

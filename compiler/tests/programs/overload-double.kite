@@ -1,0 +1,13 @@
+// CODE-REVIEW FIX (0bda23d, klower sigCanon): overload resolution keyed a `Double`-typed PARAMETER by the
+// mangled tag "Double" (paramSigList, via tyTag) but a float-literal ARGUMENT by "Float" (argSigList, via
+// tagOf) — two different mangled selectors for the SAME 64-bit representation, so a call with a float literal
+// could never resolve to the Double overload (fail-loud ambiguous-overload, or worse, silently picked the
+// wrong overload by arity alone). sigCanon now collapses the float family to one tag on BOTH the param and
+// arg sides, so `scale(3.5)` resolves to the Double overload. Uses a distinctive function name (`scale`, not
+// `f`/`g`) to stay clear of the separate stdlib higher-order-param-named-`f` bug.
+fun scale(x: Double): Int { return 1 }
+fun scale(x: String): Int { return 2 }
+
+fun main(): Int {
+  return scale(3.5) + scale("hi") * 10
+}
