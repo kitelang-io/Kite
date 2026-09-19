@@ -219,6 +219,35 @@ rm -f "$T/is_out"
 grep -q "defines no \`set\` method" "$T/is_err" || fail "index-store-no-set diagnostic not on stderr"
 echo "  Bag[0]=9 (no set) --no-check -> exit $rc, no binary, diagnostic on stderr ✓"
 
+echo "=== [robustness] index READ on a get-less nominal is a compile error, no silent wild read (0bda23d) ==="
+IG=compiler/tests/bugs/index-load-no-get-must-abort.kite
+# --no-check exercises the guard this fixture NAMES — klower's lowerIndex. Mirror of index-store-no-set above:
+# a nominal type with `set` but no `get` must NOT fall through to the erased `intbuf.get` role (a __rawLoad
+# through the wrong layout, silently reading adjacent heap); it must lowFail. Asserts non-zero exit + no
+# binary + a stderr diagnostic.
+rm -f "$T/ig_out"
+"$T/k2" --no-check "$IG" "$T/ig_out" >"$T/ig_stdout" 2>"$T/ig_err"; rc=$?
+[ "$rc" -eq 0 ] && fail "compiler returned 0 on x[i] for a get-less nominal — lowerIndex silent-misroute regressed"
+[ -f "$T/ig_out" ] && fail "compiler wrote a binary despite x[i] on a type with no \`get\` method"
+grep -q "defines no \`get\` method" "$T/ig_err" || fail "index-load-no-get diagnostic not on stderr"
+echo "  Bag[0] (no get) --no-check -> exit $rc, no binary, diagnostic on stderr ✓"
+
+echo "=== [robustness] a non-exhaustive value-\`when\` over a HEAP result type hard-aborts at RUNTIME, no silent null (0bda23d) ==="
+WH=compiler/tests/bugs/when-nonexhaustive-heap-must-abort.kite
+# Contrast when-nonexhaustive-must-abort.kite above (a COMPILE-time enum-exhaustiveness rejection): here the
+# subject is an Int (not statically enumerable), so the checker allows the missing catch-all, and the program
+# COMPILES to a binary. RUNNING it on an uncovered code must hard-abort (__abort, exit 134) instead of
+# returning a null-pointer String that would segfault on first use.
+rm -f "$T/wh_out"
+"$T/k2" "$WH" "$T/wh_out" >/dev/null 2>&1
+[ -f "$T/wh_out" ] || fail "compiler failed to build the heap-when fixture (a runtime check — it should compile)"
+chmod +x "$T/wh_out"
+"$T/wh_out" >"$T/wh_stdout" 2>/dev/null; rc=$?
+[ "$rc" -eq 139 ] && fail "non-exhaustive heap-\`when\` SEGFAULTED (139) — buildWhenChain null-fallthrough guard missing"
+[ "$rc" -eq 0 ] && fail "non-exhaustive heap-\`when\` returned 0 — no trap on the unmatched heap-result fallthrough"
+[ "$(cat "$T/wh_stdout")" = "OK" ] || fail "heap-when fixture printed unexpected stdout before trapping ($(cat "$T/wh_stdout"))"
+echo "  httpName(500) (no else, String result) -> exit $rc (abort), only the matched arm printed ✓"
+
 echo "=== [robustness] out-of-bounds subscript on a sized-byte array hard-aborts at RUNTIME, no silent heap read (item 6) ==="
 BO=compiler/tests/bugs/bytes-oob-must-abort.kite
 # Unlike the compile-time *-must-abort fixtures above, a bytes OOB is a RUNTIME check: the program COMPILES

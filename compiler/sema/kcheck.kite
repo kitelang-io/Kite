@@ -1076,7 +1076,7 @@ fun parseTyC(reg: PReg, p: P): Ty {
 // modifier is not part of the type, so skip a leading `inout`(71)/`consuming`(72) token before parsing.
 fun parseTyStr(reg: PReg, s: String): Ty {
   if (s == "") { return TUnknown }
-  val p = P(lex(s), 0, intBuf(), 0)
+  val p = P(lex(s), 0, intBuf(), 0, 0)
   if (pk(p) == 71 || pk(p) == 72) { eat(p) }
   return parseTyC(reg, p)
 }
@@ -1405,7 +1405,9 @@ fun opOverloadTy(env: TEnv, op: String, ta: Ty): Ty {
 // Silent Int/Float mixing is UNSOUND (the int operand would be dereferenced as a double-pointer): ban
 // `i + f` when one side is a concrete integer prim and the other a concrete float prim — require an
 // explicit toFloat(i)/toInt(f). Only fires for two concrete primitives, so erased generics stay permissive.
-fun primFloatKind(reg: PReg, t: Ty): Int { return when (t) { TPrim(x) -> primKind(reg, x); else -> 0 } }
+// stripNull first: a nullable operand (`Int?`/`Double?`) must still be classified so mixedIntFloat catches
+// `Int? + Double` — otherwise TNull(...) falls to the `else -> 0` branch and the unsound mix slips through.
+fun primFloatKind(reg: PReg, t: Ty): Int { return when (stripNull(t)) { TPrim(x) -> primKind(reg, x); else -> 0 } }
 
 fun mixedIntFloat(reg: PReg, ta: Ty, tb: Ty): Bool {
   val ka = primFloatKind(reg, ta)

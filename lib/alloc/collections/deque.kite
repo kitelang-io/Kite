@@ -16,12 +16,22 @@ class Deque<T>(var n: Int, var cap: Int, var head: Int, var buf: RawBuf) {
   // CoW: clone the whole ring (cap slots, head layout preserved) away from other owners before a write.
   fun ensureUnique(self): Int {
     if (__refcount(self.buf) > 1) {
-      val bytes = self.cap * sizeOf::<T>()
-      val nd = if (bytes == 0) { 0 } else { __rawAlloc(bytes) }
+      val nd = if (self.cap == 0) { 0 } else { __rawAlloc(self.cap * sizeOf::<T>()) }
+      // LINEARIZE the ring into the clone (element i -> linear slot i) so the class-element retain below is a
+      // simple 0..n pass and later ops see head==0. Mirrors ensureCap's linearization.
       var i = 0
-      while (i < bytes) { __rawStoreByte(nd, i, __rawLoadByte(self.buf.data, i)) i = i + 1 }
+      while (i < self.n) {
+        __packedSet::<T>(nd, i, __packedGet::<T>(self.buf.data, (self.head + i) % self.cap))
+        i = i + 1
+      }
+      // element-ARC: the clone byte-copied each class element POINTER without a retain, so both buffers now
+      // co-own the same elements. Retain each so both handles' drops balance — else a later `set()` (which
+      // releases the overwritten element via __packedSetOw) or a drop frees an element the other buffer still
+      // points at (double-free / UAF). No-op (byte-free) for non-class T. (Matches Vec.ensureUnique.)
+      __packedRetainAll::<T>(nd, self.n)
       val old = self.buf
       self.buf = RawBuf(nd)
+      self.head = 0
       old.drop()
     }
     return 0

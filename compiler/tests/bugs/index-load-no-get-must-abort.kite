@@ -1,0 +1,15 @@
+// CODE-REVIEW FIX (0bda23d, klower lowerIndex): `a[i]` (index READ) on a non-default nominal type that
+// defines NO `get` method (neither a by-name `<T>_get` method nor a `@lang("map.get")` selector) must NOT
+// silently fall through to the erased `intbuf.get` role — that `__rawLoad`s through the WRONG layout and
+// reads adjacent heap memory (a wild read). This is the symmetric READ-side counterpart of the STORE-side
+// guard already covered by index-store-no-set-must-abort.kite. Here `Bag` defines `set` but no `get`, so
+// `b[0]` must lowFail: non-zero exit, no binary, a stderr diagnostic naming the missing `get`.
+class Bag(var n: Int) {
+  fun set(self, i: Int, v: Int): Int { self.n = v return 0 }
+}
+
+fun main(): Int {
+  val b = Bag(5)
+  println(b[0])
+  return 0
+}

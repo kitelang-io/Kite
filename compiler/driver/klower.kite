@@ -483,12 +483,19 @@ fun mangleMethod(owner: String, name: String): String {
 // candidate; an un-inferable same-arity tie is the 'ambiguous overload' error.
 
 // coarse tag list of a function's declared param types, joined with "_" ("Int_Int"); "" for a nullary fn.
+// Canonical OVERLOAD-SIGNATURE tag: like tyTag, but collapses the float family {Double,Float} to one tag so a
+// `Double` PARAM (paramSigList, via tyTag) and a float-literal ARG (argSigList, whose tagOf yields "Float")
+// mangle to the SAME selector and resolve. Double and Float share ONE 64-bit runtime representation (f32 is
+// deferred), so they are a single overload class today — collapsing them cannot lose a distinction that
+// exists. Used by BOTH the definition side (paramSigList) and the call side (argSigList) so they always agree.
+fun sigCanon(t: String): String { if (t == "Float" || t == "Double") { return "Double" } return t }
+
 fun paramSigList(fd: FFunc): String {
   var s = ""
   var i = 0
   while (i < fd.params.size()) {
     val p: FParam = fd.params.get(i)
-    val t = tyTag(stripMode(p.ty))
+    val t = sigCanon(tyTag(stripMode(p.ty)))
     if (i == 0) { s = t } else { s = s + ("_" + t) }
     i = i + 1
   }
@@ -506,7 +513,7 @@ fun argSigList(lo: Lo, args: IntBuf): String {
   var i = 0
   while (i < args.size()) {
     val a: FArg = args.get(i)
-    val t = tagOf(lo, a.expr)
+    val t = sigCanon(tagOf(lo, a.expr))
     if (i == 0) { s = t } else { s = s + ("_" + t) }
     i = i + 1
   }
@@ -531,7 +538,16 @@ fun ovCountPrefix(fN: IntBuf, pref: String, out: IntBuf): Int {
 // overloaded (the plain mangle is defined — the compiler's every call — or no sig-mangled variant exists).
 // Resolution is arity-first: the exact arg-tag match wins; failing that, a UNIQUE same-arity candidate wins;
 // an un-inferable same-arity tie hard-aborts with the locked 'ambiguous overload' diagnostic.
+// A bound LOCAL/PARAMETER shadows a same-named free-function overload set (ordinary lexical scoping): a
+// stdlib higher-order method's own parameter is conventionally named `f` (`fun fold(self, f: (T)->T)`), and
+// a user program is free to ALSO declare overloaded free functions named `f`. Without this guard, lowering
+// the stdlib body's `f(x)` call — where `f` is that in-scope parameter, a function VALUE, not a name to
+// overload-resolve — would find the user's unrelated `f` overload set and mis-resolve (or hard-abort as
+// "ambiguous overload") a call that is actually a plain closure invocation. `owner == ""` scopes this to the
+// free-function-call form (a receiver/static call can't collide with a bare local name); returning "" here
+// (same as "not overloaded") sends every caller down its normal closure-call / plain-symbol fallback path.
 fun ovResolveVariant(lo: Lo, owner: String, name: String, args: IntBuf): String {
+  if (owner == "" && memListL(lo.locN, name)) { return "" } // local/param function value shadows any overload set
   if (funDefined(lo, mangleMethod(owner, name))) { return "" } // non-overloaded plain symbol exists
   val ar = args.size()
   val exact = mangleMethod(owner, name + ("__" + (ar.toStr() + ("__" + argSigList(lo, args)))))
@@ -2431,6 +2447,7 @@ fun seqNewSel(lo: Lo, base: String): String { return roleLookup(lo.roleK, lo.rol
 fun seqPushSel(lo: Lo, base: String): String { return roleLookup(lo.roleK, lo.roleV, "seq.push@" + base) }
 fun mapNewSel(lo: Lo, base: String): String { return roleLookup(lo.roleK, lo.roleV, "map.new@" + base) }
 fun mapSetSel(lo: Lo, base: String): String { return roleLookup(lo.roleK, lo.roleV, "map.set@" + base) }
+fun mapGetSel(lo: Lo, base: String): String { return roleLookup(lo.roleK, lo.roleV, "map.get@" + base) }
 // The default `[..]`/`[k:v]` target type name, sourced from lib's @lang("seq.default")/@lang("map.default").
 fun defaultSeqTy(lo: Lo): String { return roleSym(lo, "seq.default") }
 fun defaultMapTy(lo: Lo): String { return roleSym(lo, "map.default") }
@@ -2590,7 +2607,19 @@ fun lowerIndex(lo: Lo, a: FExpr, ix: FExpr): Expr {
   // Phase 8 literal flip: a target-tier nominal (Vec/Array/…) with a concrete `<T>_get` method drives
   // `a[i]` through it by convention (§3c), so indexing follows the static element type off the bootstrap
   // IntBuf. IntBuf and unknown "?" tags keep the default list role — byte-identical for the self-host.
-  if (!isDefaultSeqTag(at)) { val m = mangleMethod(at, "get"); if (funDefined(lo, m)) { return ECall(m, args) } }
+  // GUARD (review High, symmetric with lowerIndexStore): a NON-default nominal that defines no `get` (neither
+  // the by-name `<T>_get` method nor a `@lang("map.get")` selector) must NOT silently fall through to the
+  // erased `intbuf.get` role — that `__rawLoad`s through the WRONG layout and silently reads adjacent heap.
+  // For any such type this is a LOUD compile error (no binary), never a wild read. Only the genuine erased
+  // IntBuf kernel ("" / "?" / "IntBuf") reaches the intbuf.get role below.
+  if (!isDefaultSeqTag(at)) {
+    val m = mangleMethod(at, "get")
+    if (funDefined(lo, m)) { return ECall(m, args) }
+    val mg = mapGetSel(lo, protoBaseOf(at))
+    if (mg != "") { val mm = mangleMethod(at, mg); if (funDefined(lo, mm)) { return ECall(mm, args) } }
+    lowFail("cannot read `" + at + "[i]`: type `" + at + "` defines no `get` method (an index read needs a `get`, or the `@lang(\"map.get\")` role)")
+    return EInt("0")
+  }
   return ECall(roleSym(lo, "intbuf.get"), args)
 }
 
@@ -3018,7 +3047,15 @@ fun armIsTerminal(a: FArm): Bool {
 // fold arms[i..] into a right-nested if/else-if chain. A terminal arm becomes the trailing branch (its body);
 // a no-match tail keeps genWhenE's `0` fallthrough. First arm ends up OUTERMOST -> first-match, top-to-bottom.
 fun buildWhenChain(lo: Lo, subjVar: String, subjFull: String, arms: IntBuf, i: Int): FExpr {
-  if (i >= arms.size()) { return FEInt("0") }
+  if (i >= arms.size()) {
+    // No arm matched (reached only by a `when` with no catch-all/`else`). For a SCALAR result, 0 is a
+    // legitimate fallthrough value (and a no-op for a statement-position `when`). For a HEAP (reference) result
+    // there is NO valid fallthrough — returning a null 0 would SIGSEGV on first use — so trap loudly instead.
+    // A correct logically-exhaustive `when` never executes this at runtime; add an `else` to silence the trap.
+    val rt = tagOfArms(lo, arms)
+    if (deriveIsScalar(rt) == false && (rt != "?" && rt != "")) { return FECall(FEIdent("__abort"), intBuf()) }
+    return FEInt("0")
+  }
   val a: FArm = arms.get(i)
   val body = armBodyWithBinds(lo, subjVar, subjFull, a)
   if (armIsTerminal(a)) { return body }
@@ -3807,6 +3844,62 @@ fun arcRetName(e: Expr): String { return when (e) { EIdent(n) -> n; else -> "" }
 
 fun arcRelList(cls: IntBuf, exceptNm: String): IntBuf { val out = intBuf(); arcReleaseInto(out, cls, exceptNm); return out }
 
+// field type of field `f` on struct/class tag `at` ("?" if unknown) — the tag-keyed core of fieldTag.
+fun fieldTagOfTag(lo: Lo, at: String, f: String): String {
+  var i = 0
+  while (i < lo.sN.size()) {
+    if (lo.sN.get(i) == at) {
+      val fns: IntBuf = lo.sFN.get(i)
+      val fts: IntBuf = lo.sFT.get(i)
+      var j = 0
+      while (j < fns.size()) { if (fns.get(j) == f) { return tyTagR(fts.get(j)) }; j = j + 1 }
+      return "?"
+    }
+    i = i + 1
+  }
+  return "?"
+}
+
+// A spilled `return <expr>` that BORROWS a class-typed field of an OWNED local about to be released is a
+// use-after-free: the owned-local release burst deep-releases that field's object, freeing the very value
+// being returned (and the caller expects a +1 owned result). Detect exactly that shape — a `return b.item`
+// where `b` is an owned class local in `cls` and `item` is a class-typed field — so it is RETAINED before
+// the release. A fresh +1 value (ctor / call) already owns its result and is NOT retained (that would leak);
+// a primitive field is never retained (isClassTag gates it). The compiler is class-free (cls empty), so this
+// never fires during self-compile.
+// root local name of a (possibly nested) field-access chain, "" if the base is not a bare local.
+fun arcRetRootLocal(e: Expr): String {
+  return when (e) {
+    EField(b, f) -> arcRetRootLocal(b)
+    EIdent(n) -> n
+    else -> ""
+  }
+}
+
+// type tag of a (possibly nested) local/field-access chain, "" / "?" if unresolvable.
+fun arcRetChainTag(lo: Lo, e: Expr): String {
+  return when (e) {
+    EIdent(n) -> localTag(lo, n)
+    EField(b, f) -> fieldTagOfTag(lo, arcRetChainTag(lo, b), f)
+    else -> ""
+  }
+}
+
+// A returned field borrow `b.item` (or nested `b.item.sub`) whose CHAIN ROOT is an owned class local about to
+// be released, and whose final field is itself class-typed, must be retained before the release burst (else
+// the owner's deep-release frees the returned value → caller UAF). isClassTag gates out primitive fields.
+fun arcRetBorrowsClass(lo: Lo, cls: IntBuf, e: Expr): Bool {
+  return when (e) {
+    EField(b, f) -> memListL(cls, arcRetRootLocal(b)) && isClassTag(lo, arcRetChainTag(lo, e))
+    else -> false
+  }
+}
+
+fun arcRetSpill(lo: Lo, cls: IntBuf, e: Expr): Expr {
+  if (arcRetBorrowsClass(lo, cls, e)) { val a = intBuf(); a.push(e); return ECall("__retain", a) }
+  return e
+}
+
 fun arcZeroInto(out: IntBuf, cls: IntBuf): Int {
   var i = 0
   while (i < cls.size()) { out.push(SAssign(cls.get(i), EInt("0"))); i = i + 1 }
@@ -3821,7 +3914,7 @@ fun arcRet(lo: Lo, cls: IntBuf, v: Expr): Expr {
   val rn = arcRetName(v)
   if (memListL(cls, rn)) { return EBlock(arcRelList(cls, rn), v) }
   val t = freshName(lo, "_ar")
-  val ss = intBuf(); ss.push(SLet(t, v)); arcReleaseInto(ss, cls, "")
+  val ss = intBuf(); ss.push(SLet(t, arcRetSpill(lo, cls, v))); arcReleaseInto(ss, cls, "")
   return EBlock(ss, EIdent(t))
 }
 
@@ -3843,7 +3936,7 @@ fun arcRwStmts(lo: Lo, cls: IntBuf, stmts: IntBuf): IntBuf {
       SReturnV(e) -> {
         val rn = arcRetName(e)
         if (memListL(cls, rn)) { arcReleaseInto(out, cls, rn); out.push(SReturnV(e)) }
-        else { val t = freshName(lo, "_ar"); out.push(SLet(t, e)); arcReleaseInto(out, cls, ""); out.push(SReturnV(EIdent(t))) }
+        else { val t = freshName(lo, "_ar"); out.push(SLet(t, arcRetSpill(lo, cls, e))); arcReleaseInto(out, cls, ""); out.push(SReturnV(EIdent(t))) }
       }
       SReturnU -> { arcReleaseInto(out, cls, ""); out.push(SReturnU) }
       SExprS(e) -> { out.push(SExprS(arcRwExpr(lo, cls, e))); 0 }
@@ -4040,13 +4133,13 @@ fun arcInjectBody(lo: Lo, body: Expr, cls: IntBuf): Expr {
         val r2 = arcRwExpr(lo, cls, res)
         val rn = arcRetName(r2)
         if (memListL(cls, rn)) { arcReleaseInto(out, cls, rn); EBlock(out, r2) }
-        else { val t = freshName(lo, "_ar"); out.push(SLet(t, r2)); arcReleaseInto(out, cls, ""); EBlock(out, EIdent(t)) }
+        else { val t = freshName(lo, "_ar"); out.push(SLet(t, arcRetSpill(lo, cls, r2))); arcReleaseInto(out, cls, ""); EBlock(out, EIdent(t)) }
       }
     }
     else -> {
       val out = intBuf()
       arcZeroInto(out, cls)
-      val t = freshName(lo, "_ar"); out.push(SLet(t, arcRwExpr(lo, cls, body))); arcReleaseInto(out, cls, "")
+      val t = freshName(lo, "_ar"); out.push(SLet(t, arcRetSpill(lo, cls, arcRwExpr(lo, cls, body)))); arcReleaseInto(out, cls, "")
       EBlock(out, EIdent(t))
     }
   }
@@ -4077,7 +4170,7 @@ fun implTypesOf(implTrait: IntBuf, implType: IntBuf, tn: String): IntBuf {
 
 // build  fun ___dyn_T_m(obj, <method params>): Ret { val __t = __typeId(obj)
 //   if (__t == id(Ty0)) return Ty0_m(obj, params) ; ... ; return 0 }
-fun buildDispatcher(traitName: String, m: FFunc, implTypes: IntBuf, structN: IntBuf): Func {
+fun buildDispatcher(traitName: String, m: FFunc, implTypes: IntBuf, structN: IntBuf, variantOwn: IntBuf): Func {
   val pnames = intBuf(); pnames.push("obj")
   val ptys = intBuf(); ptys.push(traitName)
   var i = 0
@@ -4085,16 +4178,37 @@ fun buildDispatcher(traitName: String, m: FFunc, implTypes: IntBuf, structN: Int
   val stmts = intBuf()
   val tArgs = intBuf(); tArgs.push(EIdent("obj"))
   stmts.push(SLet("__t", ECall("__typeId", tArgs)))
+  // GUARD (review High): every enum carries runtime type-id -1 (enums are distinguished by their variant tag
+  // at offset 0, not by a per-type id), so 2+ ENUM implementors of one trait would all guard `__t == -1` and
+  // the FIRST arm would always fire — a silent wrong-impl dispatch (type confusion / OOB field read). Reject
+  // it at build time. A single enum implementor (one -1 arm) is unambiguous and allowed; struct implementors
+  // GUARD (review High): enums all carry runtime type-id -1 (they are distinguished by their variant tag at
+  // offset 0, not by a per-type id), so 2+ ENUM implementors of one trait cannot be told apart by __typeId —
+  // a naive dispatcher would guard `__t == -1` twice and the FIRST enum arm would always fire (a silent
+  // wrong-impl dispatch → type confusion / OOB field read). Only USER ENUM types collide: a struct has a
+  // distinct id, and a PRIMITIVE implementor (`impl Hash for Int`) is never dynamically dispatched (primitives
+  // are header-less, static/operator dispatch only). We STILL generate the dispatcher (a derived/impl'd trait
+  // over enums is dispatched STATICALLY for concrete receivers — `Shape_eq` etc. — so the dispatcher is dead
+  // code there and must not be a compile error), but when 2+ enums implement it we OMIT those ambiguous enum
+  // arms: any enum value reaching the dispatcher DYNAMICALLY (a trait-typed / erased receiver) then falls
+  // through to the trailing __abort below — a LOUD runtime abort, never a silent miscompile. A single enum
+  // implementor keeps its arm (its -1 is unambiguous). kitec is trait-free, so this never fires for self-host.
+  var negc = 0
+  var jn = 0
+  while (jn < implTypes.size()) { if (isEnumType(variantOwn, implTypes.get(jn))) { negc = negc + 1 }; jn = jn + 1 }
   var j = 0
   while (j < implTypes.size()) {
     val ty: String = implTypes.get(j)
-    val id = indexOfL(structN, ty)
-    val cargs = intBuf(); cargs.push(EIdent("obj"))
-    var k = 0
-    while (k < m.params.size()) { val pp: FParam = m.params.get(k); cargs.push(EIdent(pp.name)); k = k + 1 }
-    val callE = ECall(mangleMethod(ty, m.name), cargs)
-    val cond = EBin("==", EIdent("__t"), EInt(id.toStr()))
-    stmts.push(SExprS(EIf(cond, EBlock(oneStmt(SReturnV(callE)), ENoRes), ENoRes)))
+    val ambiguousEnum = isEnumType(variantOwn, ty) && negc > 1
+    if (ambiguousEnum == false) {
+      val id = indexOfL(structN, ty)
+      val cargs = intBuf(); cargs.push(EIdent("obj"))
+      var k = 0
+      while (k < m.params.size()) { val pp: FParam = m.params.get(k); cargs.push(EIdent(pp.name)); k = k + 1 }
+      val callE = ECall(mangleMethod(ty, m.name), cargs)
+      val cond = EBin("==", EIdent("__t"), EInt(id.toStr()))
+      stmts.push(SExprS(EIf(cond, EBlock(oneStmt(SReturnV(callE)), ENoRes), ENoRes)))
+    }
     j = j + 1
   }
   // No impl matched the runtime type-id: this is a hard error (a trait method invoked on a type that
@@ -4106,7 +4220,7 @@ fun buildDispatcher(traitName: String, m: FFunc, implTypes: IntBuf, structN: Int
 }
 
 // generate every trait method's dispatcher; register names/returns so calls resolve during lowering
-fun genDispatchers(traitDecls: IntBuf, implTrait: IntBuf, implType: IntBuf, structN: IntBuf, fN: IntBuf, fR: IntBuf): IntBuf {
+fun genDispatchers(traitDecls: IntBuf, implTrait: IntBuf, implType: IntBuf, structN: IntBuf, fN: IntBuf, fR: IntBuf, variantOwn: IntBuf): IntBuf {
   val out = intBuf()
   var i = 0
   while (i < traitDecls.size()) {
@@ -4115,7 +4229,7 @@ fun genDispatchers(traitDecls: IntBuf, implTrait: IntBuf, implType: IntBuf, stru
     var j = 0
     while (j < tr.methods.size()) {
       val m: FFunc = tr.methods.get(j)
-      val d = buildDispatcher(tr.name, m, impls, structN)
+      val d = buildDispatcher(tr.name, m, impls, structN, variantOwn)
       out.push(d); fN.push(d.name); fR.push(m.ret)
       j = j + 1
     }
@@ -6402,7 +6516,7 @@ fun finishLower(pfuns: IntBuf, structN: IntBuf, structF: IntBuf, structFT: IntBu
     tmi = tmi + 1
   }
   // trait dispatchers: generated + name-registered BEFORE phase 2 so trait-typed method calls resolve
-  val dispatchers = genDispatchers(traitDecls, implTrait, implType, structN, fN, fR)
+  val dispatchers = genDispatchers(traitDecls, implTrait, implType, structN, fN, fR, variantOwn)
   // ownership-mode table for TOP-LEVEL free functions (owner==""): name -> per-param mode list. Used by
   // lowerPlainCall to decide whether a class temp passed as an arg is BORROWED (release after) or
   // TRANSFERRED (consuming — callee owns it). Built once here; empty for the class-free compiler.

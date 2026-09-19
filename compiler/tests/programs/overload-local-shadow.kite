@@ -1,0 +1,24 @@
+// Regression: a user program that OVERLOADS a free function named `f` must not break the stdlib's
+// higher-order collection methods, which conventionally name their own callback parameter `f`
+// (`fun fold(self, f: (Int,Int)->Int)`, `fun map(self, f: (Int)->Int)` — see lib/alloc/collections/vec.kite
+// and internal/intbuf.kite). Before the fix, lowering the stdlib body's `f(...)` call resolved `f` against
+// the UNRELATED user-defined overload set of the same name (ovResolveVariant in klower.kite did not check
+// whether `f` was a bound local/parameter first) — a same-arity ambiguity hard-aborted the build with
+// "ambiguous overload: `f`" even though the program is perfectly valid (a local/param function VALUE must
+// shadow a same-named free-function overload set, ordinary lexical scoping). This program overloads `f`
+// AND drives both `.fold(...)` and `.map(...)` (each of whose internal parameter is named `f`) through an
+// IntBuf, proving the collision no longer aborts.
+fun f(x: Double): Int { return 100 }
+fun f(x: String): Int { return 200 }
+
+fun addup(a: Int, x: Int): Int { return a + x }
+fun dbl(x: Int): Int { return x * 2 }
+
+fun main(): Int {
+  val l = intBuf() l.push(1) l.push(2) l.push(3) l.push(4)
+  val folded = l.fold(0, addup) // 1+2+3+4 = 10
+  val mapped = l.map(dbl).sum() // (2+4+6+8) = 20
+  // also confirm the genuine overload set is untouched by a direct call
+  val ov = f(1.5) + f("hi") // 100 + 200 = 300
+  return folded + mapped + (ov / 30) // 10 + 20 + 10 = 40
+}

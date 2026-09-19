@@ -1,0 +1,22 @@
+// CODE-REVIEW FIX (0bda23d, klower buildWhenChain): a non-exhaustive value-`when` whose subject is NOT
+// statically enumerable (here an `Int` HTTP status code, not an enum) cannot be exhaustiveness-checked at
+// compile time — the checker allows it. Before the fix, an unmatched subject fell through to the shared `0`
+// fallthrough constant REGARDLESS of the arm's result type: for a heap/reference result (`String` here) that
+// `0` is a NULL pointer wearing a String's clothes, so the very next String op on it (e.g. `println`, which
+// reads the length/bytes through the pointer) reads through address 0 and SEGFAULTS — a silent miscompile
+// that surfaces far from the `when`. Now buildWhenChain traps with `__abort()` at the no-match point whenever
+// the arm result type is non-scalar, so this is a RUNTIME check (the program COMPILES to a binary) and running
+// it on an uncovered code hard-aborts (exit 134) instead of segfaulting on a null String.
+fun httpName(code: Int): String {
+  return when (code) {
+    200 -> "OK"
+    404 -> "NF"
+  }
+}
+
+fun main(): Int {
+  println(httpName(200))
+  // 500 matches no arm and there is no `else` -> must trap here, not return a null String.
+  println(httpName(500))
+  return 0
+}

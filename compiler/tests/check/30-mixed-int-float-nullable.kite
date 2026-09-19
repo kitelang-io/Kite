@@ -1,0 +1,8 @@
+// CODE-REVIEW FIX (0bda23d, kcheck primFloatKind): mixedIntFloat classified only TPrim, so a NULLABLE
+// int/float operand (`Int?`/`Double?`) fell to the `else -> 0` branch and slipped past the mixed-arithmetic
+// ban — an unsound `Int? + Double` would deref the int operand as a double-pointer at runtime. primFloatKind
+// now strips the null wrapper first, so this is caught just like the non-nullable case (17-mixed-int-float).
+fun m(i: Int?): Double {
+  val f = 2.0
+  return i + f
+}
